@@ -478,6 +478,17 @@ describe("App", () => {
         ]
         return jsonResponse(allocations[allocations.length - 1])
       }
+      if (url.endsWith("/api/reports/availability-load") && method === "POST") {
+        return jsonResponse({
+          buckets: [{
+            period_start: "2026-01-01",
+            availability_hours: 160,
+            load_hours: 80,
+            free_hours: 80,
+            utilization_pct: 50
+          }]
+        })
+      }
 
       return jsonResponse([])
     })
@@ -520,11 +531,19 @@ describe("App", () => {
     const reportPanel = within(reportSection as HTMLElement)
 
     fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
 
     await waitFor(() => {
-      const reportPersonLabel = reportPanel.getByText("Alice (100%)").closest("label")
+      const reportPersonCheckbox = reportPanel.getByRole("checkbox", { name: "Alice (100%)" })
+      const reportPersonLabel = reportPersonCheckbox.closest("label")
       expect(reportPersonLabel).not.toBeNull()
       expect(reportPersonLabel).toHaveClass("person-overallocated")
+
+      const reportPersonCell = reportPanel.getByRole("cell", { name: "Alice (100%)" })
+      const reportPersonRow = reportPersonCell.closest("tr")
+      expect(reportPersonRow).not.toBeNull()
+      expect(reportPersonRow).toHaveClass("person-overallocated")
+      expect(reportPanel.getByRole("cell", { name: "50.00" })).toBeInTheDocument()
     })
   })
 

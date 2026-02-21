@@ -173,6 +173,11 @@ details > summary {
   background: #ffffff;
 }
 
+.report-period-summary-row.person-overallocated td,
+.report-period-detail-row.person-overallocated td {
+  background: #ffe5e5;
+}
+
 .report-period-start-cell {
   font-weight: 600;
   min-width: 8.5rem;

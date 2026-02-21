@@ -96,6 +96,7 @@ export type ReportObjectResult = {
 export type ReportTableRow = {
   id: string
   periodStart: string
+  objectID: string
   objectLabel: string
   bucket: ReportBucket
   isTotal: boolean
@@ -545,6 +546,7 @@ export function buildReportTableRows(reportResults: ReportObjectResult[]): Repor
       rows.push({
         id: `${periodStart}:summary`,
         periodStart,
+        objectID: "total",
         objectLabel: "Total",
         bucket: totalBucket,
         isTotal: true,
@@ -555,6 +557,7 @@ export function buildReportTableRows(reportResults: ReportObjectResult[]): Repor
         rows.push({
           id: `${periodStart}:${row.objectID}`,
           periodStart,
+          objectID: row.objectID,
           objectLabel: row.objectLabel,
           bucket: row.bucket,
           isTotal: false,
@@ -573,6 +576,7 @@ export function buildReportTableRows(reportResults: ReportObjectResult[]): Repor
     rows.push({
       id: `${periodStart}:summary`,
       periodStart,
+      objectID: singleRow.objectID,
       objectLabel: singleRow.objectLabel,
       bucket: singleRow.bucket,
       isTotal: false,
@@ -603,6 +607,28 @@ export function reportDetailToggleLabel(row: ReportTableRow, isExpanded: boolean
     return "Hide entries"
   }
   return `Show ${row.detailCount} entries`
+}
+
+export function reportUtilizationForDisplay(
+  row: ReportTableRow,
+  scope: ReportScope,
+  personsByID: Map<string, Person>
+): number {
+  if (scope !== "person" || row.objectID === "total") {
+    return row.bucket.utilization_pct
+  }
+
+  const person = personsByID.get(row.objectID)
+  if (!person) {
+    return row.bucket.utilization_pct
+  }
+
+  const employmentPct = personEmploymentPctOnDate(person, row.periodStart)
+  if (employmentPct <= 0) {
+    return 0
+  }
+
+  return row.bucket.utilization_pct * (employmentPct / 100)
 }
 
 export default function App() {
@@ -975,6 +1001,11 @@ export default function App() {
 
   const personNameByID = useMemo(
     () => new Map(persons.map((person) => [person.id, person.name])),
+    [persons]
+  )
+
+  const personByID = useMemo(
+    () => new Map(persons.map((person) => [person.id, person])),
     [persons]
   )
 
@@ -2136,7 +2167,7 @@ export default function App() {
     [expandedReportPeriodSet, reportTableRows]
   )
 
-  const showReportObjectColumn = reportScope !== "organisation" && reportResults.length > 1
+  const showReportObjectColumn = reportScope !== "organisation"
 
   const showAvailabilityColumns = showAvailabilityMetrics(reportScope)
   const showProjectColumns = showProjectMetrics(reportScope)
@@ -3090,9 +3121,12 @@ export default function App() {
             {visibleReportRows.map((row) => {
               const isExpandableRow = isExpandableReportPeriodRow(row)
               const isExpanded = expandedReportPeriodSet.has(row.periodStart)
+              const isOverallocatedReportPerson = reportScope === "person" && isOverallocatedPersonID(row.objectID)
+              const utilizationForDisplay = reportUtilizationForDisplay(row, reportScope, personByID)
               const rowClassNames = [
                 row.isDetail ? "report-period-detail-row" : "report-period-summary-row",
-                row.isTotal ? "report-total-row" : ""
+                row.isTotal ? "report-total-row" : "",
+                isOverallocatedReportPerson ? "person-overallocated" : ""
               ]
                 .filter((className) => className !== "")
                 .join(" ")
@@ -3138,7 +3172,7 @@ export default function App() {
                   {showProjectColumns && <td>{formatHours(row.bucket.project_load_hours)}</td>}
                   {showProjectColumns && <td>{formatHours(row.bucket.project_estimation_hours)}</td>}
                   {showAvailabilityColumns && <td>{formatHours(row.bucket.free_hours)}</td>}
-                  {showAvailabilityColumns && <td>{formatHours(row.bucket.utilization_pct)}</td>}
+                  {showAvailabilityColumns && <td>{formatHours(utilizationForDisplay)}</td>}
                   {showProjectColumns && <td>{formatHours(row.bucket.project_completion_pct)}</td>}
                 </tr>
               )

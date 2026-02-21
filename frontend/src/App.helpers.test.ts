@@ -24,12 +24,14 @@ import {
   personEmploymentPctOnDate,
   reportBucketTotal,
   reportDetailToggleLabel,
+  reportUtilizationForDisplay,
   roundHours,
   toErrorMessage,
   toWorkingHours,
   type Allocation,
   type Person,
   type ReportObjectResult,
+  type ReportTableRow,
   workingHoursForAllocationUnit
 } from "./App"
 
@@ -395,5 +397,34 @@ describe("App helpers", () => {
     expect(reportDetailToggleLabel(summaryRow!, true)).toBe("Hide entries")
     expect(isReportRowVisible(detailRow!, new Set())).toBe(false)
     expect(isReportRowVisible(detailRow!, new Set(["2026-01-01"]))).toBe(true)
+  })
+
+  it("converts person report utilization for 100% employment baseline display", () => {
+    const person: Person = {
+      id: "person_1",
+      organisation_id: "org_1",
+      name: "Alice",
+      employment_pct: 80
+    }
+    const row: ReportTableRow = {
+      id: "row_1",
+      periodStart: "2026-01-01",
+      objectID: "person_1",
+      objectLabel: "Alice (80%)",
+      bucket: {
+        period_start: "2026-01-01",
+        availability_hours: 128,
+        load_hours: 64,
+        free_hours: 64,
+        utilization_pct: 50
+      },
+      isTotal: false,
+      isDetail: false,
+      detailCount: 0
+    }
+
+    expect(reportUtilizationForDisplay(row, "person", new Map([[person.id, person]]))).toBe(40)
+    expect(reportUtilizationForDisplay({ ...row, objectID: "total" }, "person", new Map([[person.id, person]]))).toBe(50)
+    expect(reportUtilizationForDisplay(row, "group", new Map([[person.id, person]]))).toBe(50)
   })
 })
