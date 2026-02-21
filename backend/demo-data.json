@@ -1,0 +1,123 @@
+{
+  "organisations": {
+    "org_1": {
+      "id": "org_1",
+      "name": "Demo Org",
+      "hours_per_day": 8,
+      "hours_per_week": 40,
+      "hours_per_year": 2080,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "persons": {
+    "person_1": {
+      "id": "person_1",
+      "organisation_id": "org_1",
+      "name": "Avery Planner",
+      "employment_pct": 100,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "person_2": {
+      "id": "person_2",
+      "organisation_id": "org_1",
+      "name": "Jordan Analyst",
+      "employment_pct": 80,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "projects": {
+    "project_1": {
+      "id": "project_1",
+      "organisation_id": "org_1",
+      "name": "Migration",
+      "start_date": "2026-01-01",
+      "end_date": "2026-06-30",
+      "estimated_effort_hours": 900,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "project_2": {
+      "id": "project_2",
+      "organisation_id": "org_1",
+      "name": "Platform Upgrade",
+      "start_date": "2026-02-01",
+      "end_date": "2026-12-31",
+      "estimated_effort_hours": 1600,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "groups": {
+    "group_1": {
+      "id": "group_1",
+      "organisation_id": "org_1",
+      "name": "Delivery Team",
+      "member_ids": ["person_1", "person_2"],
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "allocations": {
+    "allocation_1": {
+      "id": "allocation_1",
+      "organisation_id": "org_1",
+      "target_type": "person",
+      "target_id": "person_1",
+      "person_id": "person_1",
+      "project_id": "project_1",
+      "start_date": "2026-01-01",
+      "end_date": "2026-04-30",
+      "percent": 50,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "allocation_2": {
+      "id": "allocation_2",
+      "organisation_id": "org_1",
+      "target_type": "group",
+      "target_id": "group_1",
+      "project_id": "project_2",
+      "start_date": "2026-03-01",
+      "end_date": "2026-09-30",
+      "percent": 40,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "org_holidays": {
+    "org_holiday_1": {
+      "id": "org_holiday_1",
+      "organisation_id": "org_1",
+      "date": "2026-01-01",
+      "hours": 8,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "group_unavailability": {
+    "group_unavailability_1": {
+      "id": "group_unavailability_1",
+      "organisation_id": "org_1",
+      "group_id": "group_1",
+      "date": "2026-01-08",
+      "hours": 2,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "person_unavailability": {
+    "person_unavailability_1": {
+      "id": "person_unavailability_1",
+      "organisation_id": "org_1",
+      "person_id": "person_2",
+      "date": "2026-01-15",
+      "hours": 4,
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "sequence": 100
+}

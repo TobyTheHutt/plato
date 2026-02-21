@@ -27,6 +27,16 @@ go.work.sum
 # env file
 .env
 
+# Backend runtime data
+backend/plato_runtime_data.json
+backend/plato_data.json
+
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
