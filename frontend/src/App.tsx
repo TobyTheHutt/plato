@@ -1,635 +1,128 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { showAvailabilityMetrics, showProjectMetrics, type ReportScope } from "./reportColumns"
-
-export type Role = "org_admin" | "org_user"
-
-export type Organisation = {
-  id: string
-  name: string
-  hours_per_day: number
-  hours_per_week: number
-  hours_per_year: number
-}
-
-export type EmploymentChange = {
-  effective_month: string
-  employment_pct: number
-}
-
-export type Person = {
-  id: string
-  organisation_id: string
-  name: string
-  employment_pct: number
-  employment_changes?: EmploymentChange[]
-}
-
-export type Project = {
-  id: string
-  organisation_id: string
-  name: string
-  start_date: string
-  end_date: string
-  estimated_effort_hours: number
-}
-
-export type Group = {
-  id: string
-  organisation_id: string
-  name: string
-  member_ids: string[]
-}
-
-export type Allocation = {
-  id: string
-  organisation_id: string
-  target_type: AllocationTargetType
-  target_id: string
-  project_id: string
-  start_date: string
-  end_date: string
-  percent: number
-  person_id?: string
-}
-
-export type AllocationTargetType = "person" | "group"
-export type AllocationLoadInputType = "fte_pct" | "hours"
-export type AllocationLoadUnit = "day" | "week" | "month"
-export type AllocationMergeStrategy = "stack" | "replace" | "keep"
-export type AllocationFormState = {
-  id: string
-  targetType: AllocationTargetType
-  targetID: string
-  projectID: string
-  startDate: string
-  endDate: string
-  loadInputType: AllocationLoadInputType
-  loadUnit: AllocationLoadUnit
-  loadValue: string
-}
-
-export type PersonUnavailability = {
-  id: string
-  organisation_id: string
-  person_id: string
-  date: string
-  hours: number
-}
-
-export type ReportBucket = {
-  period_start: string
-  availability_hours: number
-  load_hours: number
-  project_load_hours?: number
-  project_estimation_hours?: number
-  free_hours: number
-  utilization_pct: number
-  project_completion_pct?: number
-}
-
-export type ReportObjectResult = {
-  objectID: string
-  objectLabel: string
-  buckets: ReportBucket[]
-}
-
-export type ReportTableRow = {
-  id: string
-  periodStart: string
-  objectID: string
-  objectLabel: string
-  bucket: ReportBucket
-  isTotal: boolean
-  isDetail: boolean
-  detailCount: number
-}
-
-export type ReportGranularity = "day" | "week" | "month" | "year"
-
-export type WorkingTimeUnit = "day" | "week" | "month" | "year"
-export type AvailabilityScope = "organisation" | "person" | "group"
-export type AvailabilityUnitScope = "hours" | "days" | "weeks"
-export type DateHoursEntry = {
-  date: string
-  hours: number
-}
-export type PersonDateHoursEntry = {
-  personID: string
-  date: string
-  hours: number
-}
-export type PersonAllocationLoadSegment = {
-  startDate: string
-  endDate: string
-  percent: number
-}
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8070"
-
-const DAYS_PER_WEEK = 5
-const WEEKS_PER_YEAR = 52
-const MONTHS_PER_YEAR = 12
-const DAYS_PER_YEAR = DAYS_PER_WEEK * WEEKS_PER_YEAR
-const WEEKS_PER_MONTH = WEEKS_PER_YEAR / MONTHS_PER_YEAR
-const DAYS_PER_MONTH = DAYS_PER_YEAR / MONTHS_PER_YEAR
-const PERSON_UNAVAILABILITY_LOAD_CONCURRENCY = 5
-const REPORT_MULTI_OBJECT_CONCURRENCY = 5
-
-export function newAllocationFormState(): AllocationFormState {
-  return {
-    id: "",
-    targetType: "person",
-    targetID: "",
-    projectID: "",
-    startDate: "2026-01-01",
-    endDate: "2026-12-31",
-    loadInputType: "fte_pct",
-    loadUnit: "day",
-    loadValue: "0"
-  }
-}
-
-export function asNumber(value: string): number {
-  const parsed = Number(value)
-  if (Number.isNaN(parsed)) {
-    return 0
-  }
-  return parsed
-}
-
-export function formatHours(value: number | null | undefined): string {
-  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
-    return "n/a"
-  }
-  return value.toFixed(2)
-}
-
-export function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return "unexpected error"
-}
-
-export function toWorkingHours(value: number, unit: WorkingTimeUnit): { day: number; week: number; year: number } {
-  if (unit === "day") {
-    return {
-      day: value,
-      week: value * DAYS_PER_WEEK,
-      year: value * DAYS_PER_YEAR
-    }
-  }
-  if (unit === "week") {
-    return {
-      day: value / DAYS_PER_WEEK,
-      week: value,
-      year: value * WEEKS_PER_YEAR
-    }
-  }
-  if (unit === "month") {
-    return {
-      day: value / DAYS_PER_MONTH,
-      week: value / WEEKS_PER_MONTH,
-      year: value * MONTHS_PER_YEAR
-    }
-  }
-  return {
-    day: value / DAYS_PER_YEAR,
-    week: value / WEEKS_PER_YEAR,
-    year: value
-  }
-}
-
-export function workingHoursForAllocationUnit(hoursPerDay: number, unit: AllocationLoadUnit): number {
-  if (unit === "day") {
-    return hoursPerDay
-  }
-  if (unit === "week") {
-    return hoursPerDay * DAYS_PER_WEEK
-  }
-  return hoursPerDay * DAYS_PER_MONTH
-}
-
-export function allocationPercentFromInput(
-  value: number,
-  inputType: AllocationLoadInputType,
-  unit: AllocationLoadUnit,
-  hoursPerDay: number
-): number {
-  if (inputType === "fte_pct") {
-    return roundHours(value)
-  }
-  if (hoursPerDay <= 0) {
-    return 0
-  }
-
-  const unitHours = workingHoursForAllocationUnit(hoursPerDay, unit)
-  if (unitHours <= 0) {
-    return 0
-  }
-  return roundHours((value / unitHours) * 100)
-}
-
-export function parseDateValue(value: string): Date | null {
-  if (!value) {
-    return null
-  }
-
-  const parsed = new Date(`${value}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) {
-    return null
-  }
-
-  return parsed
-}
-
-export function formatDateValue(value: Date): string {
-  return value.toISOString().slice(0, 10)
-}
-
-export function roundHours(value: number): number {
-  return Math.round(value * 1000) / 1000
-}
-
-export function personDailyHours(hoursPerDay: number, employmentPct: number): number {
-  return roundHours((hoursPerDay * employmentPct) / 100)
-}
-
-export function isValidMonthValue(value: string): boolean {
-  return /^\d{4}-\d{2}$/.test(value)
-}
-
-export function personEmploymentPctOnDate(person: Person, date: string): number {
-  const month = date.slice(0, 7)
-  if (!isValidMonthValue(month)) {
-    return person.employment_pct
-  }
-
-  let currentEmploymentPct = person.employment_pct
-  let latestEffectiveMonth = ""
-  for (const change of person.employment_changes ?? []) {
-    if (!isValidMonthValue(change.effective_month)) {
-      continue
-    }
-    if (change.effective_month <= month && change.effective_month >= latestEffectiveMonth) {
-      currentEmploymentPct = change.employment_pct
-      latestEffectiveMonth = change.effective_month
-    }
-  }
-
-  return currentEmploymentPct
-}
-
-export function buildWeekdayEntries(
-  startDate: Date,
-  endDate: Date,
-  hoursPerDay: number
-): DateHoursEntry[] {
-  if (startDate.getTime() > endDate.getTime()) {
-    throw new Error("start date must be before or equal to end date")
-  }
-  if (hoursPerDay <= 0) {
-    throw new Error("organisation working hours must be greater than 0")
-  }
-
-  const entries: DateHoursEntry[] = []
-  const cursor = new Date(startDate)
-  while (cursor.getTime() <= endDate.getTime()) {
-    const dayOfWeek = cursor.getUTCDay()
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      entries.push({ date: formatDateValue(cursor), hours: roundHours(hoursPerDay) })
-    }
-    cursor.setUTCDate(cursor.getUTCDate() + 1)
-  }
-
-  if (entries.length === 0) {
-    throw new Error("timespan must include at least one weekday")
-  }
-
-  return entries
-}
-
-export function parseWeekStartValue(value: string): Date | null {
-  const match = value.match(/^(\d{4})-W(\d{2})$/)
-  if (!match) {
-    return null
-  }
-
-  const year = Number(match[1])
-  const week = Number(match[2])
-  if (Number.isNaN(year) || Number.isNaN(week) || week < 1 || week > 53) {
-    return null
-  }
-
-  const januaryFourth = new Date(Date.UTC(year, 0, 4))
-  const dayOfWeek = januaryFourth.getUTCDay() || 7
-  const firstWeekMonday = new Date(januaryFourth)
-  firstWeekMonday.setUTCDate(januaryFourth.getUTCDate() - dayOfWeek + 1)
-
-  const start = new Date(firstWeekMonday)
-  start.setUTCDate(firstWeekMonday.getUTCDate() + ((week - 1) * 7))
-  return start
-}
-
-export function buildDayRangeDateHours(
-  startDate: string,
-  endDate: string,
-  hoursPerDay: number
-): DateHoursEntry[] {
-  const start = parseDateValue(startDate)
-  const end = parseDateValue(endDate)
-  if (!start || !end) {
-    throw new Error("valid start and end dates are required")
-  }
-  return buildWeekdayEntries(start, end, hoursPerDay)
-}
-
-export function buildWeekRangeDateHours(
-  startWeek: string,
-  endWeek: string,
-  hoursPerDay: number
-): DateHoursEntry[] {
-  const start = parseWeekStartValue(startWeek)
-  const end = parseWeekStartValue(endWeek)
-  if (!start || !end) {
-    throw new Error("valid start and end weeks are required")
-  }
-
-  if (start.getTime() > end.getTime()) {
-    throw new Error("start week must be before or equal to end week")
-  }
-
-  const endWeekFriday = new Date(end)
-  endWeekFriday.setUTCDate(endWeekFriday.getUTCDate() + 4)
-  return buildWeekdayEntries(start, endWeekFriday, hoursPerDay)
-}
-
-export function normalizeAllocationTargetType(allocation: Allocation): AllocationTargetType {
-  if (allocation.target_type === "group") {
-    return "group"
-  }
-  return "person"
-}
-
-export function normalizeAllocationTargetID(allocation: Allocation): string {
-  if (allocation.target_id) {
-    return allocation.target_id
-  }
-  return allocation.person_id ?? ""
-}
-
-export function dateRangesOverlap(
-  leftStartDate: string,
-  leftEndDate: string,
-  rightStartDate: string,
-  rightEndDate: string
-): boolean {
-  const leftStart = parseDateValue(leftStartDate)
-  const leftEnd = parseDateValue(leftEndDate)
-  const rightStart = parseDateValue(rightStartDate)
-  const rightEnd = parseDateValue(rightEndDate)
-
-  if (!leftStart || !leftEnd || !rightStart || !rightEnd) {
-    return false
-  }
-
-  return leftStart.getTime() <= rightEnd.getTime() && rightStart.getTime() <= leftEnd.getTime()
-}
-
-export function hasPersonIntersection(left: string[], right: string[]): boolean {
-  if (left.length === 0 || right.length === 0) {
-    return false
-  }
-
-  const rightSet = new Set(right)
-  for (const personID of left) {
-    if (rightSet.has(personID)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-export function isSubsetOf(candidateValues: string[], referenceValues: string[]): boolean {
-  const referenceSet = new Set(referenceValues)
-  for (const value of candidateValues) {
-    if (!referenceSet.has(value)) {
-      return false
-    }
-  }
-  return true
-}
-
-export function dateAfterValue(value: string): string | null {
-  const date = parseDateValue(value)
-  if (!date) {
-    return null
-  }
-  const nextDate = new Date(date)
-  nextDate.setUTCDate(nextDate.getUTCDate() + 1)
-  return formatDateValue(nextDate)
-}
-
-export function isPersonOverallocated(person: Person, segments: PersonAllocationLoadSegment[]): boolean {
-  if (segments.length === 0) {
-    return false
-  }
-
-  const deltaByDate = new Map<string, number>()
-  const checkpoints = new Set<string>()
-  const addDelta = (date: string, delta: number) => {
-    deltaByDate.set(date, (deltaByDate.get(date) ?? 0) + delta)
-  }
-
-  for (const segment of segments) {
-    const start = parseDateValue(segment.startDate)
-    const end = parseDateValue(segment.endDate)
-    if (!start || !end || start.getTime() > end.getTime() || segment.percent <= 0) {
-      continue
-    }
-
-    const startDate = formatDateValue(start)
-    const endDate = formatDateValue(end)
-    const dateAfterEnd = dateAfterValue(endDate)
-
-    addDelta(startDate, segment.percent)
-    checkpoints.add(startDate)
-    if (dateAfterEnd) {
-      addDelta(dateAfterEnd, -segment.percent)
-      checkpoints.add(dateAfterEnd)
-    }
-  }
-
-  for (const change of person.employment_changes ?? []) {
-    if (!isValidMonthValue(change.effective_month)) {
-      continue
-    }
-    checkpoints.add(`${change.effective_month}-01`)
-  }
-
-  if (checkpoints.size === 0) {
-    return false
-  }
-
-  let activePercent = 0
-  const sortedCheckpoints = Array.from(checkpoints).sort((left, right) => left.localeCompare(right))
-  for (const checkpoint of sortedCheckpoints) {
-    activePercent += deltaByDate.get(checkpoint) ?? 0
-    const employmentPct = personEmploymentPctOnDate(person, checkpoint)
-    if (activePercent > employmentPct + 1e-9) {
-      return true
-    }
-  }
-
-  return false
-}
-
-export function reportBucketTotal(buckets: ReportBucket[]): ReportBucket {
-  const total: ReportBucket = {
-    period_start: "",
-    availability_hours: 0,
-    load_hours: 0,
-    project_load_hours: 0,
-    project_estimation_hours: 0,
-    free_hours: 0,
-    utilization_pct: 0,
-    project_completion_pct: 0
-  }
-
-  for (const bucket of buckets) {
-    total.availability_hours += bucket.availability_hours
-    total.load_hours += bucket.load_hours
-    total.project_load_hours = (total.project_load_hours ?? 0) + (bucket.project_load_hours ?? 0)
-    total.project_estimation_hours = (total.project_estimation_hours ?? 0) + (bucket.project_estimation_hours ?? 0)
-    total.free_hours += bucket.free_hours
-  }
-
-  if (total.availability_hours > 0) {
-    total.utilization_pct = (total.load_hours / total.availability_hours) * 100
-  }
-
-  if ((total.project_estimation_hours ?? 0) > 0) {
-    total.project_completion_pct = ((total.project_load_hours ?? 0) / (total.project_estimation_hours ?? 0)) * 100
-  }
-
-  return total
-}
-
-export function buildReportTableRows(reportResults: ReportObjectResult[]): ReportTableRow[] {
-  if (reportResults.length === 0) {
-    return []
-  }
-
-  const rowsByPeriod = new Map<string, Array<{ objectID: string; objectLabel: string; bucket: ReportBucket }>>()
-  for (const result of reportResults) {
-    for (const bucket of result.buckets) {
-      const existingRows = rowsByPeriod.get(bucket.period_start) ?? []
-      existingRows.push({
-        objectID: result.objectID,
-        objectLabel: result.objectLabel,
-        bucket
-      })
-      rowsByPeriod.set(bucket.period_start, existingRows)
-    }
-  }
-
-  const sortedPeriods = Array.from(rowsByPeriod.keys()).sort((left, right) => left.localeCompare(right))
-  const rows: ReportTableRow[] = []
-
-  for (const periodStart of sortedPeriods) {
-    const periodRows = rowsByPeriod.get(periodStart) ?? []
-    periodRows.sort((left, right) => left.objectLabel.localeCompare(right.objectLabel))
-    if (periodRows.length > 1) {
-      const totalBucket = reportBucketTotal(periodRows.map((row) => row.bucket))
-      totalBucket.period_start = periodStart
-      rows.push({
-        id: `${periodStart}:summary`,
-        periodStart,
-        objectID: "total",
-        objectLabel: "Total",
-        bucket: totalBucket,
-        isTotal: true,
-        isDetail: false,
-        detailCount: periodRows.length
-      })
-      for (const row of periodRows) {
-        rows.push({
-          id: `${periodStart}:${row.objectID}`,
-          periodStart,
-          objectID: row.objectID,
-          objectLabel: row.objectLabel,
-          bucket: row.bucket,
-          isTotal: false,
-          isDetail: true,
-          detailCount: 0
-        })
-      }
-      continue
-    }
-
-    const singleRow = periodRows[0]
-    if (!singleRow) {
-      continue
-    }
-
-    rows.push({
-      id: `${periodStart}:summary`,
-      periodStart,
-      objectID: singleRow.objectID,
-      objectLabel: singleRow.objectLabel,
-      bucket: singleRow.bucket,
-      isTotal: false,
-      isDetail: false,
-      detailCount: 0
-    })
-  }
-
-  return rows
-}
-
-export function isExpandableReportPeriodRow(row: ReportTableRow): boolean {
-  return !row.isDetail && row.detailCount > 1
-}
-
-export function isReportRowVisible(row: ReportTableRow, expandedPeriods: ReadonlySet<string>): boolean {
-  if (!row.isDetail) {
-    return true
-  }
-  return expandedPeriods.has(row.periodStart)
-}
-
-export function reportDetailToggleLabel(row: ReportTableRow, isExpanded: boolean): string {
-  if (!isExpandableReportPeriodRow(row)) {
-    return ""
-  }
-  if (isExpanded) {
-    return "Hide entries"
-  }
-  return `Show ${row.detailCount} entries`
-}
-
-export function reportUtilizationForDisplay(
-  row: ReportTableRow,
-  scope: ReportScope,
-  personsByID: Map<string, Person>
-): number {
-  if (scope !== "person" || row.objectID === "total") {
-    return row.bucket.utilization_pct
-  }
-
-  const person = personsByID.get(row.objectID)
-  if (!person) {
-    return row.bucket.utilization_pct
-  }
-
-  const employmentPct = personEmploymentPctOnDate(person, row.periodStart)
-  if (employmentPct <= 0) {
-    return 0
-  }
-
-  return row.bucket.utilization_pct * (employmentPct / 100)
-}
+import {
+  allocationPercentFromInput,
+  asNumber,
+  buildDayRangeDateHours,
+  buildReportTableRows,
+  buildWeekRangeDateHours,
+  dateRangesOverlap,
+  formatHours,
+  hasPersonIntersection,
+  isExpandableReportPeriodRow,
+  isPersonOverallocated,
+  isReportRowVisible,
+  isSubsetOf,
+  newAllocationFormState,
+  normalizeAllocationTargetID,
+  normalizeAllocationTargetType,
+  personDailyHours,
+  personEmploymentPctOnDate,
+  reportDetailToggleLabel,
+  reportUtilizationForDisplay,
+  toErrorMessage,
+  toWorkingHours
+} from "./app/helpers"
+import { PERSON_UNAVAILABILITY_LOAD_CONCURRENCY, REPORT_MULTI_OBJECT_CONCURRENCY } from "./app/constants"
+import { useApiClient } from "./hooks/useApiClient"
+import type {
+  Allocation,
+  AllocationFormState,
+  AllocationLoadInputType,
+  AllocationLoadUnit,
+  AllocationMergeStrategy,
+  AllocationTargetType,
+  AvailabilityScope,
+  AvailabilityUnitScope,
+  Group,
+  GroupFormState,
+  GroupMemberFormState,
+  HolidayFormState,
+  Organisation,
+  OrganisationFormState,
+  Person,
+  PersonAllocationLoadSegment,
+  PersonDateHoursEntry,
+  PersonFormState,
+  PersonUnavailability,
+  Project,
+  ProjectFormState,
+  ReportBucket,
+  ReportGranularity,
+  ReportObjectResult,
+  Role,
+  ScopedGroupUnavailabilityFormState,
+  ScopedPersonUnavailabilityFormState,
+  TimespanFormState,
+  WorkingTimeUnit
+} from "./app/types"
+import { AllocationsPanel } from "./panels/AllocationsPanel"
+import { AuthTenantPanel } from "./panels/AuthTenantPanel"
+import { GroupsPanel } from "./panels/GroupsPanel"
+import { HolidaysUnavailabilityPanel } from "./panels/HolidaysUnavailabilityPanel"
+import { OrganisationPanel } from "./panels/OrganisationPanel"
+import { PersonsPanel } from "./panels/PersonsPanel"
+import { ProjectsPanel } from "./panels/ProjectsPanel"
+import { ReportPanel } from "./panels/ReportPanel"
+
+export type {
+  Allocation,
+  AllocationFormState,
+  AllocationLoadInputType,
+  AllocationLoadUnit,
+  AllocationMergeStrategy,
+  AllocationTargetType,
+  AvailabilityScope,
+  AvailabilityUnitScope,
+  DateHoursEntry,
+  EmploymentChange,
+  Group,
+  Organisation,
+  Person,
+  PersonAllocationLoadSegment,
+  PersonDateHoursEntry,
+  PersonUnavailability,
+  Project,
+  ReportBucket,
+  ReportGranularity,
+  ReportObjectResult,
+  ReportTableRow,
+  Role,
+  WorkingTimeUnit
+} from "./app/types"
+
+export {
+  allocationPercentFromInput,
+  asNumber,
+  buildDayRangeDateHours,
+  buildReportTableRows,
+  buildWeekRangeDateHours,
+  buildWeekdayEntries,
+  dateAfterValue,
+  dateRangesOverlap,
+  formatDateValue,
+  formatHours,
+  hasPersonIntersection,
+  isExpandableReportPeriodRow,
+  isPersonOverallocated,
+  isReportRowVisible,
+  isSubsetOf,
+  isValidMonthValue,
+  newAllocationFormState,
+  normalizeAllocationTargetID,
+  normalizeAllocationTargetType,
+  parseDateValue,
+  parseWeekStartValue,
+  personDailyHours,
+  personEmploymentPctOnDate,
+  reportBucketTotal,
+  reportDetailToggleLabel,
+  reportUtilizationForDisplay,
+  roundHours,
+  toErrorMessage,
+  toWorkingHours,
+  workingHoursForAllocationUnit
+} from "./app/helpers"
 
 export default function App() {
   const canUseNetwork = typeof fetch === "function"
@@ -651,46 +144,46 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
 
-  const [organisationForm, setOrganisationForm] = useState({
+  const [organisationForm, setOrganisationForm] = useState<OrganisationFormState>({
     id: "",
     name: "",
     workingTimeValue: "8",
     workingTimeUnit: "day" as WorkingTimeUnit
   })
 
-  const [personForm, setPersonForm] = useState({
+  const [personForm, setPersonForm] = useState<PersonFormState>({
     id: "",
     name: "",
     employmentPct: "100",
     employmentEffectiveFromMonth: ""
   })
-  const [projectForm, setProjectForm] = useState({
+  const [projectForm, setProjectForm] = useState<ProjectFormState>({
     id: "",
     name: "",
     startDate: "2026-01-01",
     endDate: "2026-12-31",
     estimatedEffortHours: "1000"
   })
-  const [groupForm, setGroupForm] = useState({ id: "", name: "", memberIDs: [] as string[] })
-  const [groupMemberForm, setGroupMemberForm] = useState({ groupID: "", personID: "" })
+  const [groupForm, setGroupForm] = useState<GroupFormState>({ id: "", name: "", memberIDs: [] as string[] })
+  const [groupMemberForm, setGroupMemberForm] = useState<GroupMemberFormState>({ groupID: "", personID: "" })
 
   const [allocationForm, setAllocationForm] = useState<AllocationFormState>(() => newAllocationFormState())
   const [allocationMergeStrategy, setAllocationMergeStrategy] = useState<AllocationMergeStrategy>("stack")
 
-  const [holidayForm, setHolidayForm] = useState({ date: "", hours: "8" })
-  const [personUnavailabilityForm, setPersonUnavailabilityForm] = useState({
+  const [holidayForm, setHolidayForm] = useState<HolidayFormState>({ date: "", hours: "8" })
+  const [personUnavailabilityForm, setPersonUnavailabilityForm] = useState<ScopedPersonUnavailabilityFormState>({
     personID: "",
     date: "",
     hours: "8"
   })
-  const [groupUnavailabilityForm, setGroupUnavailabilityForm] = useState({
+  const [groupUnavailabilityForm, setGroupUnavailabilityForm] = useState<ScopedGroupUnavailabilityFormState>({
     groupID: "",
     date: "",
     hours: "8"
   })
   const [availabilityScope, setAvailabilityScope] = useState<AvailabilityScope>("organisation")
   const [availabilityUnitScope, setAvailabilityUnitScope] = useState<AvailabilityUnitScope>("hours")
-  const [timespanForm, setTimespanForm] = useState({
+  const [timespanForm, setTimespanForm] = useState<TimespanFormState>({
     startDate: "",
     endDate: "",
     startWeek: "",
@@ -704,108 +197,12 @@ export default function App() {
   const [reportGranularity, setReportGranularity] = useState<ReportGranularity>("month")
   const [reportResults, setReportResults] = useState<ReportObjectResult[]>([])
   const [expandedReportPeriods, setExpandedReportPeriods] = useState<string[]>([])
-  const selectAllPersonsCheckboxRef = useRef<HTMLInputElement | null>(null)
-  const selectAllProjectsCheckboxRef = useRef<HTMLInputElement | null>(null)
-  const selectAllGroupsCheckboxRef = useRef<HTMLInputElement | null>(null)
-  const selectAllAllocationsCheckboxRef = useRef<HTMLInputElement | null>(null)
+  const selectAllPersonsCheckboxRef = useRef<HTMLInputElement>(null)
+  const selectAllProjectsCheckboxRef = useRef<HTMLInputElement>(null)
+  const selectAllGroupsCheckboxRef = useRef<HTMLInputElement>(null)
+  const selectAllAllocationsCheckboxRef = useRef<HTMLInputElement>(null)
 
-  const authHeaders = useCallback(
-    (organisationID?: string): HeadersInit => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "X-Role": role,
-        "X-User-ID": "dev-user"
-      }
-
-      const scopedOrganisationID = organisationID ?? selectedOrganisationID
-      if (scopedOrganisationID) {
-        headers["X-Org-ID"] = scopedOrganisationID
-      }
-
-      return headers
-    },
-    [role, selectedOrganisationID]
-  )
-
-  const sendRequest = useCallback(
-    async (path: string, options?: RequestInit, organisationID?: string): Promise<Response> => {
-      if (!canUseNetwork) {
-        throw new Error("fetch is not available")
-      }
-
-      return fetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          ...authHeaders(organisationID),
-          ...(options?.headers ?? {})
-        }
-      })
-    },
-    [authHeaders, canUseNetwork]
-  )
-
-  const requestJSON = useCallback(
-    async <T,>(path: string, options?: RequestInit, organisationID?: string, defaultResponse?: T): Promise<T> => {
-      const response = await sendRequest(path, options, organisationID)
-      if (response.status === 204) {
-        throw new Error(`request returned no content for ${path}`)
-      }
-
-      const text = await response.text()
-      const hasBody = text.trim() !== ""
-      const payload = hasBody ? JSON.parse(text) : defaultResponse
-
-      if (!response.ok) {
-        const message = (
-          payload
-          && typeof payload === "object"
-          && "error" in payload
-          && typeof payload.error === "string"
-        )
-          ? payload.error
-          : `request failed with status ${response.status}`
-        throw new Error(message)
-      }
-
-      if (!hasBody) {
-        if (defaultResponse !== undefined) {
-          return defaultResponse
-        }
-        throw new Error(`request returned empty body for ${path}`)
-      }
-
-      return payload as T
-    },
-    [sendRequest]
-  )
-
-  const requestNoContent = useCallback(
-    async (path: string, options?: RequestInit, organisationID?: string): Promise<void> => {
-      const response = await sendRequest(path, options, organisationID)
-      if (response.ok) {
-        return
-      }
-
-      const text = await response.text()
-      if (!text) {
-        throw new Error(`request failed with status ${response.status}`)
-      }
-
-      let message = `request failed with status ${response.status}`
-      try {
-        const payload = JSON.parse(text) as Record<string, unknown>
-        if (typeof payload.error === "string") {
-          message = payload.error
-        }
-      } catch {
-        if (text.trim() !== "") {
-          message = `request failed with status ${response.status}: ${text}`
-        }
-      }
-      throw new Error(message)
-    },
-    [sendRequest]
-  )
+  const { requestJSON, requestNoContent } = useApiClient({ role, selectedOrganisationID, canUseNetwork })
 
   const withFeedback = useCallback(async (operation: () => Promise<void>, success: string) => {
     setErrorMessage("")
@@ -2179,1007 +1576,158 @@ export default function App() {
         <p>Organisations, people, projects, groups, allocations, calendars, and availability load reports.</p>
       </header>
 
-      <section className="panel">
-        <h2>Auth and Tenant</h2>
-        <div className="row">
-          <label>
-            Role
-            <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
-              <option value="org_admin">org_admin</option>
-              <option value="org_user">org_user</option>
-            </select>
-          </label>
-          <label>
-            Active organisation
-            <select value={selectedOrganisationID} onChange={(event) => setSelectedOrganisationID(event.target.value)}>
-              <option value="">None</option>
-              {organisations.map((organisation) => (
-                <option key={organisation.id} value={organisation.id}>
-                  {organisation.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" onClick={() => void withFeedback(loadOrganisations, "organisations refreshed")}>
-            Refresh
-          </button>
-        </div>
-      </section>
+      <AuthTenantPanel
+        role={role}
+        setRole={setRole}
+        selectedOrganisationID={selectedOrganisationID}
+        setSelectedOrganisationID={setSelectedOrganisationID}
+        organisations={organisations}
+        onRefresh={() => void withFeedback(loadOrganisations, "organisations refreshed")}
+      />
 
-      <section className="panel">
-        <h2>Organisation</h2>
-        <form className="grid-form" onSubmit={handleOrganisationCreate}>
-          <label>
-            Name
-            <input value={organisationForm.name} onChange={(event) => setOrganisationForm((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <label>
-            Working hours
-            <input
-              type="number"
-              value={organisationForm.workingTimeValue}
-              onChange={(event) => setOrganisationForm((current) => ({ ...current, workingTimeValue: event.target.value }))}
-            />
-          </label>
-          <label>
-            Working hours unit
-            <select
-              value={organisationForm.workingTimeUnit}
-              onChange={(event) => setOrganisationForm((current) => ({ ...current, workingTimeUnit: event.target.value as WorkingTimeUnit }))}
-            >
-              <option value="day">daily</option>
-              <option value="week">weekly</option>
-              <option value="month">monthly</option>
-              <option value="year">yearly</option>
-            </select>
-          </label>
-          <div className="actions">
-            <button type="submit">Create organisation</button>
-            <button type="button" disabled={!selectedOrganisationID} onClick={() => handleOrganisationUpdate()}>
-              Update selected organisation
-            </button>
-            <button type="button" disabled={!selectedOrganisationID} onClick={() => handleOrganisationDelete()}>
-              Delete selected organisation
-            </button>
-          </div>
-        </form>
-      </section>
+      <OrganisationPanel
+        organisationForm={organisationForm}
+        setOrganisationForm={setOrganisationForm}
+        selectedOrganisationID={selectedOrganisationID}
+        onCreate={handleOrganisationCreate}
+        onUpdate={handleOrganisationUpdate}
+        onDelete={handleOrganisationDelete}
+      />
 
-      <section className="panel">
-        <h2>Persons</h2>
-        <form className="grid-form" onSubmit={savePerson}>
-          <p>{personFormContextLabel}</p>
-          {editingPerson && (
-            <div className="actions">
-              <button type="button" onClick={switchPersonToCreateContext}>Switch to creation context</button>
-            </div>
-          )}
-          <label>
-            Name
-            <input value={personForm.name} onChange={(event) => setPersonForm((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <label>
-            Employment percent
-            <input type="number" value={personForm.employmentPct} onChange={(event) => setPersonForm((current) => ({ ...current, employmentPct: event.target.value }))} />
-          </label>
-          {personForm.id && (
-            <label>
-              Effective from month
-              <input
-                type="month"
-                value={personForm.employmentEffectiveFromMonth}
-                onChange={(event) => {
-                  setPersonForm((current) => ({ ...current, employmentEffectiveFromMonth: event.target.value }))
-                }}
-              />
-            </label>
-          )}
-          <div className="actions">
-            <button type="submit">Save person</button>
-            {selectedPersonIDs.length > 1 && (
-              <button type="button" onClick={deleteSelectedPersons}>Delete selected items</button>
-            )}
-          </div>
-        </form>
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input
-                  ref={selectAllPersonsCheckboxRef}
-                  type="checkbox"
-                  aria-label="Select all persons"
-                  checked={persons.length > 0 && selectedPersonIDs.length === persons.length}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      setSelectedPersonIDs(persons.map((person) => person.id))
-                      return
-                    }
-                    setSelectedPersonIDs([])
-                  }}
-                />
-              </th>
-              <th>Name</th>
-              <th>Employment %</th>
-              <th>Employment changes</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {persons.map((person) => (
-              <tr key={person.id} className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}>
-                <td>
-                  <input
-                    type="checkbox"
-                    aria-label={`Select person ${person.name}`}
-                    checked={selectedPersonIDs.includes(person.id)}
-                    onChange={() => {
-                      setSelectedPersonIDs((current) => {
-                        if (current.includes(person.id)) {
-                          return current.filter((id) => id !== person.id)
-                        }
-                        return [...current, person.id]
-                      })
-                    }}
-                  />
-                </td>
-                <td>{person.name}</td>
-                <td>{person.employment_pct}</td>
-                <td>
-                  {person.employment_changes && person.employment_changes.length > 0
-                    ? person.employment_changes
-                      .map((change) => `${change.effective_month}: ${change.employment_pct}%`)
-                      .join(", ")
-                    : "-"}
-                </td>
-                <td>
-                  <div className="actions">
-                    <button type="button" onClick={() => switchPersonToEditContext(person)}>Edit</button>
-                    <button type="button" onClick={() => deletePerson(person.id)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <PersonsPanel
+        personForm={personForm}
+        setPersonForm={setPersonForm}
+        personFormContextLabel={personFormContextLabel}
+        editingPerson={editingPerson}
+        onSwitchToCreateContext={switchPersonToCreateContext}
+        onSavePerson={savePerson}
+        selectedPersonIDs={selectedPersonIDs}
+        onDeleteSelectedPersons={deleteSelectedPersons}
+        selectAllPersonsCheckboxRef={selectAllPersonsCheckboxRef}
+        persons={persons}
+        setSelectedPersonIDs={setSelectedPersonIDs}
+        isOverallocatedPersonID={isOverallocatedPersonID}
+        onSwitchToEditContext={switchPersonToEditContext}
+        onDeletePerson={deletePerson}
+      />
 
-      <section className="panel">
-        <h2>Projects</h2>
-        <form className="grid-form" onSubmit={saveProject}>
-          <p>{projectFormContextLabel}</p>
-          {editingProject && (
-            <div className="actions">
-              <button type="button" onClick={switchProjectToCreateContext}>Switch to creation context</button>
-            </div>
-          )}
-          <label>
-            Name
-            <input value={projectForm.name} onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <label>
-            Start date
-            <input type="date" value={projectForm.startDate} onChange={(event) => setProjectForm((current) => ({ ...current, startDate: event.target.value }))} />
-          </label>
-          <label>
-            End date
-            <input type="date" value={projectForm.endDate} onChange={(event) => setProjectForm((current) => ({ ...current, endDate: event.target.value }))} />
-          </label>
-          <label>
-            Estimated effort hours
-            <input
-              type="number"
-              value={projectForm.estimatedEffortHours}
-              onChange={(event) => setProjectForm((current) => ({ ...current, estimatedEffortHours: event.target.value }))}
-            />
-          </label>
-          <div className="actions">
-            <button type="submit">Save project</button>
-            {selectedProjectIDs.length > 1 && (
-              <button type="button" onClick={deleteSelectedProjects}>Delete selected items</button>
-            )}
-          </div>
-        </form>
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input
-                  ref={selectAllProjectsCheckboxRef}
-                  type="checkbox"
-                  aria-label="Select all projects"
-                  checked={projects.length > 0 && selectedProjectIDs.length === projects.length}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      setSelectedProjectIDs(projects.map((project) => project.id))
-                      return
-                    }
-                    setSelectedProjectIDs([])
-                  }}
-                />
-              </th>
-              <th>Name</th>
-              <th>Start</th>
-              <th>End</th>
-              <th>Effort hours</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {projects.map((project) => (
-              <tr key={project.id}>
-                <td>
-                  <input
-                    type="checkbox"
-                    aria-label={`Select project ${project.name}`}
-                    checked={selectedProjectIDs.includes(project.id)}
-                    onChange={() => {
-                      setSelectedProjectIDs((current) => {
-                        if (current.includes(project.id)) {
-                          return current.filter((id) => id !== project.id)
-                        }
-                        return [...current, project.id]
-                      })
-                    }}
-                  />
-                </td>
-                <td>{project.name}</td>
-                <td>{project.start_date}</td>
-                <td>{project.end_date}</td>
-                <td>{project.estimated_effort_hours}</td>
-                <td>
-                  <div className="actions">
-                    <button type="button" onClick={() => switchProjectToEditContext(project)}>Edit</button>
-                    <button type="button" onClick={() => deleteProject(project.id)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <ProjectsPanel
+        projectForm={projectForm}
+        setProjectForm={setProjectForm}
+        projectFormContextLabel={projectFormContextLabel}
+        editingProject={editingProject}
+        onSwitchToCreateContext={switchProjectToCreateContext}
+        onSaveProject={saveProject}
+        selectedProjectIDs={selectedProjectIDs}
+        onDeleteSelectedProjects={deleteSelectedProjects}
+        selectAllProjectsCheckboxRef={selectAllProjectsCheckboxRef}
+        projects={projects}
+        setSelectedProjectIDs={setSelectedProjectIDs}
+        onSwitchToEditContext={switchProjectToEditContext}
+        onDeleteProject={deleteProject}
+      />
 
-      <section className="panel">
-        <h2>Groups</h2>
-        <form className="grid-form" onSubmit={saveGroup}>
-          <p>{groupFormContextLabel}</p>
-          {editingGroup && (
-            <div className="actions">
-              <button type="button" onClick={switchGroupToCreateContext}>Switch to creation context</button>
-            </div>
-          )}
-          <label>
-            Name
-            <input value={groupForm.name} onChange={(event) => setGroupForm((current) => ({ ...current, name: event.target.value }))} />
-          </label>
-          <fieldset>
-            <legend>Members</legend>
-            <div className="chips">
-              {persons.map((person) => (
-                <label key={person.id} className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}>
-                  <input
-                    type="checkbox"
-                    checked={groupForm.memberIDs.includes(person.id)}
-                    onChange={() => {
-                      setGroupForm((current) => {
-                        if (current.memberIDs.includes(person.id)) {
-                          return { ...current, memberIDs: current.memberIDs.filter((entry) => entry !== person.id) }
-                        }
-                        return { ...current, memberIDs: [...current.memberIDs, person.id] }
-                      })
-                    }}
-                  />
-                  {person.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <div className="actions">
-            <button type="submit">Save group</button>
-            {selectedGroupIDs.length > 1 && (
-              <button type="button" onClick={deleteSelectedGroups}>Delete selected items</button>
-            )}
-          </div>
-        </form>
+      <GroupsPanel
+        groupForm={groupForm}
+        setGroupForm={setGroupForm}
+        groupFormContextLabel={groupFormContextLabel}
+        editingGroup={editingGroup}
+        onSwitchToCreateContext={switchGroupToCreateContext}
+        onSaveGroup={saveGroup}
+        selectedGroupIDs={selectedGroupIDs}
+        onDeleteSelectedGroups={deleteSelectedGroups}
+        persons={persons}
+        isOverallocatedPersonID={isOverallocatedPersonID}
+        groupMemberForm={groupMemberForm}
+        setGroupMemberForm={setGroupMemberForm}
+        groups={groups}
+        onAddGroupMember={addGroupMember}
+        selectAllGroupsCheckboxRef={selectAllGroupsCheckboxRef}
+        setSelectedGroupIDs={setSelectedGroupIDs}
+        onRemoveGroupMember={removeGroupMember}
+        onSwitchToEditContext={switchGroupToEditContext}
+        onDeleteGroup={deleteGroup}
+      />
 
-        <form className="row" onSubmit={addGroupMember}>
-          <label>
-            Group
-            <select value={groupMemberForm.groupID} onChange={(event) => setGroupMemberForm((current) => ({ ...current, groupID: event.target.value }))}>
-              <option value="">Select group</option>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>{group.name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Person
-            <select value={groupMemberForm.personID} onChange={(event) => setGroupMemberForm((current) => ({ ...current, personID: event.target.value }))}>
-              <option value="">Select person</option>
-              {persons.map((person) => (
-                <option
-                  key={person.id}
-                  value={person.id}
-                  className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}
-                >
-                  {person.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit">Add member</button>
-        </form>
+      <AllocationsPanel
+        allocationForm={allocationForm}
+        setAllocationForm={setAllocationForm}
+        allocationFormContextLabel={allocationFormContextLabel}
+        editingAllocation={editingAllocation}
+        onSwitchToCreateContext={switchAllocationToCreateContext}
+        onSaveAllocation={saveAllocation}
+        allocationTargetOptions={allocationTargetOptions}
+        isOverallocatedPersonID={isOverallocatedPersonID}
+        projects={projects}
+        allocationFormConflicts={allocationFormConflicts}
+        allocationFormConflictingSelectedPersonNames={allocationFormConflictingSelectedPersonNames}
+        allocationFormConflictingSelectedPersonIDs={allocationFormConflictingSelectedPersonIDs}
+        allocationMergeStrategy={allocationMergeStrategy}
+        setAllocationMergeStrategy={setAllocationMergeStrategy}
+        allocationFormCanReplaceConflicts={allocationFormCanReplaceConflicts}
+        selectedAllocationIDs={selectedAllocationIDs}
+        onDeleteSelectedAllocations={deleteSelectedAllocations}
+        selectAllAllocationsCheckboxRef={selectAllAllocationsCheckboxRef}
+        allocations={allocations}
+        setSelectedAllocationIDs={setSelectedAllocationIDs}
+        groups={groups}
+        persons={persons}
+        resolveAllocationPersonIDs={resolveAllocationPersonIDs}
+        onSwitchToEditContext={switchAllocationToEditContext}
+        onDeleteAllocation={deleteAllocation}
+      />
 
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input
-                  ref={selectAllGroupsCheckboxRef}
-                  type="checkbox"
-                  aria-label="Select all groups"
-                  checked={groups.length > 0 && selectedGroupIDs.length === groups.length}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      setSelectedGroupIDs(groups.map((group) => group.id))
-                      return
-                    }
-                    setSelectedGroupIDs([])
-                  }}
-                />
-              </th>
-              <th>Name</th>
-              <th>Members</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => (
-              <tr key={group.id}>
-                <td>
-                  <input
-                    type="checkbox"
-                    aria-label={`Select group ${group.name}`}
-                    checked={selectedGroupIDs.includes(group.id)}
-                    onChange={() => {
-                      setSelectedGroupIDs((current) => {
-                        if (current.includes(group.id)) {
-                          return current.filter((id) => id !== group.id)
-                        }
-                        return [...current, group.id]
-                      })
-                    }}
-                  />
-                </td>
-                <td>{group.name}</td>
-                <td>
-                  <details>
-                    <summary>{group.member_ids.length} member(s)</summary>
-                    {group.member_ids.length === 0 && <p>No members</p>}
-                    {group.member_ids.map((memberID) => {
-                      const person = persons.find((entry) => entry.id === memberID)
-                      return (
-                        <div key={memberID} className="member-row">
-                          <span className={isOverallocatedPersonID(memberID) ? "person-overallocated" : undefined}>
-                            {person?.name ?? memberID}
-                          </span>
-                          <button type="button" onClick={() => removeGroupMember(group.id, memberID)}>Remove</button>
-                        </div>
-                      )
-                    })}
-                  </details>
-                </td>
-                <td>
-                  <div className="actions">
-                    <button type="button" onClick={() => switchGroupToEditContext(group)}>Edit</button>
-                    <button type="button" onClick={() => deleteGroup(group.id)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <HolidaysUnavailabilityPanel
+        availabilityScope={availabilityScope}
+        setAvailabilityScope={setAvailabilityScope}
+        availabilityUnitScope={availabilityUnitScope}
+        setAvailabilityUnitScope={setAvailabilityUnitScope}
+        onCreateHoliday={createHoliday}
+        onCreatePersonUnavailability={createPersonUnavailability}
+        onCreateGroupUnavailability={createGroupUnavailability}
+        selectedOrganisationID={selectedOrganisationID}
+        setSelectedOrganisationID={setSelectedOrganisationID}
+        organisations={organisations}
+        holidayForm={holidayForm}
+        setHolidayForm={setHolidayForm}
+        timespanForm={timespanForm}
+        setTimespanForm={setTimespanForm}
+        personUnavailability={personUnavailability}
+        persons={persons}
+        isOverallocatedPersonID={isOverallocatedPersonID}
+        onDeletePersonUnavailability={deletePersonUnavailability}
+        personUnavailabilityForm={personUnavailabilityForm}
+        setPersonUnavailabilityForm={setPersonUnavailabilityForm}
+        groupUnavailabilityForm={groupUnavailabilityForm}
+        setGroupUnavailabilityForm={setGroupUnavailabilityForm}
+        groups={groups}
+        selectedGroupPersonUnavailability={selectedGroupPersonUnavailability}
+      />
 
-      <section className="panel">
-        <h2>Allocations</h2>
-        <form className="grid-form" onSubmit={saveAllocation}>
-          <p>{allocationFormContextLabel}</p>
-          {editingAllocation && (
-            <div className="actions">
-              <button type="button" onClick={switchAllocationToCreateContext}>Switch to creation context</button>
-            </div>
-          )}
-          <label>
-            Target type
-            <select
-              value={allocationForm.targetType}
-              onChange={(event) => {
-                setAllocationForm((current) => ({
-                  ...current,
-                  targetType: event.target.value as AllocationTargetType,
-                  targetID: ""
-                }))
-              }}
-            >
-              <option value="person">person</option>
-              <option value="group">group</option>
-            </select>
-          </label>
-          <label>
-            Target
-            <select value={allocationForm.targetID} onChange={(event) => setAllocationForm((current) => ({ ...current, targetID: event.target.value }))}>
-              <option value="">Select target</option>
-              {allocationTargetOptions.map((target) => (
-                <option
-                  key={target.id}
-                  value={target.id}
-                  className={
-                    allocationForm.targetType === "person" && isOverallocatedPersonID(target.id)
-                      ? "person-overallocated"
-                      : undefined
-                  }
-                >
-                  {target.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Project
-            <select value={allocationForm.projectID} onChange={(event) => setAllocationForm((current) => ({ ...current, projectID: event.target.value }))}>
-              <option value="">Select project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Start date
-            <input type="date" value={allocationForm.startDate} onChange={(event) => setAllocationForm((current) => ({ ...current, startDate: event.target.value }))} />
-          </label>
-          <label>
-            End date
-            <input type="date" value={allocationForm.endDate} onChange={(event) => setAllocationForm((current) => ({ ...current, endDate: event.target.value }))} />
-          </label>
-          <label>
-            Load value type
-            <select
-              value={allocationForm.loadInputType}
-              onChange={(event) => setAllocationForm((current) => ({ ...current, loadInputType: event.target.value as AllocationLoadInputType }))}
-            >
-              <option value="fte_pct">FTE % (full-time basis)</option>
-              <option value="hours">Hours</option>
-            </select>
-          </label>
-          <label>
-            Load unit
-            <select
-              value={allocationForm.loadUnit}
-              onChange={(event) => setAllocationForm((current) => ({ ...current, loadUnit: event.target.value as AllocationLoadUnit }))}
-            >
-              <option value="day">per day</option>
-              <option value="week">per week</option>
-              <option value="month">per month</option>
-            </select>
-          </label>
-          <label>
-            {allocationForm.loadInputType === "fte_pct"
-              ? `FTE % per ${allocationForm.loadUnit}`
-              : `Hours per ${allocationForm.loadUnit}`}
-            <input
-              type="number"
-              value={allocationForm.loadValue}
-              onChange={(event) => setAllocationForm((current) => ({ ...current, loadValue: event.target.value }))}
-            />
-          </label>
-          {allocationFormConflicts.length > 0 && (
-            <>
-              <p>{allocationFormConflicts.length} allocation conflict(s) detected for the selected users and timespan.</p>
-              {allocationFormConflictingSelectedPersonNames.length > 0 && (
-                <p>Affected persons: {allocationFormConflictingSelectedPersonNames.join(", ")}</p>
-              )}
-              {allocationMergeStrategy === "keep" && allocationFormConflictingSelectedPersonIDs.length > 0 && (
-                <p>{allocationFormConflictingSelectedPersonIDs.length} selected user(s) will be excluded from this allocation.</p>
-              )}
-              <label>
-                Merge strategy
-                <select
-                  value={allocationMergeStrategy}
-                  onChange={(event) => setAllocationMergeStrategy(event.target.value as AllocationMergeStrategy)}
-                >
-                  <option value="stack">stack with existing allocations</option>
-                  <option value="replace" disabled={!allocationFormCanReplaceConflicts}>replace conflicting allocations</option>
-                  <option value="keep">keep existing allocations as-is (exclude affected users)</option>
-                </select>
-              </label>
-              {!allocationFormCanReplaceConflicts && (
-                <p>Replace is unavailable because some conflicts include users outside the current selection.</p>
-              )}
-            </>
-          )}
-          <div className="actions">
-            <button type="submit">Save allocation</button>
-            {selectedAllocationIDs.length > 1 && (
-              <button type="button" onClick={deleteSelectedAllocations}>Delete selected items</button>
-            )}
-          </div>
-        </form>
-
-        <table>
-          <thead>
-            <tr>
-              <th>
-                <input
-                  ref={selectAllAllocationsCheckboxRef}
-                  type="checkbox"
-                  aria-label="Select all allocations"
-                  checked={allocations.length > 0 && selectedAllocationIDs.length === allocations.length}
-                  onChange={(event) => {
-                    if (event.target.checked) {
-                      setSelectedAllocationIDs(allocations.map((allocation) => allocation.id))
-                      return
-                    }
-                    setSelectedAllocationIDs([])
-                  }}
-                />
-              </th>
-              <th>Target</th>
-              <th>Project</th>
-              <th>Start</th>
-              <th>End</th>
-              <th>FTE % (full-time basis)</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {allocations.map((allocation) => {
-              const targetType = normalizeAllocationTargetType(allocation)
-              const targetID = normalizeAllocationTargetID(allocation)
-              const targetLabel = targetType === "group"
-                ? groups.find((entry) => entry.id === targetID)?.name ?? targetID
-                : persons.find((entry) => entry.id === targetID)?.name ?? targetID
-              const hasOverallocatedPerson = resolveAllocationPersonIDs(allocation)
-                .some((personID) => isOverallocatedPersonID(personID))
-              const project = projects.find((entry) => entry.id === allocation.project_id)
-              return (
-                <tr key={allocation.id} className={hasOverallocatedPerson ? "person-overallocated" : undefined}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select allocation ${allocation.id}`}
-                      checked={selectedAllocationIDs.includes(allocation.id)}
-                      onChange={() => {
-                        setSelectedAllocationIDs((current) => {
-                          if (current.includes(allocation.id)) {
-                            return current.filter((id) => id !== allocation.id)
-                          }
-                          return [...current, allocation.id]
-                        })
-                      }}
-                    />
-                  </td>
-                  <td>{targetType}: {targetLabel}</td>
-                  <td>{project?.name ?? allocation.project_id}</td>
-                  <td>{allocation.start_date || "-"}</td>
-                  <td>{allocation.end_date || "-"}</td>
-                  <td>{allocation.percent}</td>
-                  <td>
-                    <div className="actions">
-                      <button type="button" onClick={() => switchAllocationToEditContext(allocation)}>Edit</button>
-                      <button type="button" onClick={() => deleteAllocation(allocation)}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="panel">
-        <h2>Holidays and Unavailability</h2>
-
-        <h3>Entry Scope</h3>
-        <form className="row">
-          <label>
-            Scope
-            <select value={availabilityScope} onChange={(event) => setAvailabilityScope(event.target.value as AvailabilityScope)}>
-              <option value="organisation">organisation</option>
-              <option value="person">person</option>
-              <option value="group">group</option>
-            </select>
-          </label>
-          <label>
-            Units
-            <select value={availabilityUnitScope} onChange={(event) => setAvailabilityUnitScope(event.target.value as AvailabilityUnitScope)}>
-              <option value="hours">hours (single day)</option>
-              <option value="days">days (timespan)</option>
-              <option value="weeks">weeks (timespan)</option>
-            </select>
-          </label>
-        </form>
-
-        {availabilityScope === "organisation" && (
-          <>
-            <form className="row" onSubmit={createHoliday}>
-              <label>
-                Organisation
-                <select value={selectedOrganisationID} onChange={(event) => setSelectedOrganisationID(event.target.value)}>
-                  <option value="">Select organisation</option>
-                  {organisations.map((organisation) => (
-                    <option key={organisation.id} value={organisation.id}>{organisation.name}</option>
-                  ))}
-                </select>
-              </label>
-              {availabilityUnitScope === "hours" ? (
-                <>
-                  <label>
-                    Date
-                    <input type="date" value={holidayForm.date} onChange={(event) => setHolidayForm((current) => ({ ...current, date: event.target.value }))} />
-                  </label>
-                  <label>
-                    Hours
-                    <input type="number" value={holidayForm.hours} onChange={(event) => setHolidayForm((current) => ({ ...current, hours: event.target.value }))} />
-                  </label>
-                </>
-              ) : availabilityUnitScope === "days" ? (
-                <>
-                  <label>
-                    Start date
-                    <input type="date" value={timespanForm.startDate} onChange={(event) => setTimespanForm((current) => ({ ...current, startDate: event.target.value }))} />
-                  </label>
-                  <label>
-                    End date
-                    <input type="date" value={timespanForm.endDate} onChange={(event) => setTimespanForm((current) => ({ ...current, endDate: event.target.value }))} />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label>
-                    Start week
-                    <input type="week" value={timespanForm.startWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, startWeek: event.target.value }))} />
-                  </label>
-                  <label>
-                    End week
-                    <input type="week" value={timespanForm.endWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, endWeek: event.target.value }))} />
-                  </label>
-                </>
-              )}
-              <button type="submit">{availabilityUnitScope === "hours" ? "Add org unavailability" : "Add org member unavailability"}</button>
-            </form>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Person</th>
-                  <th>Date</th>
-                  <th>Hours</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {personUnavailability.map((entry) => (
-                  <tr key={entry.id}>
-                    <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                      {persons.find((person) => person.id === entry.person_id)?.name ?? entry.person_id}
-                    </td>
-                    <td>{entry.date}</td>
-                    <td>{entry.hours}</td>
-                    <td>
-                      <button type="button" onClick={() => deletePersonUnavailability(entry)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
-
-        {availabilityScope === "person" && (
-          <>
-            <form className="row" onSubmit={createPersonUnavailability}>
-              <label>
-                Person
-                <select value={personUnavailabilityForm.personID} onChange={(event) => setPersonUnavailabilityForm((current) => ({ ...current, personID: event.target.value }))}>
-                  <option value="">Select person</option>
-                  {persons.map((person) => (
-                    <option
-                      key={person.id}
-                      value={person.id}
-                      className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}
-                    >
-                      {person.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {availabilityUnitScope === "hours" ? (
-                <>
-                  <label>
-                    Date
-                    <input type="date" value={personUnavailabilityForm.date} onChange={(event) => setPersonUnavailabilityForm((current) => ({ ...current, date: event.target.value }))} />
-                  </label>
-                  <label>
-                    Hours
-                    <input type="number" value={personUnavailabilityForm.hours} onChange={(event) => setPersonUnavailabilityForm((current) => ({ ...current, hours: event.target.value }))} />
-                  </label>
-                </>
-              ) : availabilityUnitScope === "days" ? (
-                <>
-                  <label>
-                    Start date
-                    <input type="date" value={timespanForm.startDate} onChange={(event) => setTimespanForm((current) => ({ ...current, startDate: event.target.value }))} />
-                  </label>
-                  <label>
-                    End date
-                    <input type="date" value={timespanForm.endDate} onChange={(event) => setTimespanForm((current) => ({ ...current, endDate: event.target.value }))} />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label>
-                    Start week
-                    <input type="week" value={timespanForm.startWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, startWeek: event.target.value }))} />
-                  </label>
-                  <label>
-                    End week
-                    <input type="week" value={timespanForm.endWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, endWeek: event.target.value }))} />
-                  </label>
-                </>
-              )}
-              <button type="submit">{availabilityUnitScope === "hours" ? "Add person unavailability" : "Add person unavailability entries"}</button>
-            </form>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Person</th>
-                  <th>Date</th>
-                  <th>Hours</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {personUnavailability.map((entry) => {
-                  const person = persons.find((value) => value.id === entry.person_id)
-                  return (
-                    <tr key={entry.id}>
-                      <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                        {person?.name ?? entry.person_id}
-                      </td>
-                      <td>{entry.date}</td>
-                      <td>{entry.hours}</td>
-                      <td>
-                        <button type="button" onClick={() => deletePersonUnavailability(entry)}>Delete</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </>
-        )}
-
-        {availabilityScope === "group" && (
-          <>
-            <form className="row" onSubmit={createGroupUnavailability}>
-              <label>
-                Group
-                <select value={groupUnavailabilityForm.groupID} onChange={(event) => setGroupUnavailabilityForm((current) => ({ ...current, groupID: event.target.value }))}>
-                  <option value="">Select group</option>
-                  {groups.map((group) => (
-                    <option key={group.id} value={group.id}>{group.name}</option>
-                  ))}
-                </select>
-              </label>
-              {availabilityUnitScope === "hours" ? (
-                <>
-                  <label>
-                    Date
-                    <input type="date" value={groupUnavailabilityForm.date} onChange={(event) => setGroupUnavailabilityForm((current) => ({ ...current, date: event.target.value }))} />
-                  </label>
-                  <label>
-                    Hours
-                    <input type="number" value={groupUnavailabilityForm.hours} onChange={(event) => setGroupUnavailabilityForm((current) => ({ ...current, hours: event.target.value }))} />
-                  </label>
-                </>
-              ) : availabilityUnitScope === "days" ? (
-                <>
-                  <label>
-                    Start date
-                    <input type="date" value={timespanForm.startDate} onChange={(event) => setTimespanForm((current) => ({ ...current, startDate: event.target.value }))} />
-                  </label>
-                  <label>
-                    End date
-                    <input type="date" value={timespanForm.endDate} onChange={(event) => setTimespanForm((current) => ({ ...current, endDate: event.target.value }))} />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label>
-                    Start week
-                    <input type="week" value={timespanForm.startWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, startWeek: event.target.value }))} />
-                  </label>
-                  <label>
-                    End week
-                    <input type="week" value={timespanForm.endWeek} onChange={(event) => setTimespanForm((current) => ({ ...current, endWeek: event.target.value }))} />
-                  </label>
-                </>
-              )}
-              <button type="submit">{availabilityUnitScope === "hours" ? "Add group unavailability" : "Add group unavailability entries"}</button>
-            </form>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Person</th>
-                  <th>Date</th>
-                  <th>Hours</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {selectedGroupPersonUnavailability.map((entry) => {
-                  const person = persons.find((value) => value.id === entry.person_id)
-                  return (
-                    <tr key={entry.id}>
-                      <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                        {person?.name ?? entry.person_id}
-                      </td>
-                      <td>{entry.date}</td>
-                      <td>{entry.hours}</td>
-                      <td>
-                        <button type="button" onClick={() => deletePersonUnavailability(entry)}>Delete</button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2>Report</h2>
-        <form className="grid-form" onSubmit={runReport}>
-          <label>
-            Scope
-            <select
-              value={reportScope}
-              onChange={(event) => {
-                setReportScope(event.target.value as ReportScope)
-                setReportIDs([])
-                setReportResults([])
-              }}
-            >
-              <option value="organisation">organisation</option>
-              <option value="person">person</option>
-              <option value="group">group</option>
-              <option value="project">project</option>
-            </select>
-          </label>
-
-          <label>
-            From
-            <input type="date" value={reportFromDate} onChange={(event) => setReportFromDate(event.target.value)} />
-          </label>
-
-          <label>
-            To
-            <input type="date" value={reportToDate} onChange={(event) => setReportToDate(event.target.value)} />
-          </label>
-
-          <label>
-            Granularity
-            <select value={reportGranularity} onChange={(event) => setReportGranularity(event.target.value as ReportGranularity)}>
-              <option value="day">day</option>
-              <option value="week">week</option>
-              <option value="month">month</option>
-              <option value="year">year</option>
-            </select>
-          </label>
-
-          {reportScope !== "organisation" && (
-            <fieldset>
-              <legend>Scope IDs</legend>
-              <div className="chips">
-                {selectableReportItems.map((entry) => (
-                  <label
-                    key={entry.id}
-                    className={reportScope === "person" && isOverallocatedPersonID(entry.id) ? "person-overallocated" : undefined}
-                  >
-                    <input type="checkbox" checked={reportIDs.includes(entry.id)} onChange={() => toggleReportID(entry.id)} />
-                    {entry.label}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          )}
-
-          <div className="actions">
-            <button type="submit">Run report</button>
-          </div>
-        </form>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Period start</th>
-              {showReportObjectColumn && <th>Object</th>}
-              {showAvailabilityColumns && <th>Availability hours</th>}
-              {showAvailabilityColumns && <th>Load hours</th>}
-              {showProjectColumns && <th>Project load hours</th>}
-              {showProjectColumns && <th>Project estimation hours</th>}
-              {showAvailabilityColumns && <th>Free hours</th>}
-              {showAvailabilityColumns && <th>Utilization %</th>}
-              {showProjectColumns && <th>Project completion %</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {visibleReportRows.map((row) => {
-              const isExpandableRow = isExpandableReportPeriodRow(row)
-              const isExpanded = expandedReportPeriodSet.has(row.periodStart)
-              const isOverallocatedReportPerson = reportScope === "person" && isOverallocatedPersonID(row.objectID)
-              const utilizationForDisplay = reportUtilizationForDisplay(row, reportScope, personByID)
-              const rowClassNames = [
-                row.isDetail ? "report-period-detail-row" : "report-period-summary-row",
-                row.isTotal ? "report-total-row" : "",
-                isOverallocatedReportPerson ? "person-overallocated" : ""
-              ]
-                .filter((className) => className !== "")
-                .join(" ")
-
-              return (
-                <tr key={row.id} className={rowClassNames}>
-                  <td className={row.isDetail ? "report-period-empty-cell" : "report-period-start-cell"}>
-                    {!row.isDetail && (
-                      <div className="report-period-start-content">
-                        <span>{row.periodStart}</span>
-                        {!showReportObjectColumn && isExpandableRow && (
-                          <button
-                            type="button"
-                            className="report-period-toggle-button"
-                            onClick={() => toggleReportPeriodDetails(row.periodStart)}
-                          >
-                            {reportDetailToggleLabel(row, isExpanded)}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  {showReportObjectColumn && (
-                    <td>
-                      {isExpandableRow ? (
-                        <div className="report-period-object-cell">
-                          <span>{row.objectLabel}</span>
-                          <button
-                            type="button"
-                            className="report-period-toggle-button"
-                            onClick={() => toggleReportPeriodDetails(row.periodStart)}
-                          >
-                            {reportDetailToggleLabel(row, isExpanded)}
-                          </button>
-                        </div>
-                      ) : (
-                        row.objectLabel
-                      )}
-                    </td>
-                  )}
-                  {showAvailabilityColumns && <td>{formatHours(row.bucket.availability_hours)}</td>}
-                  {showAvailabilityColumns && <td>{formatHours(row.bucket.load_hours)}</td>}
-                  {showProjectColumns && <td>{formatHours(row.bucket.project_load_hours)}</td>}
-                  {showProjectColumns && <td>{formatHours(row.bucket.project_estimation_hours)}</td>}
-                  {showAvailabilityColumns && <td>{formatHours(row.bucket.free_hours)}</td>}
-                  {showAvailabilityColumns && <td>{formatHours(utilizationForDisplay)}</td>}
-                  {showProjectColumns && <td>{formatHours(row.bucket.project_completion_pct)}</td>}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </section>
+      <ReportPanel
+        reportScope={reportScope}
+        setReportScope={setReportScope}
+        setReportIDs={setReportIDs}
+        setReportResults={setReportResults}
+        onRunReport={runReport}
+        reportFromDate={reportFromDate}
+        setReportFromDate={setReportFromDate}
+        reportToDate={reportToDate}
+        setReportToDate={setReportToDate}
+        reportGranularity={reportGranularity}
+        setReportGranularity={setReportGranularity}
+        selectableReportItems={selectableReportItems}
+        isOverallocatedPersonID={isOverallocatedPersonID}
+        reportIDs={reportIDs}
+        onToggleReportID={toggleReportID}
+        showReportObjectColumn={showReportObjectColumn}
+        showAvailabilityColumns={showAvailabilityColumns}
+        showProjectColumns={showProjectColumns}
+        visibleReportRows={visibleReportRows}
+        expandedReportPeriodSet={expandedReportPeriodSet}
+        personByID={personByID}
+        onToggleReportPeriodDetails={toggleReportPeriodDetails}
+      />
 
       {successMessage && <p className="success" aria-live="polite" role="status">{successMessage}</p>}
       {errorMessage && <p className="error" aria-live="assertive" role="alert">{errorMessage}</p>}

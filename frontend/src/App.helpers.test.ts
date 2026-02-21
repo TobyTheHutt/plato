@@ -28,12 +28,9 @@ import {
   roundHours,
   toErrorMessage,
   toWorkingHours,
-  type Allocation,
-  type Person,
-  type ReportObjectResult,
-  type ReportTableRow,
   workingHoursForAllocationUnit
-} from "./App"
+} from "./app/helpers"
+import type { Allocation, Person, ReportObjectResult, ReportTableRow } from "./app/types"
 
 describe("App helpers", () => {
   it("builds the default allocation form state", () => {
