@@ -678,7 +678,7 @@ describe("App broad flows", () => {
       expect(screen.getByText(/allocation updated|allocation created/i)).toBeInTheDocument()
     })
 
-    const firstAllocationRow = allocationPanel.getAllByRole("row").find((row) => {
+    const firstAllocationRow = allocationPanel.getAllByRole("row").find((row: HTMLElement) => {
       return within(row).queryByRole("button", { name: /^delete$/i })
     })
     expect(firstAllocationRow).not.toBeUndefined()
@@ -1067,7 +1067,9 @@ describe("App broad flows", () => {
 
   it("shows a scoped report error when one object report request fails", async () => {
     const { fetchMock } = buildMockAPI()
-    const baseImpl = fetchMock.getMockImplementation()
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
     fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString()
       const path = new URL(url, "http://localhost").pathname

@@ -23,8 +23,8 @@ import {
   toErrorMessage,
   toWorkingHours
 } from "./app/helpers"
-import { PERSON_UNAVAILABILITY_LOAD_CONCURRENCY, REPORT_MULTI_OBJECT_CONCURRENCY } from "./app/constants"
-import { useApiClient } from "./hooks/useApiClient"
+import { REPORT_MULTI_OBJECT_CONCURRENCY } from "./app/constants"
+import { usePlatoApi } from "./hooks/usePlatoApi"
 import type {
   Allocation,
   AllocationFormState,
@@ -201,23 +201,58 @@ export default function App() {
   const selectAllProjectsCheckboxRef = useRef<HTMLInputElement>(null)
   const selectAllGroupsCheckboxRef = useRef<HTMLInputElement>(null)
   const selectAllAllocationsCheckboxRef = useRef<HTMLInputElement>(null)
+  const feedbackRequestIDRef = useRef(0)
 
-  const { requestJSON, requestNoContent } = useApiClient({ role, selectedOrganisationID, canUseNetwork })
+  const {
+    fetchOrganisations,
+    fetchOrganisationScopedData,
+    createOrganisationRequest,
+    updateOrganisationRequest,
+    deleteOrganisationRequest,
+    createPersonRequest,
+    updatePersonRequest,
+    deletePersonRequest,
+    createProjectRequest,
+    updateProjectRequest,
+    deleteProjectRequest,
+    createGroupRequest,
+    updateGroupRequest,
+    deleteGroupRequest,
+    addGroupMemberRequest,
+    removeGroupMemberRequest,
+    createAllocationRequest,
+    updateAllocationRequest,
+    deleteAllocationRequest,
+    createPersonUnavailabilityEntriesRequest,
+    deletePersonUnavailabilityRequest,
+    runAvailabilityLoadReportRequest
+  } = usePlatoApi({ role, selectedOrganisationID, canUseNetwork })
 
   const withFeedback = useCallback(async (operation: () => Promise<void>, success: string) => {
+    const tracksFeedback = success !== ""
+    const requestID = tracksFeedback ? feedbackRequestIDRef.current + 1 : feedbackRequestIDRef.current
+    if (tracksFeedback) {
+      feedbackRequestIDRef.current = requestID
+    }
     setErrorMessage("")
-    setSuccessMessage("")
+    if (tracksFeedback) {
+      setSuccessMessage("")
+    }
 
     try {
       await operation()
-      setSuccessMessage(success)
+      if (tracksFeedback && feedbackRequestIDRef.current === requestID) {
+        setSuccessMessage(success)
+      }
     } catch (error) {
-      setErrorMessage(toErrorMessage(error))
+      if (!tracksFeedback || feedbackRequestIDRef.current === requestID) {
+        setErrorMessage(toErrorMessage(error))
+      }
     }
   }, [])
 
   const loadOrganisations = useCallback(async () => {
-    const loaded = await requestJSON<Organisation[]>("/api/organisations", { method: "GET" }, "", [])
+    const loaded = await fetchOrganisations()
     setOrganisations(loaded)
     setSelectedOrganisationID((current) => {
       if (loaded.length === 0) {
@@ -228,56 +263,16 @@ export default function App() {
       }
       return loaded[0].id
     })
-  }, [requestJSON])
+  }, [fetchOrganisations])
 
   const loadOrganisationScopedData = useCallback(async () => {
-    if (!selectedOrganisationID) {
-      setPersons([])
-      setProjects([])
-      setGroups([])
-      setAllocations([])
-      setPersonUnavailability([])
-      return
-    }
-
-    const [loadedPersons, loadedProjects, loadedGroups, loadedAllocations] = await Promise.all([
-      requestJSON<Person[]>("/api/persons", { method: "GET" }, undefined, []),
-      requestJSON<Project[]>("/api/projects", { method: "GET" }, undefined, []),
-      requestJSON<Group[]>("/api/groups", { method: "GET" }, undefined, []),
-      requestJSON<Allocation[]>("/api/allocations", { method: "GET" }, undefined, [])
-    ])
-
-    const personEntries: PersonUnavailability[] = []
-    const personLoadErrors: string[] = []
-
-    for (let index = 0; index < loadedPersons.length; index += PERSON_UNAVAILABILITY_LOAD_CONCURRENCY) {
-      const personBatch = loadedPersons.slice(index, index + PERSON_UNAVAILABILITY_LOAD_CONCURRENCY)
-      const settledBatch = await Promise.allSettled(
-        personBatch.map((person) => requestJSON<PersonUnavailability[]>(`/api/persons/${person.id}/unavailability`, { method: "GET" }, undefined, []))
-      )
-
-      settledBatch.forEach((result, resultIndex) => {
-        if (result.status === "fulfilled") {
-          personEntries.push(...result.value)
-          return
-        }
-        const failedPersonID = personBatch[resultIndex]?.id ?? "unknown"
-        personLoadErrors.push(`${failedPersonID}: ${toErrorMessage(result.reason)}`)
-      })
-    }
-
-    if (personLoadErrors.length > 0) {
-      throw new Error(
-        `failed to load unavailability for ${personLoadErrors.length} person(s): ${personLoadErrors.join(", ")}`
-      )
-    }
-
-    setPersons(loadedPersons)
-    setProjects(loadedProjects)
-    setGroups(loadedGroups)
-    setAllocations(loadedAllocations)
-    setPersonUnavailability(personEntries)
-  }, [requestJSON, selectedOrganisationID])
+    const scopedData = await fetchOrganisationScopedData(selectedOrganisationID)
+    setPersons(scopedData.persons)
+    setProjects(scopedData.projects)
+    setGroups(scopedData.groups)
+    setAllocations(scopedData.allocations)
+    setPersonUnavailability(scopedData.personUnavailability)
+  }, [fetchOrganisationScopedData, selectedOrganisationID])
 
   useEffect(() => {
     if (!canUseNetwork) {
@@ -754,48 +749,18 @@ export default function App() {
     return entries
   }
 
-  const createPersonUnavailabilityEntries = async (entries: PersonDateHoursEntry[]) => {
-    const createResults = await Promise.allSettled(
-      entries.map((entry) => requestJSON<PersonUnavailability>(`/api/persons/${entry.personID}/unavailability`, {
-        method: "POST",
-        body: JSON.stringify({ date: entry.date, hours: entry.hours })
-      }))
-    )
-
-    const failedCreates: string[] = []
-    createResults.forEach((result, index) => {
-      if (result.status === "rejected") {
-        const entry = entries[index]
-        failedCreates.push(`${entry.personID} on ${entry.date}: ${toErrorMessage(result.reason)}`)
-      }
-    })
-    if (failedCreates.length > 0) {
-      const createdCount = createResults.length - failedCreates.length
-      throw new Error(
-        `created ${createdCount} of ${createResults.length} unavailability entries. failed ${failedCreates.length}: ${failedCreates.join(", ")}`
-      )
-    }
-  }
-
   const handleOrganisationCreate = (event: FormEvent) => {
     event.preventDefault()
 
     void withFeedback(async () => {
       const workingHours = toWorkingHours(asNumber(organisationForm.workingTimeValue), organisationForm.workingTimeUnit)
 
-      await requestJSON<Organisation>(
-        "/api/organisations",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name: organisationForm.name,
-            hours_per_day: workingHours.day,
-            hours_per_week: workingHours.week,
-            hours_per_year: workingHours.year
-          })
-        },
-        ""
-      )
+      await createOrganisationRequest({
+        name: organisationForm.name,
+        hours_per_day: workingHours.day,
+        hours_per_week: workingHours.week,
+        hours_per_year: workingHours.year
+      })
       await loadOrganisations()
     }, "organisation created")
   }
@@ -808,14 +773,11 @@ export default function App() {
     void withFeedback(async () => {
       const workingHours = toWorkingHours(asNumber(organisationForm.workingTimeValue), organisationForm.workingTimeUnit)
 
-      await requestJSON<Organisation>(`/api/organisations/${selectedOrganisationID}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: organisationForm.name,
-          hours_per_day: workingHours.day,
-          hours_per_week: workingHours.week,
-          hours_per_year: workingHours.year
-        })
+      await updateOrganisationRequest(selectedOrganisationID, {
+        name: organisationForm.name,
+        hours_per_day: workingHours.day,
+        hours_per_week: workingHours.week,
+        hours_per_year: workingHours.year
       })
       await loadOrganisations()
       await loadOrganisationScopedData()
@@ -828,7 +790,7 @@ export default function App() {
     }
 
     void withFeedback(async () => {
-      await requestNoContent(`/api/organisations/${selectedOrganisationID}`, { method: "DELETE" })
+      await deleteOrganisationRequest(selectedOrganisationID)
       await loadOrganisations()
     }, "organisation deleted")
   }
@@ -914,7 +876,11 @@ export default function App() {
 
     void withFeedback(async () => {
       if (personForm.id) {
-        const payload: Record<string, unknown> = {
+        const payload: {
+          name: string
+          employment_pct: number
+          employment_effective_from_month?: string
+        } = {
           name: personForm.name,
           employment_pct: asNumber(personForm.employmentPct)
         }
@@ -922,15 +888,9 @@ export default function App() {
           payload.employment_effective_from_month = personForm.employmentEffectiveFromMonth
         }
 
-        await requestJSON<Person>(`/api/persons/${personForm.id}`, {
-          method: "PUT",
-          body: JSON.stringify(payload)
-        })
+        await updatePersonRequest(personForm.id, payload)
       } else {
-        await requestJSON<Person>("/api/persons", {
-          method: "POST",
-          body: JSON.stringify({ name: personForm.name, employment_pct: asNumber(personForm.employmentPct) })
-        })
+        await createPersonRequest({ name: personForm.name, employment_pct: asNumber(personForm.employmentPct) })
       }
       switchPersonToCreateContext()
       await loadOrganisationScopedData()
@@ -939,7 +899,7 @@ export default function App() {
 
   const deletePerson = (personID: string) => {
     void withFeedback(async () => {
-      await requestNoContent(`/api/persons/${personID}`, { method: "DELETE" })
+      await deletePersonRequest(personID)
       setSelectedPersonIDs((current) => current.filter((id) => id !== personID))
       if (personForm.id === personID) {
         switchPersonToCreateContext()
@@ -960,7 +920,7 @@ export default function App() {
     void withFeedback(async () => {
       await deleteSelectedEntries(
         personIDs,
-        (personID) => requestNoContent(`/api/persons/${personID}`, { method: "DELETE" }),
+        (personID) => deletePersonRequest(personID),
         "persons"
       )
       if (personForm.id && personIDs.includes(personForm.id)) {
@@ -979,24 +939,18 @@ export default function App() {
 
     void withFeedback(async () => {
       if (projectForm.id) {
-        await requestJSON<Project>(`/api/projects/${projectForm.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            name: projectForm.name,
-            start_date: projectForm.startDate,
-            end_date: projectForm.endDate,
-            estimated_effort_hours: asNumber(projectForm.estimatedEffortHours)
-          })
+        await updateProjectRequest(projectForm.id, {
+          name: projectForm.name,
+          start_date: projectForm.startDate,
+          end_date: projectForm.endDate,
+          estimated_effort_hours: asNumber(projectForm.estimatedEffortHours)
         })
       } else {
-        await requestJSON<Project>("/api/projects", {
-          method: "POST",
-          body: JSON.stringify({
-            name: projectForm.name,
-            start_date: projectForm.startDate,
-            end_date: projectForm.endDate,
-            estimated_effort_hours: asNumber(projectForm.estimatedEffortHours)
-          })
+        await createProjectRequest({
+          name: projectForm.name,
+          start_date: projectForm.startDate,
+          end_date: projectForm.endDate,
+          estimated_effort_hours: asNumber(projectForm.estimatedEffortHours)
         })
       }
       switchProjectToCreateContext()
@@ -1006,7 +960,7 @@ export default function App() {
 
   const deleteProject = (projectID: string) => {
     void withFeedback(async () => {
-      await requestNoContent(`/api/projects/${projectID}`, { method: "DELETE" })
+      await deleteProjectRequest(projectID)
       setSelectedProjectIDs((current) => current.filter((id) => id !== projectID))
       if (projectForm.id === projectID) {
         switchProjectToCreateContext()
@@ -1027,7 +981,7 @@ export default function App() {
     void withFeedback(async () => {
       await deleteSelectedEntries(
         projectIDs,
-        (projectID) => requestNoContent(`/api/projects/${projectID}`, { method: "DELETE" }),
+        (projectID) => deleteProjectRequest(projectID),
         "projects"
       )
       if (projectForm.id && projectIDs.includes(projectForm.id)) {
@@ -1043,15 +997,9 @@ export default function App() {
 
     void withFeedback(async () => {
       if (groupForm.id) {
-        await requestJSON<Group>(`/api/groups/${groupForm.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ name: groupForm.name, member_ids: groupForm.memberIDs })
-        })
+        await updateGroupRequest(groupForm.id, { name: groupForm.name, member_ids: groupForm.memberIDs })
       } else {
-        await requestJSON<Group>("/api/groups", {
-          method: "POST",
-          body: JSON.stringify({ name: groupForm.name, member_ids: groupForm.memberIDs })
-        })
+        await createGroupRequest({ name: groupForm.name, member_ids: groupForm.memberIDs })
       }
       switchGroupToCreateContext()
       await loadOrganisationScopedData()
@@ -1060,7 +1008,7 @@ export default function App() {
 
   const deleteGroup = (groupID: string) => {
     void withFeedback(async () => {
-      await requestNoContent(`/api/groups/${groupID}`, { method: "DELETE" })
+      await deleteGroupRequest(groupID)
       setSelectedGroupIDs((current) => current.filter((id) => id !== groupID))
       if (groupForm.id === groupID) {
         switchGroupToCreateContext()
@@ -1084,7 +1032,7 @@ export default function App() {
     void withFeedback(async () => {
       await deleteSelectedEntries(
         groupIDs,
-        (groupID) => requestNoContent(`/api/groups/${groupID}`, { method: "DELETE" }),
+        (groupID) => deleteGroupRequest(groupID),
         "groups"
       )
       if (groupForm.id && groupIDs.includes(groupForm.id)) {
@@ -1105,17 +1053,14 @@ export default function App() {
     }
 
     void withFeedback(async () => {
-      await requestJSON<Group>(`/api/groups/${groupMemberForm.groupID}/members`, {
-        method: "POST",
-        body: JSON.stringify({ person_id: groupMemberForm.personID })
-      })
+      await addGroupMemberRequest(groupMemberForm.groupID, groupMemberForm.personID)
       await loadOrganisationScopedData()
     }, "group member added")
   }
 
   const removeGroupMember = (groupID: string, personID: string) => {
     void withFeedback(async () => {
-      await requestJSON<Group>(`/api/groups/${groupID}/members/${personID}`, { method: "DELETE" })
+      await removeGroupMemberRequest(groupID, personID)
       await loadOrganisationScopedData()
     }, "group member removed")
   }
@@ -1245,48 +1190,47 @@ export default function App() {
             serverStateMutated = true
           }
           await Promise.all(
-            conflictingIDs.map((allocationID) => requestNoContent(`/api/allocations/${allocationID}`, { method: "DELETE" }))
+            conflictingIDs.map((allocationID) => deleteAllocationRequest(allocationID))
           )
         }
 
         if (editingAllocation && normalizeAllocationTargetType(editingAllocation) === "group") {
           deletedEditingGroupAllocationForRollback = editingAllocation
           serverStateMutated = true
-          await requestNoContent(`/api/allocations/${editingAllocation.id}`, { method: "DELETE" })
+          await deleteAllocationRequest(editingAllocation.id)
         }
 
         if (editingAllocation && normalizeAllocationTargetType(editingAllocation) === "person") {
           const editingPersonID = normalizeAllocationTargetID(editingAllocation)
           if (usersToAllocate.includes(editingPersonID)) {
             serverStateMutated = true
-            await requestJSON<Allocation>(`/api/allocations/${editingAllocation.id}`, {
-              method: "PUT",
-              body: JSON.stringify({
-                target_type: "person",
-                target_id: editingPersonID,
-                project_id: allocationForm.projectID,
-                start_date: allocationForm.startDate,
-                end_date: allocationForm.endDate,
-                percent: allocationPercent
-              })
+            await updateAllocationRequest(editingAllocation.id, {
+              target_type: "person",
+              target_id: editingPersonID,
+              project_id: allocationForm.projectID,
+              start_date: allocationForm.startDate,
+              end_date: allocationForm.endDate,
+              percent: allocationPercent
             })
             usersToAllocate = usersToAllocate.filter((personID) => personID !== editingPersonID)
           }
         }
 
-        const createResults = await Promise.allSettled(
-          usersToAllocate.map((personID) => requestJSON<Allocation>("/api/allocations", {
-            method: "POST",
-            body: JSON.stringify({
+        const createResults: PromiseSettledResult<Allocation>[] = []
+        for (let index = 0; index < usersToAllocate.length; index += REPORT_MULTI_OBJECT_CONCURRENCY) {
+          const batchPersonIDs = usersToAllocate.slice(index, index + REPORT_MULTI_OBJECT_CONCURRENCY)
+          const batchResults = await Promise.allSettled(
+            batchPersonIDs.map((personID) => createAllocationRequest({
               target_type: "person",
               target_id: personID,
               project_id: allocationForm.projectID,
               start_date: allocationForm.startDate,
               end_date: allocationForm.endDate,
               percent: allocationPercent
-            })
-          }))
-        )
+            }))
+          )
+          createResults.push(...batchResults)
+        }
 
         const failedCreates: string[] = []
         createResults.forEach((result, index) => {
@@ -1319,16 +1263,13 @@ export default function App() {
           let rollbackRestoreError = ""
           if (rollbackAllocations.length > 0) {
             const restoreResults = await Promise.allSettled(
-              rollbackAllocations.map((allocation) => requestJSON<Allocation>("/api/allocations", {
-                method: "POST",
-                body: JSON.stringify({
-                  target_type: allocation.target_type,
-                  target_id: allocation.target_id,
-                  project_id: allocation.project_id,
-                  start_date: allocation.start_date,
-                  end_date: allocation.end_date,
-                  percent: allocation.percent
-                })
+              rollbackAllocations.map((allocation) => createAllocationRequest({
+                target_type: allocation.target_type,
+                target_id: allocation.target_id,
+                project_id: allocation.project_id,
+                start_date: allocation.start_date,
+                end_date: allocation.end_date,
+                percent: allocation.percent
               }))
             )
             const failedRestores = restoreResults.filter((result) => result.status === "rejected").length
@@ -1355,7 +1296,7 @@ export default function App() {
 
   const deleteAllocation = (allocation: Allocation) => {
     void withFeedback(async () => {
-      await requestNoContent(`/api/allocations/${allocation.id}`, { method: "DELETE" })
+      await deleteAllocationRequest(allocation.id)
       setSelectedAllocationIDs((current) => current.filter((id) => id !== allocation.id))
       if (allocationForm.id === allocation.id) {
         switchAllocationToCreateContext()
@@ -1376,7 +1317,7 @@ export default function App() {
     void withFeedback(async () => {
       await deleteSelectedEntries(
         allocationIDs,
-        (allocationID) => requestNoContent(`/api/allocations/${allocationID}`, { method: "DELETE" }),
+        (allocationID) => deleteAllocationRequest(allocationID),
         "allocations"
       )
       if (allocationForm.id && allocationIDs.includes(allocationForm.id)) {
@@ -1395,7 +1336,7 @@ export default function App() {
 
     void withFeedback(async () => {
       const entries = buildScopedPersonUnavailabilityEntries("organisation")
-      await createPersonUnavailabilityEntries(entries)
+      await createPersonUnavailabilityEntriesRequest(entries)
 
       if (availabilityUnitScope === "hours") {
         setHolidayForm({ date: "", hours: "8" })
@@ -1415,7 +1356,7 @@ export default function App() {
 
     void withFeedback(async () => {
       const entries = buildScopedPersonUnavailabilityEntries("person")
-      await createPersonUnavailabilityEntries(entries)
+      await createPersonUnavailabilityEntriesRequest(entries)
 
       if (availabilityUnitScope !== "hours") {
         setTimespanForm({ startDate: "", endDate: "", startWeek: "", endWeek: "" })
@@ -1427,7 +1368,7 @@ export default function App() {
 
   const deletePersonUnavailability = (entry: PersonUnavailability) => {
     void withFeedback(async () => {
-      await requestNoContent(`/api/persons/${entry.person_id}/unavailability/${entry.id}`, { method: "DELETE" })
+      await deletePersonUnavailabilityRequest(entry.person_id, entry.id)
       await loadOrganisationScopedData()
     }, "person unavailability deleted")
   }
@@ -1440,7 +1381,7 @@ export default function App() {
 
     void withFeedback(async () => {
       const entries = buildScopedPersonUnavailabilityEntries("group")
-      await createPersonUnavailabilityEntries(entries)
+      await createPersonUnavailabilityEntriesRequest(entries)
 
       if (availabilityUnitScope !== "hours") {
         setTimespanForm({ startDate: "", endDate: "", startWeek: "", endWeek: "" })
@@ -1477,15 +1418,12 @@ export default function App() {
           const batchTargetIDs = targetIDs.slice(index, index + REPORT_MULTI_OBJECT_CONCURRENCY)
           const batchResults = await Promise.allSettled(
             batchTargetIDs.map(async (id) => {
-              const payload = await requestJSON<{ buckets?: ReportBucket[] }>("/api/reports/availability-load", {
-                method: "POST",
-                body: JSON.stringify({
-                  scope: reportScope,
-                  ids: [id],
-                  from_date: reportFromDate,
-                  to_date: reportToDate,
-                  granularity: reportGranularity
-                })
+              const payload = await runAvailabilityLoadReportRequest({
+                scope: reportScope,
+                ids: [id],
+                from_date: reportFromDate,
+                to_date: reportToDate,
+                granularity: reportGranularity
               })
               return {
                 objectID: id,
@@ -1514,15 +1452,12 @@ export default function App() {
         return
       }
 
-      const payload = await requestJSON<{ buckets?: ReportBucket[] }>("/api/reports/availability-load", {
-        method: "POST",
-        body: JSON.stringify({
-          scope: reportScope,
-          ids: reportScope === "organisation" ? [] : targetIDs,
-          from_date: reportFromDate,
-          to_date: reportToDate,
-          granularity: reportGranularity
-        })
+      const payload = await runAvailabilityLoadReportRequest({
+        scope: reportScope,
+        ids: reportScope === "organisation" ? [] : targetIDs,
+        from_date: reportFromDate,
+        to_date: reportToDate,
+        granularity: reportGranularity
       })
       const objectID = reportScope === "organisation" ? "organisation" : targetIDs[0] ?? "scope"
       const objectLabel = reportScope === "organisation"
