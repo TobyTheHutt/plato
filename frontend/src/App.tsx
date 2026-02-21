@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { showAvailabilityMetrics, showProjectMetrics, type ReportScope } from "./reportColumns"
 
 export type Role = "org_admin" | "org_user"
@@ -87,6 +87,20 @@ export type ReportBucket = {
   project_completion_pct?: number
 }
 
+export type ReportObjectResult = {
+  objectID: string
+  objectLabel: string
+  buckets: ReportBucket[]
+}
+
+export type ReportTableRow = {
+  id: string
+  periodStart: string
+  objectLabel: string
+  bucket: ReportBucket
+  isTotal: boolean
+}
+
 export type ReportGranularity = "day" | "week" | "month" | "year"
 
 export type WorkingTimeUnit = "day" | "week" | "month" | "year"
@@ -116,6 +130,7 @@ const DAYS_PER_YEAR = DAYS_PER_WEEK * WEEKS_PER_YEAR
 const WEEKS_PER_MONTH = WEEKS_PER_YEAR / MONTHS_PER_YEAR
 const DAYS_PER_MONTH = DAYS_PER_YEAR / MONTHS_PER_YEAR
 const PERSON_UNAVAILABILITY_LOAD_CONCURRENCY = 5
+const REPORT_MULTI_OBJECT_CONCURRENCY = 5
 
 export function newAllocationFormState(): AllocationFormState {
   return {
@@ -467,6 +482,87 @@ export function isPersonOverallocated(person: Person, segments: PersonAllocation
   return false
 }
 
+export function reportBucketTotal(buckets: ReportBucket[]): ReportBucket {
+  const total: ReportBucket = {
+    period_start: "",
+    availability_hours: 0,
+    load_hours: 0,
+    project_load_hours: 0,
+    project_estimation_hours: 0,
+    free_hours: 0,
+    utilization_pct: 0,
+    project_completion_pct: 0
+  }
+
+  for (const bucket of buckets) {
+    total.availability_hours += bucket.availability_hours
+    total.load_hours += bucket.load_hours
+    total.project_load_hours = (total.project_load_hours ?? 0) + (bucket.project_load_hours ?? 0)
+    total.project_estimation_hours = (total.project_estimation_hours ?? 0) + (bucket.project_estimation_hours ?? 0)
+    total.free_hours += bucket.free_hours
+  }
+
+  if (total.availability_hours > 0) {
+    total.utilization_pct = (total.load_hours / total.availability_hours) * 100
+  }
+
+  if ((total.project_estimation_hours ?? 0) > 0) {
+    total.project_completion_pct = ((total.project_load_hours ?? 0) / (total.project_estimation_hours ?? 0)) * 100
+  }
+
+  return total
+}
+
+export function buildReportTableRows(reportResults: ReportObjectResult[]): ReportTableRow[] {
+  if (reportResults.length === 0) {
+    return []
+  }
+
+  const rowsByPeriod = new Map<string, Array<{ objectID: string; objectLabel: string; bucket: ReportBucket }>>()
+  for (const result of reportResults) {
+    for (const bucket of result.buckets) {
+      const existingRows = rowsByPeriod.get(bucket.period_start) ?? []
+      existingRows.push({
+        objectID: result.objectID,
+        objectLabel: result.objectLabel,
+        bucket
+      })
+      rowsByPeriod.set(bucket.period_start, existingRows)
+    }
+  }
+
+  const sortedPeriods = Array.from(rowsByPeriod.keys()).sort((left, right) => left.localeCompare(right))
+  const rows: ReportTableRow[] = []
+
+  for (const periodStart of sortedPeriods) {
+    const periodRows = rowsByPeriod.get(periodStart) ?? []
+    periodRows.sort((left, right) => left.objectLabel.localeCompare(right.objectLabel))
+    for (const row of periodRows) {
+      rows.push({
+        id: `${periodStart}:${row.objectID}`,
+        periodStart,
+        objectLabel: row.objectLabel,
+        bucket: row.bucket,
+        isTotal: false
+      })
+    }
+
+    if (periodRows.length > 1) {
+      const totalBucket = reportBucketTotal(periodRows.map((row) => row.bucket))
+      totalBucket.period_start = periodStart
+      rows.push({
+        id: `${periodStart}:total`,
+        periodStart,
+        objectLabel: "Total",
+        bucket: totalBucket,
+        isTotal: true
+      })
+    }
+  }
+
+  return rows
+}
+
 export default function App() {
   const canUseNetwork = typeof fetch === "function"
 
@@ -479,6 +575,10 @@ export default function App() {
   const [groups, setGroups] = useState<Group[]>([])
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [personUnavailability, setPersonUnavailability] = useState<PersonUnavailability[]>([])
+  const [selectedPersonIDs, setSelectedPersonIDs] = useState<string[]>([])
+  const [selectedProjectIDs, setSelectedProjectIDs] = useState<string[]>([])
+  const [selectedGroupIDs, setSelectedGroupIDs] = useState<string[]>([])
+  const [selectedAllocationIDs, setSelectedAllocationIDs] = useState<string[]>([])
 
   const [errorMessage, setErrorMessage] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
@@ -534,7 +634,11 @@ export default function App() {
   const [reportFromDate, setReportFromDate] = useState("2026-01-01")
   const [reportToDate, setReportToDate] = useState("2026-01-31")
   const [reportGranularity, setReportGranularity] = useState<ReportGranularity>("month")
-  const [reportBuckets, setReportBuckets] = useState<ReportBucket[]>([])
+  const [reportResults, setReportResults] = useState<ReportObjectResult[]>([])
+  const selectAllPersonsCheckboxRef = useRef<HTMLInputElement | null>(null)
+  const selectAllProjectsCheckboxRef = useRef<HTMLInputElement | null>(null)
+  const selectAllGroupsCheckboxRef = useRef<HTMLInputElement | null>(null)
+  const selectAllAllocationsCheckboxRef = useRef<HTMLInputElement | null>(null)
 
   const authHeaders = useCallback(
     (organisationID?: string): HeadersInit => {
@@ -765,6 +869,59 @@ export default function App() {
     }
     return []
   }, [groups, persons, projects, reportScope])
+
+  const reportItemLabelByID = useMemo(
+    () => new Map(selectableReportItems.map((entry) => [entry.id, entry.label])),
+    [selectableReportItems]
+  )
+
+  useEffect(() => {
+    setSelectedPersonIDs([])
+  }, [persons])
+
+  useEffect(() => {
+    setSelectedProjectIDs([])
+  }, [projects])
+
+  useEffect(() => {
+    setSelectedGroupIDs([])
+  }, [groups])
+
+  useEffect(() => {
+    setSelectedAllocationIDs([])
+  }, [allocations])
+
+  useEffect(() => {
+    if (!selectAllPersonsCheckboxRef.current) {
+      return
+    }
+    selectAllPersonsCheckboxRef.current.indeterminate =
+      selectedPersonIDs.length > 0 && selectedPersonIDs.length < persons.length
+  }, [persons.length, selectedPersonIDs.length])
+
+  useEffect(() => {
+    if (!selectAllProjectsCheckboxRef.current) {
+      return
+    }
+    selectAllProjectsCheckboxRef.current.indeterminate =
+      selectedProjectIDs.length > 0 && selectedProjectIDs.length < projects.length
+  }, [projects.length, selectedProjectIDs.length])
+
+  useEffect(() => {
+    if (!selectAllGroupsCheckboxRef.current) {
+      return
+    }
+    selectAllGroupsCheckboxRef.current.indeterminate =
+      selectedGroupIDs.length > 0 && selectedGroupIDs.length < groups.length
+  }, [groups.length, selectedGroupIDs.length])
+
+  useEffect(() => {
+    if (!selectAllAllocationsCheckboxRef.current) {
+      return
+    }
+    selectAllAllocationsCheckboxRef.current.indeterminate =
+      selectedAllocationIDs.length > 0 && selectedAllocationIDs.length < allocations.length
+  }, [allocations.length, selectedAllocationIDs.length])
 
   const allocationTargetOptions = useMemo(() => {
     if (allocationForm.targetType === "person") {
@@ -1169,6 +1326,79 @@ export default function App() {
     }, "organisation deleted")
   }
 
+  const switchPersonToCreateContext = () => {
+    setPersonForm({ id: "", name: "", employmentPct: "100", employmentEffectiveFromMonth: "" })
+  }
+
+  const switchPersonToEditContext = (person: Person) => {
+    setPersonForm({
+      id: person.id,
+      name: person.name,
+      employmentPct: String(person.employment_pct),
+      employmentEffectiveFromMonth: ""
+    })
+  }
+
+  const switchProjectToCreateContext = () => {
+    setProjectForm({
+      id: "",
+      name: "",
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+      estimatedEffortHours: "1000"
+    })
+  }
+
+  const switchProjectToEditContext = (project: Project) => {
+    setProjectForm({
+      id: project.id,
+      name: project.name,
+      startDate: project.start_date,
+      endDate: project.end_date,
+      estimatedEffortHours: String(project.estimated_effort_hours)
+    })
+  }
+
+  const switchGroupToCreateContext = () => {
+    setGroupForm({ id: "", name: "", memberIDs: [] })
+  }
+
+  const switchGroupToEditContext = (group: Group) => {
+    setGroupForm({ id: group.id, name: group.name, memberIDs: group.member_ids })
+  }
+
+  const confirmMultiDelete = (count: number, label: string): boolean => {
+    if (!window.confirm(`Delete ${count} ${label}?`)) {
+      return false
+    }
+    return window.confirm(`Please confirm again to delete ${count} ${label}.`)
+  }
+
+  const deleteSelectedEntries = async (
+    ids: string[],
+    deleteByID: (id: string) => Promise<void>,
+    label: string
+  ) => {
+    const deleteResults: PromiseSettledResult<void>[] = []
+    for (let index = 0; index < ids.length; index += REPORT_MULTI_OBJECT_CONCURRENCY) {
+      const batchIDs = ids.slice(index, index + REPORT_MULTI_OBJECT_CONCURRENCY)
+      const batchResults = await Promise.allSettled(batchIDs.map((id) => deleteByID(id)))
+      deleteResults.push(...batchResults)
+    }
+    const failedDeletes: string[] = []
+    deleteResults.forEach((result, index) => {
+      if (result.status === "rejected") {
+        failedDeletes.push(`${ids[index]}: ${toErrorMessage(result.reason)}`)
+      }
+    })
+    if (failedDeletes.length > 0) {
+      const deletedCount = deleteResults.length - failedDeletes.length
+      throw new Error(
+        `deleted ${deletedCount} of ${deleteResults.length} ${label}. failed ${failedDeletes.length}: ${failedDeletes.join(", ")}`
+      )
+    }
+  }
+
   const savePerson = (event: FormEvent) => {
     event.preventDefault()
     if (!selectedOrganisationID) {
@@ -1195,7 +1425,7 @@ export default function App() {
           body: JSON.stringify({ name: personForm.name, employment_pct: asNumber(personForm.employmentPct) })
         })
       }
-      setPersonForm({ id: "", name: "", employmentPct: "100", employmentEffectiveFromMonth: "" })
+      switchPersonToCreateContext()
       await loadOrganisationScopedData()
     }, personForm.id ? "person updated" : "person created")
   }
@@ -1203,8 +1433,35 @@ export default function App() {
   const deletePerson = (personID: string) => {
     void withFeedback(async () => {
       await requestNoContent(`/api/persons/${personID}`, { method: "DELETE" })
+      setSelectedPersonIDs((current) => current.filter((id) => id !== personID))
+      if (personForm.id === personID) {
+        switchPersonToCreateContext()
+      }
       await loadOrganisationScopedData()
     }, "person deleted")
+  }
+
+  const deleteSelectedPersons = () => {
+    if (selectedPersonIDs.length < 2) {
+      return
+    }
+    const personIDs = [...selectedPersonIDs]
+    if (!confirmMultiDelete(personIDs.length, "persons")) {
+      return
+    }
+
+    void withFeedback(async () => {
+      await deleteSelectedEntries(
+        personIDs,
+        (personID) => requestNoContent(`/api/persons/${personID}`, { method: "DELETE" }),
+        "persons"
+      )
+      if (personForm.id && personIDs.includes(personForm.id)) {
+        switchPersonToCreateContext()
+      }
+      setSelectedPersonIDs([])
+      await loadOrganisationScopedData()
+    }, "selected persons deleted")
   }
 
   const saveProject = (event: FormEvent) => {
@@ -1235,13 +1492,7 @@ export default function App() {
           })
         })
       }
-      setProjectForm({
-        id: "",
-        name: "",
-        startDate: "2026-01-01",
-        endDate: "2026-12-31",
-        estimatedEffortHours: "1000"
-      })
+      switchProjectToCreateContext()
       await loadOrganisationScopedData()
     }, projectForm.id ? "project updated" : "project created")
   }
@@ -1249,8 +1500,35 @@ export default function App() {
   const deleteProject = (projectID: string) => {
     void withFeedback(async () => {
       await requestNoContent(`/api/projects/${projectID}`, { method: "DELETE" })
+      setSelectedProjectIDs((current) => current.filter((id) => id !== projectID))
+      if (projectForm.id === projectID) {
+        switchProjectToCreateContext()
+      }
       await loadOrganisationScopedData()
     }, "project deleted")
+  }
+
+  const deleteSelectedProjects = () => {
+    if (selectedProjectIDs.length < 2) {
+      return
+    }
+    const projectIDs = [...selectedProjectIDs]
+    if (!confirmMultiDelete(projectIDs.length, "projects")) {
+      return
+    }
+
+    void withFeedback(async () => {
+      await deleteSelectedEntries(
+        projectIDs,
+        (projectID) => requestNoContent(`/api/projects/${projectID}`, { method: "DELETE" }),
+        "projects"
+      )
+      if (projectForm.id && projectIDs.includes(projectForm.id)) {
+        switchProjectToCreateContext()
+      }
+      setSelectedProjectIDs([])
+      await loadOrganisationScopedData()
+    }, "selected projects deleted")
   }
 
   const saveGroup = (event: FormEvent) => {
@@ -1268,7 +1546,7 @@ export default function App() {
           body: JSON.stringify({ name: groupForm.name, member_ids: groupForm.memberIDs })
         })
       }
-      setGroupForm({ id: "", name: "", memberIDs: [] })
+      switchGroupToCreateContext()
       await loadOrganisationScopedData()
     }, groupForm.id ? "group updated" : "group created")
   }
@@ -1276,8 +1554,41 @@ export default function App() {
   const deleteGroup = (groupID: string) => {
     void withFeedback(async () => {
       await requestNoContent(`/api/groups/${groupID}`, { method: "DELETE" })
+      setSelectedGroupIDs((current) => current.filter((id) => id !== groupID))
+      if (groupForm.id === groupID) {
+        switchGroupToCreateContext()
+      }
+      if (groupMemberForm.groupID === groupID) {
+        setGroupMemberForm((current) => ({ ...current, groupID: "" }))
+      }
       await loadOrganisationScopedData()
     }, "group deleted")
+  }
+
+  const deleteSelectedGroups = () => {
+    if (selectedGroupIDs.length < 2) {
+      return
+    }
+    const groupIDs = [...selectedGroupIDs]
+    if (!confirmMultiDelete(groupIDs.length, "groups")) {
+      return
+    }
+
+    void withFeedback(async () => {
+      await deleteSelectedEntries(
+        groupIDs,
+        (groupID) => requestNoContent(`/api/groups/${groupID}`, { method: "DELETE" }),
+        "groups"
+      )
+      if (groupForm.id && groupIDs.includes(groupForm.id)) {
+        switchGroupToCreateContext()
+      }
+      if (groupMemberForm.groupID && groupIDs.includes(groupMemberForm.groupID)) {
+        setGroupMemberForm((current) => ({ ...current, groupID: "" }))
+      }
+      setSelectedGroupIDs([])
+      await loadOrganisationScopedData()
+    }, "selected groups deleted")
   }
 
   const addGroupMember = (event: FormEvent) => {
@@ -1538,11 +1849,35 @@ export default function App() {
   const deleteAllocation = (allocation: Allocation) => {
     void withFeedback(async () => {
       await requestNoContent(`/api/allocations/${allocation.id}`, { method: "DELETE" })
+      setSelectedAllocationIDs((current) => current.filter((id) => id !== allocation.id))
       if (allocationForm.id === allocation.id) {
         switchAllocationToCreateContext()
       }
       await loadOrganisationScopedData()
     }, "allocation deleted")
+  }
+
+  const deleteSelectedAllocations = () => {
+    if (selectedAllocationIDs.length < 2) {
+      return
+    }
+    const allocationIDs = [...selectedAllocationIDs]
+    if (!confirmMultiDelete(allocationIDs.length, "allocations")) {
+      return
+    }
+
+    void withFeedback(async () => {
+      await deleteSelectedEntries(
+        allocationIDs,
+        (allocationID) => requestNoContent(`/api/allocations/${allocationID}`, { method: "DELETE" }),
+        "allocations"
+      )
+      if (allocationForm.id && allocationIDs.includes(allocationForm.id)) {
+        switchAllocationToCreateContext()
+      }
+      setSelectedAllocationIDs([])
+      await loadOrganisationScopedData()
+    }, "selected allocations deleted")
   }
 
   const createHoliday = (event: FormEvent) => {
@@ -1621,19 +1956,85 @@ export default function App() {
     event.preventDefault()
 
     void withFeedback(async () => {
+      const selectableIDSet = new Set(selectableReportItems.map((entry) => entry.id))
+      const selectedReportIDs = reportIDs.filter((id) => selectableIDSet.has(id))
+      const targetIDs = reportScope === "organisation"
+        ? []
+        : selectedReportIDs.length > 0
+          ? selectedReportIDs
+          : selectableReportItems.map((entry) => entry.id)
+
+      if (reportScope !== "organisation" && targetIDs.length > 1) {
+        const scopedResults: PromiseSettledResult<ReportObjectResult>[] = []
+        for (let index = 0; index < targetIDs.length; index += REPORT_MULTI_OBJECT_CONCURRENCY) {
+          const batchTargetIDs = targetIDs.slice(index, index + REPORT_MULTI_OBJECT_CONCURRENCY)
+          const batchResults = await Promise.allSettled(
+            batchTargetIDs.map(async (id) => {
+              const payload = await requestJSON<{ buckets?: ReportBucket[] }>("/api/reports/availability-load", {
+                method: "POST",
+                body: JSON.stringify({
+                  scope: reportScope,
+                  ids: [id],
+                  from_date: reportFromDate,
+                  to_date: reportToDate,
+                  granularity: reportGranularity
+                })
+              })
+              return {
+                objectID: id,
+                objectLabel: reportItemLabelByID.get(id) ?? id,
+                buckets: Array.isArray(payload.buckets) ? payload.buckets : []
+              }
+            })
+          )
+          scopedResults.push(...batchResults)
+        }
+
+        const failedResults: string[] = []
+        const resolvedResults: ReportObjectResult[] = []
+        scopedResults.forEach((result, index) => {
+          if (result.status === "rejected") {
+            const failedID = targetIDs[index] ?? "unknown"
+            failedResults.push(`${failedID}: ${toErrorMessage(result.reason)}`)
+            return
+          }
+          resolvedResults.push(result.value)
+        })
+        if (failedResults.length > 0) {
+          throw new Error(`report failed for ${failedResults.length} object(s): ${failedResults.join(", ")}`)
+        }
+        setReportResults(resolvedResults)
+        return
+      }
+
       const payload = await requestJSON<{ buckets?: ReportBucket[] }>("/api/reports/availability-load", {
         method: "POST",
         body: JSON.stringify({
           scope: reportScope,
-          ids: reportScope === "organisation" ? [] : reportIDs,
+          ids: reportScope === "organisation" ? [] : targetIDs,
           from_date: reportFromDate,
           to_date: reportToDate,
           granularity: reportGranularity
         })
       })
-      setReportBuckets(Array.isArray(payload.buckets) ? payload.buckets : [])
+      const objectID = reportScope === "organisation" ? "organisation" : targetIDs[0] ?? "scope"
+      const objectLabel = reportScope === "organisation"
+        ? "Organisation"
+        : reportItemLabelByID.get(objectID) ?? objectID
+      setReportResults([{
+        objectID,
+        objectLabel,
+        buckets: Array.isArray(payload.buckets) ? payload.buckets : []
+      }])
     }, "report calculated")
   }
+
+  const reportTableRows = useMemo(
+    () => buildReportTableRows(reportResults),
+    [reportResults]
+  )
+
+  const showReportObjectColumn = reportScope !== "organisation" && reportResults.length > 1
 
   const showAvailabilityColumns = showAvailabilityMetrics(reportScope)
   const showProjectColumns = showProjectMetrics(reportScope)
@@ -1719,15 +2120,10 @@ export default function App() {
             <select value={personForm.id} onChange={(event) => {
               const person = persons.find((entry) => entry.id === event.target.value)
               if (!person) {
-                setPersonForm({ id: "", name: "", employmentPct: "100", employmentEffectiveFromMonth: "" })
+                switchPersonToCreateContext()
                 return
               }
-              setPersonForm({
-                id: person.id,
-                name: person.name,
-                employmentPct: String(person.employment_pct),
-                employmentEffectiveFromMonth: ""
-              })
+              switchPersonToEditContext(person)
             }}>
               <option value="">New person</option>
               {persons.map((person) => (
@@ -1763,11 +2159,29 @@ export default function App() {
           )}
           <div className="actions">
             <button type="submit">Save person</button>
+            {selectedPersonIDs.length > 1 && (
+              <button type="button" onClick={deleteSelectedPersons}>Delete selected items</button>
+            )}
           </div>
         </form>
         <table>
           <thead>
             <tr>
+              <th>
+                <input
+                  ref={selectAllPersonsCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all persons"
+                  checked={persons.length > 0 && selectedPersonIDs.length === persons.length}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedPersonIDs(persons.map((person) => person.id))
+                      return
+                    }
+                    setSelectedPersonIDs([])
+                  }}
+                />
+              </th>
               <th>Name</th>
               <th>Employment %</th>
               <th>Employment changes</th>
@@ -1777,6 +2191,21 @@ export default function App() {
           <tbody>
             {persons.map((person) => (
               <tr key={person.id} className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select person ${person.name}`}
+                    checked={selectedPersonIDs.includes(person.id)}
+                    onChange={() => {
+                      setSelectedPersonIDs((current) => {
+                        if (current.includes(person.id)) {
+                          return current.filter((id) => id !== person.id)
+                        }
+                        return [...current, person.id]
+                      })
+                    }}
+                  />
+                </td>
                 <td>{person.name}</td>
                 <td>{person.employment_pct}</td>
                 <td>
@@ -1787,7 +2216,10 @@ export default function App() {
                     : "-"}
                 </td>
                 <td>
-                  <button type="button" onClick={() => deletePerson(person.id)}>Delete</button>
+                  <div className="actions">
+                    <button type="button" onClick={() => switchPersonToEditContext(person)}>Edit</button>
+                    <button type="button" onClick={() => deletePerson(person.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1803,22 +2235,10 @@ export default function App() {
             <select value={projectForm.id} onChange={(event) => {
               const project = projects.find((entry) => entry.id === event.target.value)
               if (!project) {
-                setProjectForm({
-                  id: "",
-                  name: "",
-                  startDate: "2026-01-01",
-                  endDate: "2026-12-31",
-                  estimatedEffortHours: "1000"
-                })
+                switchProjectToCreateContext()
                 return
               }
-              setProjectForm({
-                id: project.id,
-                name: project.name,
-                startDate: project.start_date,
-                endDate: project.end_date,
-                estimatedEffortHours: String(project.estimated_effort_hours)
-              })
+              switchProjectToEditContext(project)
             }}>
               <option value="">New project</option>
               {projects.map((project) => (
@@ -1848,11 +2268,29 @@ export default function App() {
           </label>
           <div className="actions">
             <button type="submit">Save project</button>
+            {selectedProjectIDs.length > 1 && (
+              <button type="button" onClick={deleteSelectedProjects}>Delete selected items</button>
+            )}
           </div>
         </form>
         <table>
           <thead>
             <tr>
+              <th>
+                <input
+                  ref={selectAllProjectsCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all projects"
+                  checked={projects.length > 0 && selectedProjectIDs.length === projects.length}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedProjectIDs(projects.map((project) => project.id))
+                      return
+                    }
+                    setSelectedProjectIDs([])
+                  }}
+                />
+              </th>
               <th>Name</th>
               <th>Start</th>
               <th>End</th>
@@ -1863,12 +2301,30 @@ export default function App() {
           <tbody>
             {projects.map((project) => (
               <tr key={project.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select project ${project.name}`}
+                    checked={selectedProjectIDs.includes(project.id)}
+                    onChange={() => {
+                      setSelectedProjectIDs((current) => {
+                        if (current.includes(project.id)) {
+                          return current.filter((id) => id !== project.id)
+                        }
+                        return [...current, project.id]
+                      })
+                    }}
+                  />
+                </td>
                 <td>{project.name}</td>
                 <td>{project.start_date}</td>
                 <td>{project.end_date}</td>
                 <td>{project.estimated_effort_hours}</td>
                 <td>
-                  <button type="button" onClick={() => deleteProject(project.id)}>Delete</button>
+                  <div className="actions">
+                    <button type="button" onClick={() => switchProjectToEditContext(project)}>Edit</button>
+                    <button type="button" onClick={() => deleteProject(project.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1884,10 +2340,10 @@ export default function App() {
             <select value={groupForm.id} onChange={(event) => {
               const group = groups.find((entry) => entry.id === event.target.value)
               if (!group) {
-                setGroupForm({ id: "", name: "", memberIDs: [] })
+                switchGroupToCreateContext()
                 return
               }
-              setGroupForm({ id: group.id, name: group.name, memberIDs: group.member_ids })
+              switchGroupToEditContext(group)
             }}>
               <option value="">New group</option>
               {groups.map((group) => (
@@ -1923,6 +2379,9 @@ export default function App() {
           </fieldset>
           <div className="actions">
             <button type="submit">Save group</button>
+            {selectedGroupIDs.length > 1 && (
+              <button type="button" onClick={deleteSelectedGroups}>Delete selected items</button>
+            )}
           </div>
         </form>
 
@@ -1957,6 +2416,21 @@ export default function App() {
         <table>
           <thead>
             <tr>
+              <th>
+                <input
+                  ref={selectAllGroupsCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all groups"
+                  checked={groups.length > 0 && selectedGroupIDs.length === groups.length}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedGroupIDs(groups.map((group) => group.id))
+                      return
+                    }
+                    setSelectedGroupIDs([])
+                  }}
+                />
+              </th>
               <th>Name</th>
               <th>Members</th>
               <th />
@@ -1965,22 +2439,44 @@ export default function App() {
           <tbody>
             {groups.map((group) => (
               <tr key={group.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select group ${group.name}`}
+                    checked={selectedGroupIDs.includes(group.id)}
+                    onChange={() => {
+                      setSelectedGroupIDs((current) => {
+                        if (current.includes(group.id)) {
+                          return current.filter((id) => id !== group.id)
+                        }
+                        return [...current, group.id]
+                      })
+                    }}
+                  />
+                </td>
                 <td>{group.name}</td>
                 <td>
-                  {group.member_ids.map((memberID) => {
-                    const person = persons.find((entry) => entry.id === memberID)
-                    return (
-                      <div key={memberID} className="member-row">
-                        <span className={isOverallocatedPersonID(memberID) ? "person-overallocated" : undefined}>
-                          {person?.name ?? memberID}
-                        </span>
-                        <button type="button" onClick={() => removeGroupMember(group.id, memberID)}>Remove</button>
-                      </div>
-                    )
-                  })}
+                  <details>
+                    <summary>{group.member_ids.length} member(s)</summary>
+                    {group.member_ids.length === 0 && <p>No members</p>}
+                    {group.member_ids.map((memberID) => {
+                      const person = persons.find((entry) => entry.id === memberID)
+                      return (
+                        <div key={memberID} className="member-row">
+                          <span className={isOverallocatedPersonID(memberID) ? "person-overallocated" : undefined}>
+                            {person?.name ?? memberID}
+                          </span>
+                          <button type="button" onClick={() => removeGroupMember(group.id, memberID)}>Remove</button>
+                        </div>
+                      )
+                    })}
+                  </details>
                 </td>
                 <td>
-                  <button type="button" onClick={() => deleteGroup(group.id)}>Delete</button>
+                  <div className="actions">
+                    <button type="button" onClick={() => switchGroupToEditContext(group)}>Edit</button>
+                    <button type="button" onClick={() => deleteGroup(group.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -2107,12 +2603,30 @@ export default function App() {
           )}
           <div className="actions">
             <button type="submit">Save allocation</button>
+            {selectedAllocationIDs.length > 1 && (
+              <button type="button" onClick={deleteSelectedAllocations}>Delete selected items</button>
+            )}
           </div>
         </form>
 
         <table>
           <thead>
             <tr>
+              <th>
+                <input
+                  ref={selectAllAllocationsCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all allocations"
+                  checked={allocations.length > 0 && selectedAllocationIDs.length === allocations.length}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedAllocationIDs(allocations.map((allocation) => allocation.id))
+                      return
+                    }
+                    setSelectedAllocationIDs([])
+                  }}
+                />
+              </th>
               <th>Target</th>
               <th>Project</th>
               <th>Start</th>
@@ -2133,6 +2647,21 @@ export default function App() {
               const project = projects.find((entry) => entry.id === allocation.project_id)
               return (
                 <tr key={allocation.id} className={hasOverallocatedPerson ? "person-overallocated" : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select allocation ${allocation.id}`}
+                      checked={selectedAllocationIDs.includes(allocation.id)}
+                      onChange={() => {
+                        setSelectedAllocationIDs((current) => {
+                          if (current.includes(allocation.id)) {
+                            return current.filter((id) => id !== allocation.id)
+                          }
+                          return [...current, allocation.id]
+                        })
+                      }}
+                    />
+                  </td>
                   <td>{targetType}: {targetLabel}</td>
                   <td>{project?.name ?? allocation.project_id}</td>
                   <td>{allocation.start_date || "-"}</td>
@@ -2425,6 +2954,7 @@ export default function App() {
               onChange={(event) => {
                 setReportScope(event.target.value as ReportScope)
                 setReportIDs([])
+                setReportResults([])
               }}
             >
               <option value="organisation">organisation</option>
@@ -2480,6 +3010,7 @@ export default function App() {
           <thead>
             <tr>
               <th>Period start</th>
+              {showReportObjectColumn && <th>Object</th>}
               {showAvailabilityColumns && <th>Availability hours</th>}
               {showAvailabilityColumns && <th>Load hours</th>}
               {showProjectColumns && <th>Project load hours</th>}
@@ -2490,16 +3021,17 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {reportBuckets.map((bucket) => (
-              <tr key={bucket.period_start}>
-                <td>{bucket.period_start}</td>
-                {showAvailabilityColumns && <td>{formatHours(bucket.availability_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(bucket.load_hours)}</td>}
-                {showProjectColumns && <td>{formatHours(bucket.project_load_hours)}</td>}
-                {showProjectColumns && <td>{formatHours(bucket.project_estimation_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(bucket.free_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(bucket.utilization_pct)}</td>}
-                {showProjectColumns && <td>{formatHours(bucket.project_completion_pct)}</td>}
+            {reportTableRows.map((row) => (
+              <tr key={row.id} className={row.isTotal ? "report-total-row" : undefined}>
+                <td>{row.periodStart}</td>
+                {showReportObjectColumn && <td>{row.objectLabel}</td>}
+                {showAvailabilityColumns && <td>{formatHours(row.bucket.availability_hours)}</td>}
+                {showAvailabilityColumns && <td>{formatHours(row.bucket.load_hours)}</td>}
+                {showProjectColumns && <td>{formatHours(row.bucket.project_load_hours)}</td>}
+                {showProjectColumns && <td>{formatHours(row.bucket.project_estimation_hours)}</td>}
+                {showAvailabilityColumns && <td>{formatHours(row.bucket.free_hours)}</td>}
+                {showAvailabilityColumns && <td>{formatHours(row.bucket.utilization_pct)}</td>}
+                {showProjectColumns && <td>{formatHours(row.bucket.project_completion_pct)}</td>}
               </tr>
             ))}
           </tbody>

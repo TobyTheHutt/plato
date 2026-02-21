@@ -4,6 +4,7 @@ import {
   buildDayRangeDateHours,
   buildWeekRangeDateHours,
   buildWeekdayEntries,
+  buildReportTableRows,
   dateAfterValue,
   dateRangesOverlap,
   formatDateValue,
@@ -19,11 +20,14 @@ import {
   parseWeekStartValue,
   personDailyHours,
   personEmploymentPctOnDate,
+  reportBucketTotal,
   roundHours,
   toErrorMessage,
   toWorkingHours,
   type Allocation,
-  type Person
+  type Person,
+  type ReportObjectResult,
+  workingHoursForAllocationUnit
 } from "./App"
 
 describe("App helpers", () => {
@@ -69,6 +73,8 @@ describe("App helpers", () => {
     expect(allocationPercentFromInput(33.3333, "fte_pct", "day", 8)).toBe(33.333)
     expect(allocationPercentFromInput(20, "hours", "week", 8)).toBe(50)
     expect(allocationPercentFromInput(10, "hours", "day", 0)).toBe(0)
+    expect(workingHoursForAllocationUnit(8, "day")).toBe(8)
+    expect(workingHoursForAllocationUnit(8, "month")).toBeCloseTo(173.333333, 3)
   })
 
   it("parses and formats date values", () => {
@@ -183,6 +189,7 @@ describe("App helpers", () => {
     expect(normalizeAllocationTargetType(personFallbackAllocation)).toBe("person")
     expect(normalizeAllocationTargetID(groupAllocation)).toBe("group_1")
     expect(normalizeAllocationTargetID(personFallbackAllocation)).toBe("person_1")
+    expect(normalizeAllocationTargetID({ ...personFallbackAllocation, person_id: undefined, target_id: "" })).toBe("")
   })
 
   it("checks date and membership overlap helpers", () => {
@@ -241,5 +248,104 @@ describe("App helpers", () => {
         { startDate: "2026-01-01", endDate: "2026-01-31", percent: 0 }
       ])
     ).toBe(false)
+  })
+
+  it("sums report buckets and derives percentages", () => {
+    const total = reportBucketTotal([
+      {
+        period_start: "2026-01-01",
+        availability_hours: 8,
+        load_hours: 4,
+        project_load_hours: 4,
+        project_estimation_hours: 16,
+        free_hours: 4,
+        utilization_pct: 50,
+        project_completion_pct: 25
+      },
+      {
+        period_start: "2026-01-01",
+        availability_hours: 4,
+        load_hours: 3,
+        project_load_hours: 3,
+        project_estimation_hours: 8,
+        free_hours: 1,
+        utilization_pct: 75,
+        project_completion_pct: 37.5
+      }
+    ])
+
+    expect(total.availability_hours).toBe(12)
+    expect(total.load_hours).toBe(7)
+    expect(total.project_load_hours).toBe(7)
+    expect(total.project_estimation_hours).toBe(24)
+    expect(total.free_hours).toBe(5)
+    expect(total.utilization_pct).toBeCloseTo(58.333, 3)
+    expect(total.project_completion_pct).toBeCloseTo(29.167, 3)
+  })
+
+  it("keeps project totals empty when estimation is missing", () => {
+    const total = reportBucketTotal([{
+      period_start: "2026-01-01",
+      availability_hours: 8,
+      load_hours: 4,
+      free_hours: 4,
+      utilization_pct: 50
+    }])
+
+    expect(total.project_load_hours).toBe(0)
+    expect(total.project_estimation_hours).toBe(0)
+    expect(total.project_completion_pct).toBe(0)
+  })
+
+  it("builds report rows per period with totals for multi-object responses", () => {
+    const reportResults: ReportObjectResult[] = [
+      {
+        objectID: "person_2",
+        objectLabel: "Bob",
+        buckets: [{
+          period_start: "2026-01-01",
+          availability_hours: 8,
+          load_hours: 4,
+          project_load_hours: 0,
+          project_estimation_hours: 0,
+          free_hours: 4,
+          utilization_pct: 50,
+          project_completion_pct: 0
+        }]
+      },
+      {
+        objectID: "person_1",
+        objectLabel: "Alice",
+        buckets: [{
+          period_start: "2026-01-01",
+          availability_hours: 10,
+          load_hours: 2,
+          project_load_hours: 0,
+          project_estimation_hours: 0,
+          free_hours: 8,
+          utilization_pct: 20,
+          project_completion_pct: 0
+        }, {
+          period_start: "2026-02-01",
+          availability_hours: 6,
+          load_hours: 3,
+          project_load_hours: 0,
+          project_estimation_hours: 0,
+          free_hours: 3,
+          utilization_pct: 50,
+          project_completion_pct: 0
+        }]
+      }
+    ]
+
+    const rows = buildReportTableRows(reportResults)
+    expect(rows).toHaveLength(4)
+    expect(rows[0]?.objectLabel).toBe("Alice")
+    expect(rows[1]?.objectLabel).toBe("Bob")
+    expect(rows[2]?.isTotal).toBe(true)
+    expect(rows[2]?.objectLabel).toBe("Total")
+    expect(rows[2]?.bucket.availability_hours).toBe(18)
+    expect(rows[2]?.bucket.load_hours).toBe(6)
+    expect(rows[3]?.periodStart).toBe("2026-02-01")
   })
 })

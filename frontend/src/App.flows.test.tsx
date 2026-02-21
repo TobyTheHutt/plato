@@ -693,6 +693,10 @@ describe("App broad flows", () => {
     await waitFor(() => {
       expect(screen.getByText(/organisation unavailability added/i)).toBeInTheDocument()
     })
+    fireEvent.click(holidaysPanel.getAllByRole("button", { name: /^delete$/i })[0])
+    await waitFor(() => {
+      expect(screen.getByText("person unavailability deleted")).toBeInTheDocument()
+    })
 
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "weeks" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^start week$/i), { target: { value: "2026-W04" } })
@@ -709,6 +713,7 @@ describe("App broad flows", () => {
 
     fireEvent.change(holidaysPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "hours" } })
+    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add person unavailability$/i }))
     fireEvent.change(holidaysPanel.getByLabelText(/^person$/i), { target: { value: "person_1" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^date$/i), { target: { value: "2026-01-14" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^hours$/i), { target: { value: "3" } })
@@ -719,8 +724,13 @@ describe("App broad flows", () => {
     })
 
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "days" } })
+    fireEvent.change(holidaysPanel.getByLabelText(/^person$/i), { target: { value: "person_1" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^start date$/i), { target: { value: "2026-01-15" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^end date$/i), { target: { value: "2026-01-16" } })
+    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add person unavailability entries$/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/person unavailability entries added/i)).toBeInTheDocument()
+    })
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "weeks" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^start week$/i), { target: { value: "2026-W06" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^end week$/i), { target: { value: "2026-W06" } })
@@ -732,6 +742,7 @@ describe("App broad flows", () => {
 
     fireEvent.change(holidaysPanel.getByLabelText(/^scope$/i), { target: { value: "group" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "hours" } })
+    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add group unavailability$/i }))
     fireEvent.change(holidaysPanel.getByLabelText(/^group$/i), { target: { value: "group_1" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^date$/i), { target: { value: "2026-01-20" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^hours$/i), { target: { value: "1" } })
@@ -762,6 +773,353 @@ describe("App broad flows", () => {
     })
 
     expect(store.personUnavailability.length).toBeGreaterThan(0)
+  })
+
+  it("supports row edit actions, expandable groups, and batch delete across list sections", async () => {
+    buildMockAPI({
+      allocations: [
+        {
+          id: "allocation_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        },
+        {
+          id: "allocation_2",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_2",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 15
+        }
+      ]
+    })
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const personsPanel = sectionByHeading(/^persons$/i)
+    const projectsPanel = sectionByHeading(/^projects$/i)
+    const groupsPanel = sectionByHeading(/^groups$/i)
+    const allocationsPanel = sectionByHeading(/^allocations$/i)
+
+    const bobRow = personsPanel.getByRole("cell", { name: "Bob" }).closest("tr")
+    expect(bobRow).not.toBeNull()
+    fireEvent.click(within(bobRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
+    expect((personsPanel.getByLabelText(/^editing person$/i) as HTMLSelectElement).value).toBe("person_2")
+
+    fireEvent.change(projectsPanel.getByLabelText(/^name$/i), { target: { value: "Borealis" } })
+    fireEvent.change(projectsPanel.getByLabelText(/^start date$/i), { target: { value: "2026-02-01" } })
+    fireEvent.change(projectsPanel.getByLabelText(/^end date$/i), { target: { value: "2026-03-31" } })
+    fireEvent.change(projectsPanel.getByLabelText(/^estimated effort hours$/i), { target: { value: "80" } })
+    fireEvent.click(projectsPanel.getByRole("button", { name: /^save project$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("project created")).toBeInTheDocument()
+    })
+
+    fireEvent.change(groupsPanel.getByLabelText(/^name$/i), { target: { value: "Ops" } })
+    fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
+    fireEvent.click(groupsPanel.getByRole("button", { name: /^save group$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("group created")).toBeInTheDocument()
+    })
+
+    const groupsHeading = screen.getByRole("heading", { name: /^groups$/i })
+    const groupsSection = groupsHeading.closest("section")
+    expect(groupsSection).not.toBeNull()
+    const groupDetails = (groupsSection as HTMLElement).querySelector("details")
+    expect(groupDetails).not.toBeNull()
+    expect((groupDetails as HTMLDetailsElement).open).toBe(false)
+
+    fireEvent.click(allocationsPanel.getAllByRole("button", { name: /^edit$/i })[0])
+    await waitFor(() => {
+      expect(allocationsPanel.getByText(/^edit context:/i)).toBeInTheDocument()
+    })
+
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
+    fireEvent.click(allocationsPanel.getByRole("button", { name: /^delete selected items$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("selected allocations deleted")).toBeInTheDocument()
+      expect(allocationsPanel.getByText(/^creation context: creating a new allocation\.$/i)).toBeInTheDocument()
+    })
+
+    fireEvent.click(projectsPanel.getByLabelText(/select project apollo/i))
+    fireEvent.click(projectsPanel.getByLabelText(/select project borealis/i))
+    fireEvent.click(projectsPanel.getByRole("button", { name: /^delete selected items$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("selected projects deleted")).toBeInTheDocument()
+    })
+
+    fireEvent.click(groupsPanel.getByLabelText(/select group team/i))
+    fireEvent.click(groupsPanel.getByLabelText(/select group ops/i))
+    fireEvent.click(groupsPanel.getByRole("button", { name: /^delete selected items$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("selected groups deleted")).toBeInTheDocument()
+    })
+
+    fireEvent.click(personsPanel.getByLabelText(/select person alice/i))
+    fireEvent.click(personsPanel.getByLabelText(/select person bob/i))
+    fireEvent.click(personsPanel.getByRole("button", { name: /^delete selected items$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("selected persons deleted")).toBeInTheDocument()
+    })
+  })
+
+  it("does not batch-delete allocations when confirmation is declined", async () => {
+    buildMockAPI({
+      allocations: [
+        {
+          id: "allocation_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        },
+        {
+          id: "allocation_2",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_2",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 15
+        }
+      ]
+    })
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const allocationsPanel = sectionByHeading(/^allocations$/i)
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
+    fireEvent.click(allocationsPanel.getByRole("button", { name: /^delete selected items$/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByText("selected allocations deleted")).not.toBeInTheDocument()
+      expect(allocationsPanel.getByRole("cell", { name: /person:\s*Alice/i })).toBeInTheDocument()
+    })
+  })
+
+  it("does not create organisation unavailability when no organisation is selected", async () => {
+    const { fetchMock } = buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const authPanel = sectionByHeading(/^auth and tenant$/i)
+    const holidaysPanel = sectionByHeading(/^holidays and unavailability$/i)
+    fireEvent.change(authPanel.getByLabelText(/^active organisation$/i), { target: { value: "" } })
+    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add org unavailability$/i }))
+
+    await waitFor(() => {
+      const postUnavailabilityCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+        return /\/api\/persons\/.+\/unavailability$/.test(String(requestURL))
+          && (requestInit as RequestInit | undefined)?.method === "POST"
+      })
+      expect(postUnavailabilityCalls).toHaveLength(0)
+    })
+  })
+
+  it("covers select-all toggles and edit actions for each list", async () => {
+    buildMockAPI({
+      allocations: [
+        {
+          id: "allocation_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        },
+        {
+          id: "allocation_2",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_2",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 15
+        }
+      ]
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const personsPanel = sectionByHeading(/^persons$/i)
+    const projectsPanel = sectionByHeading(/^projects$/i)
+    const groupsPanel = sectionByHeading(/^groups$/i)
+    const allocationsPanel = sectionByHeading(/^allocations$/i)
+
+    fireEvent.click(personsPanel.getByLabelText(/select all persons/i))
+    fireEvent.click(personsPanel.getByLabelText(/select all persons/i))
+    fireEvent.click(personsPanel.getByLabelText(/select all persons/i))
+    fireEvent.click(personsPanel.getByLabelText(/select person alice/i))
+    fireEvent.click(personsPanel.getByLabelText(/select person alice/i))
+
+    fireEvent.click(projectsPanel.getByLabelText(/select all projects/i))
+    fireEvent.click(projectsPanel.getByLabelText(/select all projects/i))
+    fireEvent.click(projectsPanel.getByLabelText(/select all projects/i))
+    fireEvent.click(projectsPanel.getByLabelText(/select project apollo/i))
+    fireEvent.click(projectsPanel.getByRole("button", { name: /^edit$/i }))
+    expect((projectsPanel.getByLabelText(/^editing project$/i) as HTMLSelectElement).value).toBe("project_1")
+
+    fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
+    fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
+    fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
+    fireEvent.click(groupsPanel.getByLabelText(/select group team/i))
+    fireEvent.click(groupsPanel.getByRole("button", { name: /^edit$/i }))
+    expect((groupsPanel.getByLabelText(/^editing group$/i) as HTMLSelectElement).value).toBe("group_1")
+
+    fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
+    fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
+    fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
+
+    fireEvent.change(groupsPanel.getByLabelText(/^name$/i), { target: { value: "Empty Team" } })
+    fireEvent.click(groupsPanel.getByRole("button", { name: /^save group$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("group updated")).toBeInTheDocument()
+    })
+    fireEvent.change(groupsPanel.getByLabelText(/^editing group$/i), { target: { value: "" } })
+    fireEvent.click(groupsPanel.getByText("0 member(s)"))
+    await waitFor(() => {
+      expect(groupsPanel.getByText("No members")).toBeInTheDocument()
+    })
+
+    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+  })
+
+  it("shows per-object report rows with period totals for multiple IDs", async () => {
+    const { fetchMock } = buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const reportPanel = sectionByHeading(/^report$/i)
+    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("report calculated")).toBeInTheDocument()
+      expect(reportPanel.getByRole("columnheader", { name: /^object$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("cell", { name: "Total" })).toBeInTheDocument()
+      expect(reportPanel.getAllByRole("cell", { name: "2026-01-01" })).toHaveLength(3)
+    })
+
+    const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+      return String(requestURL).endsWith("/api/reports/availability-load")
+        && (requestInit as RequestInit | undefined)?.method === "POST"
+    })
+    expect(reportCalls).toHaveLength(2)
+
+    const sortedReportIDs = reportCalls
+      .map((call) => JSON.parse(String((call[1] as RequestInit).body)).ids?.[0] as string)
+      .sort()
+    expect(sortedReportIDs).toEqual(["person_1", "person_2"])
+  })
+
+  it("shows a scoped report error when one object report request fails", async () => {
+    const { fetchMock } = buildMockAPI()
+    const baseImpl = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+      if (path === "/api/reports/availability-load" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { ids?: string[] }
+        if (Array.isArray(payload.ids) && payload.ids[0] === "person_2") {
+          return jsonResponse({ error: "report failed" }, 500)
+        }
+      }
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const reportPanel = sectionByHeading(/^report$/i)
+    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("report failed for 1 object(s)")
+    })
+  })
+
+  it("runs organisation and project reports and renders project columns", async () => {
+    const { fetchMock } = buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const reportPanel = sectionByHeading(/^report$/i)
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("report calculated")).toBeInTheDocument()
+    })
+
+    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "project" } })
+    fireEvent.click(reportPanel.getByRole("checkbox", { name: /apollo/i }))
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+
+    await waitFor(() => {
+      expect(reportPanel.getByRole("columnheader", { name: /^project load hours$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("columnheader", { name: /^project estimation hours$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("columnheader", { name: /^project completion %$/i })).toBeInTheDocument()
+      expect(reportPanel.getByText("100.00")).toBeInTheDocument()
+      expect(reportPanel.getAllByText("60.00").length).toBeGreaterThanOrEqual(1)
+    })
+
+    const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+      return String(requestURL).endsWith("/api/reports/availability-load")
+        && (requestInit as RequestInit | undefined)?.method === "POST"
+    })
+    expect(reportCalls.length).toBeGreaterThanOrEqual(2)
   })
 
   it("covers request parsing failures and displays errors", async () => {
