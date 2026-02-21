@@ -160,6 +160,52 @@ details > summary {
   background: #f2f6fd;
 }
 
+.report-period-summary-row td {
+  border-top: 2px solid #d3deee;
+  background: #f8fbff;
+}
+
+.report-period-summary-row.report-total-row td {
+  background: #eef3fb;
+}
+
+.report-period-detail-row td {
+  background: #ffffff;
+}
+
+.report-period-start-cell {
+  font-weight: 600;
+  min-width: 8.5rem;
+}
+
+.report-period-empty-cell {
+  visibility: hidden;
+}
+
+.report-period-start-content,
+.report-period-object-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.report-period-toggle-button {
+  background: #e7edf8;
+  color: #1e3a8a;
+  border-color: #c7d6ee;
+  padding: 0.2rem 0.45rem;
+}
+
+.report-period-toggle-button:hover {
+  background: #dce7f8;
+}
+
+.report-period-toggle-button:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
 .success {
   color: #166534;
   font-weight: 600;

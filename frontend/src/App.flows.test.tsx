@@ -493,7 +493,9 @@ describe("App broad flows", () => {
       expect(personsPanel.getByRole("cell", { name: "Cara" })).toBeInTheDocument()
     })
 
-    fireEvent.change(personsPanel.getByLabelText(/^editing person$/i), { target: { value: "person_1" } })
+    const aliceRow = personsPanel.getByRole("cell", { name: "Alice" }).closest("tr")
+    expect(aliceRow).not.toBeNull()
+    fireEvent.click(within(aliceRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
     fireEvent.change(personsPanel.getByLabelText(/^name$/i), { target: { value: "Alice Prime" } })
     fireEvent.change(personsPanel.getByLabelText(/^employment percent$/i), { target: { value: "95" } })
     fireEvent.change(personsPanel.getByLabelText(/^effective from month$/i), { target: { value: "2026-07" } })
@@ -503,7 +505,6 @@ describe("App broad flows", () => {
       expect(screen.getByText("person updated")).toBeInTheDocument()
       expect(personsPanel.getByRole("cell", { name: "Alice Prime" })).toBeInTheDocument()
     })
-    fireEvent.change(personsPanel.getByLabelText(/^editing person$/i), { target: { value: "" } })
 
     const bobRow = personsPanel.getByRole("cell", { name: "Bob" }).closest("tr")
     expect(bobRow).not.toBeNull()
@@ -524,7 +525,9 @@ describe("App broad flows", () => {
       expect(projectsPanel.getByRole("cell", { name: "Borealis" })).toBeInTheDocument()
     })
 
-    fireEvent.change(projectsPanel.getByLabelText(/^editing project$/i), { target: { value: "project_1" } })
+    const apolloRow = projectsPanel.getByRole("cell", { name: "Apollo" }).closest("tr")
+    expect(apolloRow).not.toBeNull()
+    fireEvent.click(within(apolloRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
     fireEvent.change(projectsPanel.getByLabelText(/^name$/i), { target: { value: "Apollo Prime" } })
     fireEvent.click(projectsPanel.getByRole("button", { name: /^save project$/i }))
 
@@ -532,7 +535,6 @@ describe("App broad flows", () => {
       expect(screen.getByText("project updated")).toBeInTheDocument()
       expect(projectsPanel.getByRole("cell", { name: "Apollo Prime" })).toBeInTheDocument()
     })
-    fireEvent.change(projectsPanel.getByLabelText(/^editing project$/i), { target: { value: "" } })
 
     const borealisRow = projectsPanel.getByRole("cell", { name: "Borealis" }).closest("tr")
     expect(borealisRow).not.toBeNull()
@@ -551,7 +553,9 @@ describe("App broad flows", () => {
       expect(groupsPanel.getByRole("cell", { name: "Ops" })).toBeInTheDocument()
     })
 
-    fireEvent.change(groupsPanel.getByLabelText(/^editing group$/i), { target: { value: "group_1" } })
+    const teamRow = groupsPanel.getByRole("cell", { name: "Team" }).closest("tr")
+    expect(teamRow).not.toBeNull()
+    fireEvent.click(within(teamRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
     fireEvent.change(groupsPanel.getByLabelText(/^name$/i), { target: { value: "Team Updated" } })
     fireEvent.click(groupsPanel.getByRole("button", { name: /^save group$/i }))
 
@@ -559,7 +563,6 @@ describe("App broad flows", () => {
       expect(screen.getByText("group updated")).toBeInTheDocument()
       expect(groupsPanel.getByRole("cell", { name: "Team Updated" })).toBeInTheDocument()
     })
-    fireEvent.change(groupsPanel.getByLabelText(/^editing group$/i), { target: { value: "" } })
 
     fireEvent.change(groupsPanel.getByLabelText(/^group$/i), { target: { value: "group_1" } })
     fireEvent.change(groupsPanel.getByLabelText(/^person$/i), { target: { value: "person_3" } })
@@ -816,7 +819,7 @@ describe("App broad flows", () => {
     const bobRow = personsPanel.getByRole("cell", { name: "Bob" }).closest("tr")
     expect(bobRow).not.toBeNull()
     fireEvent.click(within(bobRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
-    expect((personsPanel.getByLabelText(/^editing person$/i) as HTMLSelectElement).value).toBe("person_2")
+    expect(personsPanel.getByText(/^edit context: person: bob$/i)).toBeInTheDocument()
 
     fireEvent.change(projectsPanel.getByLabelText(/^name$/i), { target: { value: "Borealis" } })
     fireEvent.change(projectsPanel.getByLabelText(/^start date$/i), { target: { value: "2026-02-01" } })
@@ -991,14 +994,14 @@ describe("App broad flows", () => {
     fireEvent.click(projectsPanel.getByLabelText(/select all projects/i))
     fireEvent.click(projectsPanel.getByLabelText(/select project apollo/i))
     fireEvent.click(projectsPanel.getByRole("button", { name: /^edit$/i }))
-    expect((projectsPanel.getByLabelText(/^editing project$/i) as HTMLSelectElement).value).toBe("project_1")
+    expect(projectsPanel.getByText(/^edit context: project: apollo$/i)).toBeInTheDocument()
 
     fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
     fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
     fireEvent.click(groupsPanel.getByLabelText(/select all groups/i))
     fireEvent.click(groupsPanel.getByLabelText(/select group team/i))
     fireEvent.click(groupsPanel.getByRole("button", { name: /^edit$/i }))
-    expect((groupsPanel.getByLabelText(/^editing group$/i) as HTMLSelectElement).value).toBe("group_1")
+    expect(groupsPanel.getByText(/^edit context: group: team$/i)).toBeInTheDocument()
 
     fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
     fireEvent.click(groupsPanel.getByRole("checkbox", { name: /alice/i }))
@@ -1009,7 +1012,6 @@ describe("App broad flows", () => {
     await waitFor(() => {
       expect(screen.getByText("group updated")).toBeInTheDocument()
     })
-    fireEvent.change(groupsPanel.getByLabelText(/^editing group$/i), { target: { value: "" } })
     fireEvent.click(groupsPanel.getByText("0 member(s)"))
     await waitFor(() => {
       expect(groupsPanel.getByText("No members")).toBeInTheDocument()
@@ -1022,7 +1024,7 @@ describe("App broad flows", () => {
     fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
   })
 
-  it("shows per-object report rows with period totals for multiple IDs", async () => {
+  it("shows per-period report summaries with expandable multi-object details", async () => {
     const { fetchMock } = buildMockAPI()
 
     render(<App />)
@@ -1038,8 +1040,17 @@ describe("App broad flows", () => {
     await waitFor(() => {
       expect(screen.getByText("report calculated")).toBeInTheDocument()
       expect(reportPanel.getByRole("columnheader", { name: /^object$/i })).toBeInTheDocument()
-      expect(reportPanel.getByRole("cell", { name: "Total" })).toBeInTheDocument()
-      expect(reportPanel.getAllByRole("cell", { name: "2026-01-01" })).toHaveLength(3)
+      expect(reportPanel.getByText("Total")).toBeInTheDocument()
+      expect(reportPanel.getAllByRole("cell", { name: "2026-01-01" })).toHaveLength(1)
+      expect(reportPanel.queryByRole("cell", { name: "Alice (100%)" })).not.toBeInTheDocument()
+    })
+
+    fireEvent.click(reportPanel.getByRole("button", { name: /^show 2 entries$/i }))
+    await waitFor(() => {
+      expect(reportPanel.getByRole("button", { name: /^hide entries$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("cell", { name: "Alice (100%)" })).toBeInTheDocument()
+      expect(reportPanel.getByRole("cell", { name: "Bob (80%)" })).toBeInTheDocument()
+      expect(reportPanel.getAllByRole("cell", { name: "2026-01-01" })).toHaveLength(1)
     })
 
     const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {

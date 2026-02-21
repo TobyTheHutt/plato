@@ -99,6 +99,8 @@ export type ReportTableRow = {
   objectLabel: string
   bucket: ReportBucket
   isTotal: boolean
+  isDetail: boolean
+  detailCount: number
 }
 
 export type ReportGranularity = "day" | "week" | "month" | "year"
@@ -537,30 +539,70 @@ export function buildReportTableRows(reportResults: ReportObjectResult[]): Repor
   for (const periodStart of sortedPeriods) {
     const periodRows = rowsByPeriod.get(periodStart) ?? []
     periodRows.sort((left, right) => left.objectLabel.localeCompare(right.objectLabel))
-    for (const row of periodRows) {
-      rows.push({
-        id: `${periodStart}:${row.objectID}`,
-        periodStart,
-        objectLabel: row.objectLabel,
-        bucket: row.bucket,
-        isTotal: false
-      })
-    }
-
     if (periodRows.length > 1) {
       const totalBucket = reportBucketTotal(periodRows.map((row) => row.bucket))
       totalBucket.period_start = periodStart
       rows.push({
-        id: `${periodStart}:total`,
+        id: `${periodStart}:summary`,
         periodStart,
         objectLabel: "Total",
         bucket: totalBucket,
-        isTotal: true
+        isTotal: true,
+        isDetail: false,
+        detailCount: periodRows.length
       })
+      for (const row of periodRows) {
+        rows.push({
+          id: `${periodStart}:${row.objectID}`,
+          periodStart,
+          objectLabel: row.objectLabel,
+          bucket: row.bucket,
+          isTotal: false,
+          isDetail: true,
+          detailCount: 0
+        })
+      }
+      continue
     }
+
+    const singleRow = periodRows[0]
+    if (!singleRow) {
+      continue
+    }
+
+    rows.push({
+      id: `${periodStart}:summary`,
+      periodStart,
+      objectLabel: singleRow.objectLabel,
+      bucket: singleRow.bucket,
+      isTotal: false,
+      isDetail: false,
+      detailCount: 0
+    })
   }
 
   return rows
+}
+
+export function isExpandableReportPeriodRow(row: ReportTableRow): boolean {
+  return !row.isDetail && row.detailCount > 1
+}
+
+export function isReportRowVisible(row: ReportTableRow, expandedPeriods: ReadonlySet<string>): boolean {
+  if (!row.isDetail) {
+    return true
+  }
+  return expandedPeriods.has(row.periodStart)
+}
+
+export function reportDetailToggleLabel(row: ReportTableRow, isExpanded: boolean): string {
+  if (!isExpandableReportPeriodRow(row)) {
+    return ""
+  }
+  if (isExpanded) {
+    return "Hide entries"
+  }
+  return `Show ${row.detailCount} entries`
 }
 
 export default function App() {
@@ -635,6 +677,7 @@ export default function App() {
   const [reportToDate, setReportToDate] = useState("2026-01-31")
   const [reportGranularity, setReportGranularity] = useState<ReportGranularity>("month")
   const [reportResults, setReportResults] = useState<ReportObjectResult[]>([])
+  const [expandedReportPeriods, setExpandedReportPeriods] = useState<string[]>([])
   const selectAllPersonsCheckboxRef = useRef<HTMLInputElement | null>(null)
   const selectAllProjectsCheckboxRef = useRef<HTMLInputElement | null>(null)
   const selectAllGroupsCheckboxRef = useRef<HTMLInputElement | null>(null)
@@ -934,6 +977,42 @@ export default function App() {
     () => new Map(persons.map((person) => [person.id, person.name])),
     [persons]
   )
+
+  const editingPerson = useMemo(
+    () => persons.find((person) => person.id === personForm.id),
+    [personForm.id, persons]
+  )
+
+  const personFormContextLabel = useMemo(() => {
+    if (!editingPerson) {
+      return "Creation context: creating a new person."
+    }
+    return `Edit context: person: ${editingPerson.name}`
+  }, [editingPerson])
+
+  const editingProject = useMemo(
+    () => projects.find((project) => project.id === projectForm.id),
+    [projectForm.id, projects]
+  )
+
+  const projectFormContextLabel = useMemo(() => {
+    if (!editingProject) {
+      return "Creation context: creating a new project."
+    }
+    return `Edit context: project: ${editingProject.name}`
+  }, [editingProject])
+
+  const editingGroup = useMemo(
+    () => groups.find((group) => group.id === groupForm.id),
+    [groupForm.id, groups]
+  )
+
+  const groupFormContextLabel = useMemo(() => {
+    if (!editingGroup) {
+      return "Creation context: creating a new group."
+    }
+    return `Edit context: group: ${editingGroup.name}`
+  }, [editingGroup])
 
   const resolveTargetPersonIDs = useCallback((targetType: AllocationTargetType, targetID: string): string[] => {
     if (targetType === "person") {
@@ -2034,6 +2113,29 @@ export default function App() {
     [reportResults]
   )
 
+  useEffect(() => {
+    setExpandedReportPeriods([])
+  }, [reportTableRows])
+
+  const toggleReportPeriodDetails = (periodStart: string) => {
+    setExpandedReportPeriods((current) => {
+      if (current.includes(periodStart)) {
+        return current.filter((entry) => entry !== periodStart)
+      }
+      return [...current, periodStart]
+    })
+  }
+
+  const expandedReportPeriodSet = useMemo(
+    () => new Set(expandedReportPeriods),
+    [expandedReportPeriods]
+  )
+
+  const visibleReportRows = useMemo(
+    () => reportTableRows.filter((row) => isReportRowVisible(row, expandedReportPeriodSet)),
+    [expandedReportPeriodSet, reportTableRows]
+  )
+
   const showReportObjectColumn = reportScope !== "organisation" && reportResults.length > 1
 
   const showAvailabilityColumns = showAvailabilityMetrics(reportScope)
@@ -2115,28 +2217,12 @@ export default function App() {
       <section className="panel">
         <h2>Persons</h2>
         <form className="grid-form" onSubmit={savePerson}>
-          <label>
-            Editing person
-            <select value={personForm.id} onChange={(event) => {
-              const person = persons.find((entry) => entry.id === event.target.value)
-              if (!person) {
-                switchPersonToCreateContext()
-                return
-              }
-              switchPersonToEditContext(person)
-            }}>
-              <option value="">New person</option>
-              {persons.map((person) => (
-                <option
-                  key={person.id}
-                  value={person.id}
-                  className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}
-                >
-                  {person.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <p>{personFormContextLabel}</p>
+          {editingPerson && (
+            <div className="actions">
+              <button type="button" onClick={switchPersonToCreateContext}>Switch to creation context</button>
+            </div>
+          )}
           <label>
             Name
             <input value={personForm.name} onChange={(event) => setPersonForm((current) => ({ ...current, name: event.target.value }))} />
@@ -2230,22 +2316,12 @@ export default function App() {
       <section className="panel">
         <h2>Projects</h2>
         <form className="grid-form" onSubmit={saveProject}>
-          <label>
-            Editing project
-            <select value={projectForm.id} onChange={(event) => {
-              const project = projects.find((entry) => entry.id === event.target.value)
-              if (!project) {
-                switchProjectToCreateContext()
-                return
-              }
-              switchProjectToEditContext(project)
-            }}>
-              <option value="">New project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
-          </label>
+          <p>{projectFormContextLabel}</p>
+          {editingProject && (
+            <div className="actions">
+              <button type="button" onClick={switchProjectToCreateContext}>Switch to creation context</button>
+            </div>
+          )}
           <label>
             Name
             <input value={projectForm.name} onChange={(event) => setProjectForm((current) => ({ ...current, name: event.target.value }))} />
@@ -2335,22 +2411,12 @@ export default function App() {
       <section className="panel">
         <h2>Groups</h2>
         <form className="grid-form" onSubmit={saveGroup}>
-          <label>
-            Editing group
-            <select value={groupForm.id} onChange={(event) => {
-              const group = groups.find((entry) => entry.id === event.target.value)
-              if (!group) {
-                switchGroupToCreateContext()
-                return
-              }
-              switchGroupToEditContext(group)
-            }}>
-              <option value="">New group</option>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>{group.name}</option>
-              ))}
-            </select>
-          </label>
+          <p>{groupFormContextLabel}</p>
+          {editingGroup && (
+            <div className="actions">
+              <button type="button" onClick={switchGroupToCreateContext}>Switch to creation context</button>
+            </div>
+          )}
           <label>
             Name
             <input value={groupForm.name} onChange={(event) => setGroupForm((current) => ({ ...current, name: event.target.value }))} />
@@ -3021,19 +3087,62 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {reportTableRows.map((row) => (
-              <tr key={row.id} className={row.isTotal ? "report-total-row" : undefined}>
-                <td>{row.periodStart}</td>
-                {showReportObjectColumn && <td>{row.objectLabel}</td>}
-                {showAvailabilityColumns && <td>{formatHours(row.bucket.availability_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(row.bucket.load_hours)}</td>}
-                {showProjectColumns && <td>{formatHours(row.bucket.project_load_hours)}</td>}
-                {showProjectColumns && <td>{formatHours(row.bucket.project_estimation_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(row.bucket.free_hours)}</td>}
-                {showAvailabilityColumns && <td>{formatHours(row.bucket.utilization_pct)}</td>}
-                {showProjectColumns && <td>{formatHours(row.bucket.project_completion_pct)}</td>}
-              </tr>
-            ))}
+            {visibleReportRows.map((row) => {
+              const isExpandableRow = isExpandableReportPeriodRow(row)
+              const isExpanded = expandedReportPeriodSet.has(row.periodStart)
+              const rowClassNames = [
+                row.isDetail ? "report-period-detail-row" : "report-period-summary-row",
+                row.isTotal ? "report-total-row" : ""
+              ]
+                .filter((className) => className !== "")
+                .join(" ")
+
+              return (
+                <tr key={row.id} className={rowClassNames}>
+                  <td className={row.isDetail ? "report-period-empty-cell" : "report-period-start-cell"}>
+                    {!row.isDetail && (
+                      <div className="report-period-start-content">
+                        <span>{row.periodStart}</span>
+                        {!showReportObjectColumn && isExpandableRow && (
+                          <button
+                            type="button"
+                            className="report-period-toggle-button"
+                            onClick={() => toggleReportPeriodDetails(row.periodStart)}
+                          >
+                            {reportDetailToggleLabel(row, isExpanded)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  {showReportObjectColumn && (
+                    <td>
+                      {isExpandableRow ? (
+                        <div className="report-period-object-cell">
+                          <span>{row.objectLabel}</span>
+                          <button
+                            type="button"
+                            className="report-period-toggle-button"
+                            onClick={() => toggleReportPeriodDetails(row.periodStart)}
+                          >
+                            {reportDetailToggleLabel(row, isExpanded)}
+                          </button>
+                        </div>
+                      ) : (
+                        row.objectLabel
+                      )}
+                    </td>
+                  )}
+                  {showAvailabilityColumns && <td>{formatHours(row.bucket.availability_hours)}</td>}
+                  {showAvailabilityColumns && <td>{formatHours(row.bucket.load_hours)}</td>}
+                  {showProjectColumns && <td>{formatHours(row.bucket.project_load_hours)}</td>}
+                  {showProjectColumns && <td>{formatHours(row.bucket.project_estimation_hours)}</td>}
+                  {showAvailabilityColumns && <td>{formatHours(row.bucket.free_hours)}</td>}
+                  {showAvailabilityColumns && <td>{formatHours(row.bucket.utilization_pct)}</td>}
+                  {showProjectColumns && <td>{formatHours(row.bucket.project_completion_pct)}</td>}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </section>

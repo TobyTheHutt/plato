@@ -198,10 +198,12 @@ describe("App", () => {
     const personPanel = within(personsSection as HTMLElement)
 
     await waitFor(() => {
-      expect(personPanel.getByRole("option", { name: "Alice" })).toBeInTheDocument()
+      expect(personPanel.getByRole("cell", { name: "Alice" })).toBeInTheDocument()
     })
 
-    fireEvent.change(personPanel.getByLabelText(/^editing person$/i), { target: { value: "person_1" } })
+    const personRow = personPanel.getByRole("cell", { name: "Alice" }).closest("tr")
+    expect(personRow).not.toBeNull()
+    fireEvent.click(within(personRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
     fireEvent.change(personPanel.getByLabelText(/^employment percent$/i), { target: { value: "75" } })
     fireEvent.change(personPanel.getByLabelText(/^effective from month$/i), { target: { value: "2026-06" } })
     fireEvent.click(personPanel.getByRole("button", { name: /^save person$/i }))

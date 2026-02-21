@@ -10,7 +10,9 @@ import {
   formatDateValue,
   formatHours,
   hasPersonIntersection,
+  isExpandableReportPeriodRow,
   isPersonOverallocated,
+  isReportRowVisible,
   isSubsetOf,
   isValidMonthValue,
   newAllocationFormState,
@@ -21,6 +23,7 @@ import {
   personDailyHours,
   personEmploymentPctOnDate,
   reportBucketTotal,
+  reportDetailToggleLabel,
   roundHours,
   toErrorMessage,
   toWorkingHours,
@@ -297,7 +300,7 @@ describe("App helpers", () => {
     expect(total.project_completion_pct).toBe(0)
   })
 
-  it("builds report rows per period with totals for multi-object responses", () => {
+  it("builds report rows with period summaries and expandable details", () => {
     const reportResults: ReportObjectResult[] = [
       {
         objectID: "person_2",
@@ -340,12 +343,57 @@ describe("App helpers", () => {
 
     const rows = buildReportTableRows(reportResults)
     expect(rows).toHaveLength(4)
-    expect(rows[0]?.objectLabel).toBe("Alice")
-    expect(rows[1]?.objectLabel).toBe("Bob")
-    expect(rows[2]?.isTotal).toBe(true)
-    expect(rows[2]?.objectLabel).toBe("Total")
-    expect(rows[2]?.bucket.availability_hours).toBe(18)
-    expect(rows[2]?.bucket.load_hours).toBe(6)
+    expect(rows[0]?.periodStart).toBe("2026-01-01")
+    expect(rows[0]?.objectLabel).toBe("Total")
+    expect(rows[0]?.isTotal).toBe(true)
+    expect(rows[0]?.isDetail).toBe(false)
+    expect(rows[0]?.detailCount).toBe(2)
+    expect(rows[0]?.bucket.availability_hours).toBe(18)
+    expect(rows[0]?.bucket.load_hours).toBe(6)
+    expect(rows[1]?.objectLabel).toBe("Alice")
+    expect(rows[1]?.isDetail).toBe(true)
+    expect(rows[2]?.objectLabel).toBe("Bob")
+    expect(rows[2]?.isDetail).toBe(true)
     expect(rows[3]?.periodStart).toBe("2026-02-01")
+    expect(rows[3]?.objectLabel).toBe("Alice")
+    expect(rows[3]?.isDetail).toBe(false)
+    expect(rows[3]?.detailCount).toBe(0)
+  })
+
+  it("handles report row expandability and visibility helpers", () => {
+    const rows = buildReportTableRows([
+      {
+        objectID: "person_1",
+        objectLabel: "Alice",
+        buckets: [{
+          period_start: "2026-01-01",
+          availability_hours: 10,
+          load_hours: 2,
+          free_hours: 8,
+          utilization_pct: 20
+        }]
+      },
+      {
+        objectID: "person_2",
+        objectLabel: "Bob",
+        buckets: [{
+          period_start: "2026-01-01",
+          availability_hours: 8,
+          load_hours: 4,
+          free_hours: 4,
+          utilization_pct: 50
+        }]
+      }
+    ])
+
+    const summaryRow = rows[0]
+    const detailRow = rows[1]
+    expect(summaryRow).toBeDefined()
+    expect(detailRow).toBeDefined()
+    expect(isExpandableReportPeriodRow(summaryRow!)).toBe(true)
+    expect(reportDetailToggleLabel(summaryRow!, false)).toBe("Show 2 entries")
+    expect(reportDetailToggleLabel(summaryRow!, true)).toBe("Hide entries")
+    expect(isReportRowVisible(detailRow!, new Set())).toBe(false)
+    expect(isReportRowVisible(detailRow!, new Set(["2026-01-01"]))).toBe(true)
   })
 })
