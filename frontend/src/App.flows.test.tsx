@@ -22,7 +22,7 @@ afterEach(() => {
 })
 
 describe("App multi-step flows", () => {
-  it("covers management and report actions across sections", async () => {
+  it("covers management actions and validates report inputs after cross-panel updates", async () => {
     const { fetchMock, restore } = buildMockAPI()
 
     render(<App />)
@@ -165,12 +165,11 @@ describe("App multi-step flows", () => {
       expect(screen.getByText("group deleted")).toBeInTheDocument()
     })
 
-    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "group" } })
-    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "project" } })
     fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
 
-    fireEvent.click(reportPanel.getByRole("checkbox", { name: /alice prime/i }))
-    fireEvent.click(reportPanel.getByRole("checkbox", { name: /alice prime/i }))
+    await waitFor(() => {
+      expect(reportPanel.getByRole("checkbox", { name: /alice prime/i })).toBeInTheDocument()
+    })
     fireEvent.click(reportPanel.getByRole("checkbox", { name: /alice prime/i }))
     fireEvent.change(reportPanel.getByLabelText(/^from$/i), { target: { value: "2026-01-02" } })
     fireEvent.change(reportPanel.getByLabelText(/^to$/i), { target: { value: "2026-02-01" } })
@@ -190,7 +189,7 @@ describe("App multi-step flows", () => {
     restore()
   })
 
-  it("covers unavailability and allocation actions with replace and edit paths", async () => {
+  it("covers unavailability actions across organisation, person, and group scopes", async () => {
     const { store } = buildMockAPI({
       groups: [
         { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
@@ -226,48 +225,7 @@ describe("App multi-step flows", () => {
       expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
     })
 
-    const allocationPanel = sectionByHeading(/^allocations$/i)
     const holidaysPanel = sectionByHeading(/^holidays and unavailability$/i)
-
-    const initialGroupRow = allocationPanel.getByText(/group:\s*Team/i).closest("tr")
-    expect(initialGroupRow).not.toBeNull()
-    fireEvent.click(within(initialGroupRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
-    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/allocation updated|allocation created/i)).toBeInTheDocument()
-    })
-
-    fireEvent.change(allocationPanel.getByLabelText(/^target type$/i), { target: { value: "group" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "group_1" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^start date$/i), { target: { value: "2026-02-01" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^end date$/i), { target: { value: "2026-11-30" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^merge strategy$/i), { target: { value: "replace" } })
-    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "25" } })
-    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText(/allocation created/i)).toBeInTheDocument()
-    })
-
-    fireEvent.click(allocationPanel.getAllByRole("button", { name: /^edit$/i })[0])
-    await waitFor(() => {
-      expect(allocationPanel.getByRole("button", { name: /^switch to creation context$/i })).toBeInTheDocument()
-    })
-    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
-    await waitFor(() => {
-      expect(screen.getByText(/allocation updated|allocation created/i)).toBeInTheDocument()
-    })
-
-    const firstAllocationRow = allocationPanel.getAllByRole("row").find((row: HTMLElement) => {
-      return within(row).queryByRole("button", { name: /^delete$/i })
-    })
-    expect(firstAllocationRow).not.toBeUndefined()
-    fireEvent.click(within(firstAllocationRow as HTMLElement).getByRole("button", { name: /^delete$/i }))
-    await waitFor(() => {
-      expect(screen.getByText("allocation deleted")).toBeInTheDocument()
-    })
 
     fireEvent.change(holidaysPanel.getByLabelText(/^units$/i), { target: { value: "hours" } })
     fireEvent.change(holidaysPanel.getByLabelText(/^organisation$/i), { target: { value: "org_1" } })
@@ -360,7 +318,7 @@ describe("App multi-step flows", () => {
     expect(store.personUnavailability.length).toBeGreaterThan(0)
   })
 
-  it("supports row edit actions, expandable groups, and batch delete across list sections", async () => {
+  it("supports cross-list create and batch delete journeys for persons, projects, and groups", async () => {
     buildMockAPI({
       allocations: [
         {
@@ -396,7 +354,6 @@ describe("App multi-step flows", () => {
     const personsPanel = sectionByHeading(/^persons$/i)
     const projectsPanel = sectionByHeading(/^projects$/i)
     const groupsPanel = sectionByHeading(/^groups$/i)
-    const allocationsPanel = sectionByHeading(/^allocations$/i)
 
     const bobRow = personsPanel.getByRole("cell", { name: "Bob" }).closest("tr")
     expect(bobRow).not.toBeNull()
@@ -426,19 +383,6 @@ describe("App multi-step flows", () => {
     expect(groupDetails).not.toBeNull()
     expect((groupDetails as HTMLDetailsElement).open).toBe(false)
 
-    fireEvent.click(allocationsPanel.getAllByRole("button", { name: /^edit$/i })[0])
-    await waitFor(() => {
-      expect(allocationsPanel.getByText(/^edit context:/i)).toBeInTheDocument()
-    })
-
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
-    fireEvent.click(allocationsPanel.getByRole("button", { name: /^delete selected items$/i }))
-    await waitFor(() => {
-      expect(screen.getByText("selected allocations deleted")).toBeInTheDocument()
-      expect(allocationsPanel.getByText(/^creation context: creating a new allocation\.$/i)).toBeInTheDocument()
-    })
-
     fireEvent.click(projectsPanel.getByLabelText(/select project apollo/i))
     fireEvent.click(projectsPanel.getByLabelText(/select project borealis/i))
     fireEvent.click(projectsPanel.getByRole("button", { name: /^delete selected items$/i }))
@@ -461,7 +405,7 @@ describe("App multi-step flows", () => {
     })
   })
 
-  it("covers select-all toggles and edit actions for each list", async () => {
+  it("covers select-all toggles across list sections and group empty-state details", async () => {
     buildMockAPI({
       allocations: [
         {
@@ -496,7 +440,6 @@ describe("App multi-step flows", () => {
     const personsPanel = sectionByHeading(/^persons$/i)
     const projectsPanel = sectionByHeading(/^projects$/i)
     const groupsPanel = sectionByHeading(/^groups$/i)
-    const allocationsPanel = sectionByHeading(/^allocations$/i)
 
     fireEvent.click(personsPanel.getByLabelText(/select all persons/i))
     fireEvent.click(personsPanel.getByLabelText(/select all persons/i))
@@ -531,12 +474,6 @@ describe("App multi-step flows", () => {
     await waitFor(() => {
       expect(groupsPanel.getByText("No members")).toBeInTheDocument()
     })
-
-    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select all allocations/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
   })
 
   it("shows per-period report summaries with expandable multi-object details", async () => {
@@ -584,36 +521,5 @@ describe("App multi-step flows", () => {
       .map((call) => JSON.parse(String((call[1] as RequestInit).body)).ids?.[0] as string)
       .sort()
     expect(sortedReportIDs).toEqual(["person_1", "person_2"])
-  })
-
-  it("runs report workflow across organisation and project scopes", async () => {
-    const { fetchMock } = buildMockAPI()
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
-    })
-
-    const reportPanel = sectionByHeading(/^report$/i)
-    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
-    await waitFor(() => {
-      expect(screen.getByText("report calculated")).toBeInTheDocument()
-    })
-
-    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "project" } })
-    fireEvent.click(reportPanel.getByRole("checkbox", { name: /apollo/i }))
-    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByText("report calculated")).toBeInTheDocument()
-      expect(reportPanel.getByRole("cell", { name: "Apollo" })).toBeInTheDocument()
-    })
-
-    const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
-      return String(requestURL).endsWith("/api/reports/availability-load")
-        && (requestInit as RequestInit | undefined)?.method === "POST"
-    })
-    expect(reportCalls).toHaveLength(2)
   })
 })
