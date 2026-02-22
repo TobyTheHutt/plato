@@ -17,15 +17,15 @@ lint-scripts:
 
 # Frontend tests with coverage thresholds from Vitest config
 test-frontend:
-	cd frontend && npm test -- --coverage
+	cd frontend && CI=1 NO_COLOR=1 npm --silent test -- --coverage
 
 # Backend tests with coverage reporting
 test-backend:
-	cd backend && go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out
+	cd backend && go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out | tail -n 1
 
 # TypeScript type checking
 typecheck:
-	cd frontend && npx tsc --noEmit
+	cd frontend && npx tsc --noEmit --pretty false
 
 # Optional future targets once tooling is configured:
 # lint-frontend:
