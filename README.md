@@ -145,11 +145,21 @@ Select `Demo Org` in the frontend tenant selector.
 
 ## Testing
 
-Coverage thresholds are enforced for frontend tests:
+Coverage thresholds are enforced for frontend and backend tests.
+
+Frontend thresholds:
 - Lines: 90%
 - Statements: 90%
 - Functions: 90%
 - Branches: 80%
+
+Backend thresholds:
+- Statements: 90%
+
+Backend coverage workflow:
+- `make test-backend` runs `go test` with `coverage.out` generation and fails if total statement coverage is below the backend threshold
+- Override the threshold locally with `make test-backend BACKEND_COVERAGE_THRESHOLD=92`
+- `make test-backend-report` writes `backend/coverage.html` for detailed local inspection
 
 Frontend lint quality gates are also enforced for maintainability:
 - Import hygiene via `eslint-plugin-import`, including unresolved import checks and circular dependency detection
@@ -184,7 +194,8 @@ Available targets:
 - `make scan-vulnerabilities` runs `govulncheck` with severity policy and accepted-risk overrides
 - `make typecheck` runs TypeScript type checking with `npm run typecheck`
 - `make test-frontend` runs Vitest with coverage
-- `make test-backend` runs Go tests with coverage reporting
+- `make test-backend` runs Go tests with coverage threshold enforcement
+- `make test-backend-report` writes `backend/coverage.html` from `backend/coverage.out`
 
 If you want to run checks directly without `make`:
 
@@ -196,8 +207,8 @@ go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 cd backend
 golangci-lint run -c ../.golangci.yml ./...
 ../scripts/check_vuln.sh
-go test ./... -coverprofile=coverage.out
-go tool cover -func=coverage.out
+../scripts/check_backend_coverage.sh 90
+go tool cover -html=coverage.out -o coverage.html
 ```
 
 Frontend:

@@ -1,4 +1,6 @@
-.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend typecheck
+BACKEND_COVERAGE_THRESHOLD ?= 90
+
+.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend test-backend-report typecheck
 
 # Run all quality checks
 check: lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
@@ -31,9 +33,13 @@ scan-vulnerabilities:
 test-frontend:
 	cd frontend && CI=1 NO_COLOR=1 npm --silent test -- --coverage
 
-# Backend tests with coverage reporting
+# Backend tests with coverage threshold enforcement
 test-backend:
-	cd backend && go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out | tail -n 1
+	bash ./scripts/check_backend_coverage.sh "$(BACKEND_COVERAGE_THRESHOLD)"
+
+# Generate backend coverage HTML report in backend/coverage.html
+test-backend-report: test-backend
+	cd backend && go tool cover -html=coverage.out -o coverage.html && echo "coverage report written to backend/coverage.html"
 
 # TypeScript type checking
 typecheck:
