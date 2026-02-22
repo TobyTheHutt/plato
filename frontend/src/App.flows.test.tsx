@@ -1,73 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, vi } from "vitest"
-import App from "./App"
-
-type Organisation = {
-  id: string
-  name: string
-  hours_per_day: number
-  hours_per_week: number
-  hours_per_year: number
-}
-
-type EmploymentChange = {
-  effective_month: string
-  employment_pct: number
-}
-
-type Person = {
-  id: string
-  organisation_id: string
-  name: string
-  employment_pct: number
-  employment_changes?: EmploymentChange[]
-}
-
-type Project = {
-  id: string
-  organisation_id: string
-  name: string
-  start_date: string
-  end_date: string
-  estimated_effort_hours: number
-}
-
-type Group = {
-  id: string
-  organisation_id: string
-  name: string
-  member_ids: string[]
-}
-
-type Allocation = {
-  id: string
-  organisation_id: string
-  target_type: "person" | "group"
-  target_id: string
-  project_id: string
-  start_date: string
-  end_date: string
-  percent: number
-}
-
-type PersonUnavailability = {
-  id: string
-  organisation_id: string
-  person_id: string
-  date: string
-  hours: number
-}
-
-type ReportBucket = {
-  period_start: string
-  availability_hours: number
-  load_hours: number
-  project_load_hours?: number
-  project_estimation_hours?: number
-  free_hours: number
-  utilization_pct: number
-  project_completion_pct?: number
-}
+import App, {
+  type Allocation,
+  type Group,
+  type Organisation,
+  type Person,
+  type PersonUnavailability,
+  type Project,
+  type ReportBucket
+} from "./App"
 
 type MockStore = {
   organisations: Organisation[]

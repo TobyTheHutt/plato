@@ -143,6 +143,8 @@ cd frontend
 npm test -- --coverage
 ```
 
+When writing frontend tests, import shared domain types from `frontend/src/App.tsx` exports instead of redefining local copies.
+
 ## License
 
 AGPL-3.0-or-later. See `LICENSE`.
