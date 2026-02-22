@@ -74,6 +74,25 @@ The backend uses clear boundaries so integrations can change over time:
 /scripts    Development helpers
 ```
 
+### Backend domain layout
+
+Service logic is organized by domain in `backend/internal/service`:
+- `service_organisations.go`
+- `service_persons.go`
+- `service_projects.go`
+- `service_groups.go`
+- `service_allocations.go`
+- `service_calendar.go`
+- `service_reports.go`
+
+Router logic is organized by domain in `backend/internal/httpapi`:
+- `routes_organisations.go`
+- `routes_persons.go`
+- `routes_projects.go`
+- `routes_groups.go`
+- `routes_allocations.go`
+- `routes_reports.go`
+
 ## Development
 
 ### Prerequisites

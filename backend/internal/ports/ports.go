@@ -76,6 +76,10 @@ type Repository interface {
 	DeleteGroupUnavailability(ctx context.Context, organisationID, id string) error
 
 	ListPersonUnavailability(ctx context.Context, organisationID string) ([]domain.PersonUnavailability, error)
+	ListPersonUnavailabilityByPerson(ctx context.Context, organisationID, personID string) ([]domain.PersonUnavailability, error)
+	ListPersonUnavailabilityByPersonAndDate(ctx context.Context, organisationID, personID, date string) ([]domain.PersonUnavailability, error)
 	CreatePersonUnavailability(ctx context.Context, entry domain.PersonUnavailability) (domain.PersonUnavailability, error)
+	CreatePersonUnavailabilityWithDailyLimit(ctx context.Context, entry domain.PersonUnavailability, maxHours float64) (domain.PersonUnavailability, error)
 	DeletePersonUnavailability(ctx context.Context, organisationID, id string) error
+	DeletePersonUnavailabilityByPerson(ctx context.Context, organisationID, personID, id string) error
 }

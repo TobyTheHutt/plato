@@ -203,6 +203,13 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second person unavailability: %v", err)
 	}
+	personUnavailabilityScoped, err := repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA2.ID, Date: "2026-01-05", Hours: 1}, 8)
+	if err != nil {
+		t.Fatalf("create scoped person unavailability: %v", err)
+	}
+	if _, err := repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA2.ID, Date: "2026-01-05", Hours: 8}, 8); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("expected scoped person unavailability daily cap validation failure, got %v", err)
+	}
 	allocations, err := repo.ListAllocations(ctx, orgA.ID)
 	if err != nil {
 		t.Fatalf("list allocations: %v", err)
@@ -232,8 +239,22 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list person unavailability: %v", err)
 	}
-	if len(personUnavailableEntries) != 2 {
-		t.Fatalf("expected 2 person unavailability entries, got %d", len(personUnavailableEntries))
+	if len(personUnavailableEntries) != 3 {
+		t.Fatalf("expected 3 person unavailability entries, got %d", len(personUnavailableEntries))
+	}
+	personUnavailableForA1, err := repo.ListPersonUnavailabilityByPerson(ctx, orgA.ID, personA1.ID)
+	if err != nil {
+		t.Fatalf("list person unavailability by person: %v", err)
+	}
+	if len(personUnavailableForA1) != 2 {
+		t.Fatalf("expected 2 person unavailability entries for person A1, got %d", len(personUnavailableForA1))
+	}
+	personUnavailableForA1Date, err := repo.ListPersonUnavailabilityByPersonAndDate(ctx, orgA.ID, personA1.ID, "2026-01-04")
+	if err != nil {
+		t.Fatalf("list person unavailability by person and date: %v", err)
+	}
+	if len(personUnavailableForA1Date) != 2 {
+		t.Fatalf("expected 2 person unavailability entries for person A1 on date, got %d", len(personUnavailableForA1Date))
 	}
 
 	if err := repo.DeleteAllocation(ctx, orgA.ID, allocationA2.ID); err != nil {
@@ -241,6 +262,12 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	}
 	if err := repo.DeleteGroupUnavailability(ctx, orgA.ID, groupUnavailability.ID); err != nil {
 		t.Fatalf("delete group unavailability: %v", err)
+	}
+	if err := repo.DeletePersonUnavailabilityByPerson(ctx, orgA.ID, personA1.ID, personUnavailabilityScoped.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected person-scoped delete forbidden for mismatched person, got %v", err)
+	}
+	if err := repo.DeletePersonUnavailabilityByPerson(ctx, orgA.ID, personA2.ID, personUnavailabilityScoped.ID); err != nil {
+		t.Fatalf("delete scoped person unavailability: %v", err)
 	}
 	if err := repo.DeletePersonUnavailability(ctx, orgA.ID, personUnavailability.ID); err != nil {
 		t.Fatalf("delete person unavailability: %v", err)
@@ -347,6 +374,9 @@ func TestFileRepositoryNotFoundCases(t *testing.T) {
 	}
 	if err := repo.DeletePersonUnavailability(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person unavailability delete, got %v", err)
+	}
+	if err := repo.DeletePersonUnavailabilityByPerson(ctx, "org", "person", "missing"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected not found for person-scoped person unavailability delete, got %v", err)
 	}
 }
 

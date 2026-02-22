@@ -870,9 +870,64 @@ func (r *FileRepository) ListPersonUnavailability(_ context.Context, organisatio
 	return result, nil
 }
 
+func (r *FileRepository) ListPersonUnavailabilityByPerson(_ context.Context, organisationID, personID string) ([]domain.PersonUnavailability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.PersonUnavailability, 0)
+	for _, entry := range r.state.PersonUnavailability {
+		if entry.OrganisationID == organisationID && entry.PersonID == personID {
+			result = append(result, entry)
+		}
+	}
+	sortedPersonUnavailability(result)
+	return result, nil
+}
+
+func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(_ context.Context, organisationID, personID, date string) ([]domain.PersonUnavailability, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.PersonUnavailability, 0)
+	for _, entry := range r.state.PersonUnavailability {
+		if entry.OrganisationID == organisationID && entry.PersonID == personID && entry.Date == date {
+			result = append(result, entry)
+		}
+	}
+	sortedPersonUnavailability(result)
+	return result, nil
+}
+
 func (r *FileRepository) CreatePersonUnavailability(_ context.Context, entry domain.PersonUnavailability) (domain.PersonUnavailability, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	now := time.Now().UTC()
+	entry.ID = r.nextIDLocked("person_unavailability")
+	entry.CreatedAt = now
+	entry.UpdatedAt = now
+	r.state.PersonUnavailability[entry.ID] = entry
+
+	if err := r.persistLocked(); err != nil {
+		return domain.PersonUnavailability{}, err
+	}
+
+	return entry, nil
+}
+
+func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(_ context.Context, entry domain.PersonUnavailability, maxHours float64) (domain.PersonUnavailability, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existingTotal := 0.0
+	for _, existing := range r.state.PersonUnavailability {
+		if existing.OrganisationID == entry.OrganisationID && existing.PersonID == entry.PersonID && existing.Date == entry.Date {
+			existingTotal += existing.Hours
+		}
+	}
+	if existingTotal+entry.Hours > maxHours+1e-9 {
+		return domain.PersonUnavailability{}, domain.ErrValidation
+	}
 
 	now := time.Now().UTC()
 	entry.ID = r.nextIDLocked("person_unavailability")
@@ -894,6 +949,21 @@ func (r *FileRepository) DeletePersonUnavailability(_ context.Context, organisat
 	entry, ok := r.state.PersonUnavailability[id]
 	if !ok || entry.OrganisationID != organisationID {
 		return domain.ErrNotFound
+	}
+	delete(r.state.PersonUnavailability, id)
+	return r.persistLocked()
+}
+
+func (r *FileRepository) DeletePersonUnavailabilityByPerson(_ context.Context, organisationID, personID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.state.PersonUnavailability[id]
+	if !ok || entry.OrganisationID != organisationID {
+		return domain.ErrNotFound
+	}
+	if entry.PersonID != personID {
+		return domain.ErrForbidden
 	}
 	delete(r.state.PersonUnavailability, id)
 	return r.persistLocked()

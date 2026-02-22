@@ -339,6 +339,12 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+group.ID+"/unavailability/"+groupUnavailable.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete group unavailability success, got %d", code)
 	}
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personA+"/unavailability/missing", nil, adminHeaders).Code; code != http.StatusNotFound {
+		t.Fatalf("expected delete person unavailability with missing entry to be not found, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personB+"/unavailability/"+personUnavailable.ID, nil, adminHeaders).Code; code != http.StatusForbidden {
+		t.Fatalf("expected delete person unavailability with mismatched person path to be forbidden, got %d", code)
+	}
 	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personA+"/unavailability/"+personUnavailable.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete person unavailability success, got %d", code)
 	}
@@ -426,7 +432,7 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		{http.MethodPatch, "/api/projects/" + projectID, http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/groups", http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/groups/" + group.ID, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/groups/" + group.ID + "/members", http.StatusNotFound},
+		{http.MethodGet, "/api/groups/" + group.ID + "/members", http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability", http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/allocations/" + allocation.ID, http.StatusMethodNotAllowed},
@@ -547,6 +553,7 @@ func TestResourceNotFoundAndTenantRequiredResponses(t *testing.T) {
 		{http.MethodGet, "/api/allocations/missing", nil},
 		{http.MethodPut, "/api/allocations/missing", personAllocationPayload(personID, projectID, 10)},
 		{http.MethodDelete, "/api/allocations/missing", nil},
+		{http.MethodDelete, "/api/persons/" + personID + "/unavailability/missing", nil},
 	}
 
 	for _, hit := range missingHits {
@@ -577,6 +584,14 @@ type errorRepository struct {
 
 func (e errorRepository) ListOrganisations(_ context.Context) ([]domain.Organisation, error) {
 	return nil, errors.New("forced repository failure")
+}
+
+type personUnavailabilityDeleteErrorRepository struct {
+	ports.Repository
+}
+
+func (e personUnavailabilityDeleteErrorRepository) DeletePersonUnavailabilityByPerson(_ context.Context, _, _, _ string) error {
+	return errors.New("forced person unavailability delete failure")
 }
 
 func TestPathHelpers(t *testing.T) {
@@ -639,6 +654,28 @@ func TestOrganisationAndReportExtraBranches(t *testing.T) {
 	}, headers)
 	if reportBadScope.Code != http.StatusBadRequest {
 		t.Fatalf("expected report bad scope validation status 400, got %d body=%s", reportBadScope.Code, reportBadScope.Body.String())
+	}
+}
+
+func TestDeletePersonUnavailabilityByPersonError(t *testing.T) {
+	repo, err := persistence.NewFileRepository(filepath.Join(t.TempDir(), "person-unavailability-list-error-data.json"))
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	svc, err := service.New(personUnavailabilityDeleteErrorRepository{Repository: repo}, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+	router := NewRouterWithDependencies(auth.NewDevAuthProvider(), svc)
+
+	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
+	personID := createPerson(t, router, orgID, "List Error Person", 100)
+	headers := map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID}
+
+	response := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personID+"/unavailability/entry-1", nil, headers)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500 for person-scoped unavailability delete failure, got %d body=%s", response.Code, response.Body.String())
 	}
 }
 
