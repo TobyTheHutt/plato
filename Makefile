@@ -21,7 +21,7 @@ lint-backend:
 
 # Go dependency vulnerability scan with reachability-aware policy
 scan-vulnerabilities:
-	./scripts/check_vuln.sh
+	bash ./scripts/check_vuln.sh
 
 # Frontend tests with coverage thresholds from Vitest config
 test-frontend:
