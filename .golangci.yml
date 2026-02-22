@@ -1,0 +1,126 @@
+run:
+  timeout: 5m
+  tests: true
+  issues-exit-code: 1
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - nilerr
+    - nilnil
+    - bodyclose
+    - copyloopvar
+    - rowserrcheck
+    - sqlclosecheck
+    - revive
+    - gocritic
+    - dupl
+    - funlen
+    - nestif
+    - nolintlint
+    - depguard
+    - maintidx
+    - cyclop
+    - gocyclo
+    - gocognit
+    - gosec
+    - noctx
+    - contextcheck
+    - containedctx
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  staticcheck:
+    checks:
+      - all
+
+  revive:
+    confidence: 0.8
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - hugeParam
+      - rangeValCopy
+      - paramTypeCombine
+      - unnamedResult
+      - httpNoBody
+      - sprintfQuotedString
+
+  dupl:
+    threshold: 220
+
+  funlen:
+    lines: 220
+    statements: 120
+
+  nestif:
+    min-complexity: 16
+
+  maintidx:
+    under: 15
+
+  cyclop:
+    max-complexity: 40
+    package-average: 20.0
+
+  gocyclo:
+    min-complexity: 40
+
+  gocognit:
+    min-complexity: 80
+
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+    allow-unused: false
+
+  depguard:
+    rules:
+      domain-boundaries:
+        files:
+          - "internal/domain/**/*.go"
+        deny:
+          - pkg: "plato/backend/internal/service"
+            desc: domain layer must not depend on service layer
+          - pkg: "plato/backend/internal/httpapi"
+            desc: domain layer must not depend on transport layer
+          - pkg: "plato/backend/internal/adapters"
+            desc: domain layer must remain infrastructure agnostic
+      service-boundaries:
+        files:
+          - "internal/service/**/*.go"
+        deny:
+          - pkg: "plato/backend/internal/httpapi"
+            desc: service layer must not depend on transport layer
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    - path: "internal/httpapi/routes_.*\\.go"
+      linters:
+        - dupl
+    - path: "_test\\.go"
+      linters:
+        - cyclop
+        - dupl
+        - funlen
+        - gocognit
+        - gocyclo
+        - maintidx
+        - nestif
+        - gosec

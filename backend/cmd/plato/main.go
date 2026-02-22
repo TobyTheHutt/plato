@@ -28,7 +28,7 @@ func main() {
 	}
 }
 
-func getenv(key string, fallback string) string {
+func getenv(key, fallback string) string {
 	value, ok := os.LookupEnv(key)
 	if !ok || value == "" {
 		return fallback

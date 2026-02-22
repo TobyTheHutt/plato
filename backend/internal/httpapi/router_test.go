@@ -24,7 +24,7 @@ import (
 func TestHealthz(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
 
 	router.ServeHTTP(rec, req)
 
@@ -682,7 +682,7 @@ func TestDeletePersonUnavailabilityByPersonError(t *testing.T) {
 func TestDecodeJSONRequestBodyTooLarge(t *testing.T) {
 	router := newTestRouter(t)
 	oversizedName := strings.Repeat("a", int(maxJSONBodyBytes))
-	body := []byte(fmt.Sprintf(`{"name":"%s","hours_per_day":8,"hours_per_week":40,"hours_per_year":2080}`, oversizedName))
+	body := []byte(fmt.Sprintf(`{"name":%q,"hours_per_day":8,"hours_per_week":40,"hours_per_year":2080}`, oversizedName))
 	response := doRawRequest(t, router, http.MethodPost, "/api/organisations", body, map[string]string{"X-Role": "org_admin"})
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d for oversized request body, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())

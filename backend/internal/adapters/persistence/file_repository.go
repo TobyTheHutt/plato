@@ -135,7 +135,7 @@ func (r *FileRepository) persistLocked() error {
 	}
 
 	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
 		_ = os.Remove(tmp)
 		r.state = cloneFileState(r.persistedState)
 		return err

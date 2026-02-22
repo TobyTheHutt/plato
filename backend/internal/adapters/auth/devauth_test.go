@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestDevAuthProviderFromRequest(t *testing.T) {
 	t.Setenv("PLATO_DEV_ROLES", "org_user")
 
 	provider := NewDevAuthProvider()
-	request := httptest.NewRequest("GET", "/", nil)
+	request := httptest.NewRequest("GET", "/", http.NoBody)
 	request.Header.Set("X-User-ID", "request-user")
 	request.Header.Set("X-Org-ID", "request-org")
 	request.Header.Set("X-Role", "org_admin, org_user")
@@ -37,7 +38,7 @@ func TestDevAuthProviderDefaults(t *testing.T) {
 	t.Setenv("PLATO_DEV_ROLES", "")
 
 	provider := NewDevAuthProvider()
-	request := httptest.NewRequest("GET", "/", nil)
+	request := httptest.NewRequest("GET", "/", http.NoBody)
 	ctx, err := provider.FromRequest(request)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

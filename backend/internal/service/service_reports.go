@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"plato/backend/internal/domain"
@@ -24,11 +25,11 @@ func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.Auth
 	}
 	fromDate, err := domain.ValidateDate(request.FromDate)
 	if err != nil {
-		return nil, fmt.Errorf("from date: %v: %w", err, domain.ErrValidation)
+		return nil, errors.Join(domain.ErrValidation, fmt.Errorf("from date: %w", err))
 	}
 	toDate, err := domain.ValidateDate(request.ToDate)
 	if err != nil {
-		return nil, fmt.Errorf("to date: %v: %w", err, domain.ErrValidation)
+		return nil, errors.Join(domain.ErrValidation, fmt.Errorf("to date: %w", err))
 	}
 	if fromDate > toDate {
 		return nil, domain.ErrValidation

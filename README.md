@@ -166,6 +166,7 @@ Available targets:
 - `make check-dry-run` validates make dependencies and command expansion without executing commands
 - `make lint-makefile` runs `checkmake` on `Makefile`
 - `make lint-scripts` runs `shellcheck` on scripts in `scripts/`
+- `make lint-backend` runs `golangci-lint` on the Go backend with `.golangci.yml`
 - `make typecheck` runs TypeScript type checking with `tsc --noEmit`
 - `make test-frontend` runs Vitest with coverage
 - `make test-backend` runs Go tests with coverage reporting
@@ -175,7 +176,9 @@ If you want to run checks directly without `make`:
 Backend:
 
 ```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 cd backend
+golangci-lint run -c ../.golangci.yml ./...
 go test ./... -coverprofile=coverage.out
 go tool cover -func=coverage.out
 ```

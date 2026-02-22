@@ -510,7 +510,7 @@ func groupAllocation(id, groupID, projectID string, percent float64, startDate, 
 	}
 }
 
-func assertBucket(t *testing.T, bucket ReportBucket, period string, availability float64, load float64, free float64) {
+func assertBucket(t *testing.T, bucket ReportBucket, period string, availability, load, free float64) {
 	t.Helper()
 	if bucket.PeriodStart != period {
 		t.Fatalf("expected period %s got %s", period, bucket.PeriodStart)
@@ -526,6 +526,6 @@ func assertBucket(t *testing.T, bucket ReportBucket, period string, availability
 	}
 }
 
-func approxEqual(expected float64, actual float64, epsilon float64) bool {
+func approxEqual(expected, actual, epsilon float64) bool {
 	return math.Abs(expected-actual) <= epsilon
 }

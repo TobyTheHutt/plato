@@ -1,7 +1,7 @@
-.PHONY: check check-dry-run lint-makefile lint-scripts test-frontend test-backend typecheck
+.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend test-frontend test-backend typecheck
 
 # Run all quality checks
-check: lint-makefile lint-scripts typecheck test-frontend test-backend
+check: lint-makefile lint-scripts lint-backend typecheck test-frontend test-backend
 
 # Validate target graph and command expansion without execution
 check-dry-run:
@@ -14,6 +14,10 @@ lint-makefile:
 # Shell script static analysis
 lint-scripts:
 	[ ! -d scripts ] || find scripts -type f -name '*.sh' -exec shellcheck {} +
+
+# Backend static analysis
+lint-backend:
+	cd backend && golangci-lint run -c ../.golangci.yml ./...
 
 # Frontend tests with coverage thresholds from Vitest config
 test-frontend:
@@ -30,9 +34,6 @@ typecheck:
 # Optional future targets once tooling is configured:
 # lint-frontend:
 # 	cd frontend && npm run lint
-#
-# lint-backend:
-# 	cd backend && golangci-lint run
 #
 # format-check:
 # 	# add format checking commands once formatter is configured
