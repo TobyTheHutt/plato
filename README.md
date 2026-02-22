@@ -151,6 +151,19 @@ Coverage thresholds are enforced for frontend tests:
 - Functions: 90%
 - Branches: 80%
 
+Frontend lint quality gates are also enforced for maintainability:
+- Import hygiene via `eslint-plugin-import`, including unresolved import checks and circular dependency detection
+- Accessibility checks via `eslint-plugin-jsx-a11y` recommended rules
+- Security checks via `eslint-plugin-security` for risky dynamic evaluation and regular expression usage
+- Complexity thresholds:
+  - `complexity`: max 20 per function
+  - `max-lines-per-function`: max 300, ignoring blank lines and comments
+  - `max-depth`: max 4 nested blocks
+  - `max-params`: max 5 function parameters
+
+Current transitional exception:
+- `frontend/src/App.tsx` has a temporary higher complexity cap of 45 and no `max-lines-per-function` cap until it is split into smaller components
+
 ### Unified quality checks
 
 Run quality checks from the repository root with `make`.
@@ -169,7 +182,7 @@ Available targets:
 - `make lint-backend` runs `golangci-lint` on the Go backend with `.golangci.yml`
 - `make lint-frontend` runs ESLint for the React and TypeScript frontend
 - `make scan-vulnerabilities` runs `govulncheck` with severity policy and accepted-risk overrides
-- `make typecheck` runs TypeScript type checking with `tsc --noEmit`
+- `make typecheck` runs TypeScript type checking with `npm run typecheck`
 - `make test-frontend` runs Vitest with coverage
 - `make test-backend` runs Go tests with coverage reporting
 
@@ -192,6 +205,7 @@ Frontend:
 ```bash
 cd frontend
 npm run lint
+npm run typecheck
 npm test -- --coverage
 ```
 

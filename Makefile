@@ -37,4 +37,4 @@ test-backend:
 
 # TypeScript type checking
 typecheck:
-	cd frontend && npx tsc --noEmit --pretty false
+	cd frontend && npm --silent run typecheck
