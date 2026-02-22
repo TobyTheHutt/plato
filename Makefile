@@ -1,7 +1,19 @@
-.PHONY: check test-frontend test-backend typecheck
+.PHONY: check check-dry-run lint-makefile lint-scripts test-frontend test-backend typecheck
 
 # Run all quality checks
-check: typecheck test-frontend test-backend
+check: lint-makefile lint-scripts typecheck test-frontend test-backend
+
+# Validate target graph and command expansion without execution
+check-dry-run:
+	MAKE="$(MAKE)" ./scripts/check_make_dry_run.sh
+
+# Makefile static analysis
+lint-makefile:
+	checkmake Makefile
+
+# Shell script static analysis
+lint-scripts:
+	[ ! -d scripts ] || find scripts -type f -name '*.sh' -exec shellcheck {} +
 
 # Frontend tests with coverage thresholds from Vitest config
 test-frontend:

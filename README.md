@@ -163,6 +163,9 @@ make check
 
 Available targets:
 - `make check` runs all quality checks in one command
+- `make check-dry-run` validates make dependencies and command expansion without executing commands
+- `make lint-makefile` runs `checkmake` on `Makefile`
+- `make lint-scripts` runs `shellcheck` on scripts in `scripts/`
 - `make typecheck` runs TypeScript type checking with `tsc --noEmit`
 - `make test-frontend` runs Vitest with coverage
 - `make test-backend` runs Go tests with coverage reporting
@@ -183,6 +186,44 @@ Frontend:
 cd frontend
 npm test -- --coverage
 ```
+
+### Makefile and shell boundaries
+
+Use this separation of concerns to keep orchestration maintainable:
+
+Keep in `Makefile`:
+- Target and dependency wiring
+- Single tool invocations
+- One line command orchestration
+
+Extract to `scripts/*.sh`:
+- Conditional logic
+- Loops and parsing
+- Error handling or reusable procedures
+
+Examples:
+
+```makefile
+test-frontend:
+	cd frontend && npm test -- --coverage
+
+deploy:
+	./scripts/deploy.sh "$(ENV)"
+```
+
+Local quality workflow:
+
+```bash
+make check-dry-run
+make --warn-undefined-variables check
+```
+
+`make check-dry-run` hard-fails when GNU Make prints undefined-variable warnings.
+
+CI rationale:
+- CI runs `make --warn-undefined-variables check` twice on purpose
+- The first run validates correctness
+- The second run, followed by `git diff --exit-code`, catches non-idempotent targets and tracked file side effects
 
 ### Frontend test boundaries
 
