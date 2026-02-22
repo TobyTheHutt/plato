@@ -1,25 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, vi } from "vitest"
 import App from "./App"
-
-function jsonResponse(payload: unknown) {
-  return {
-    ok: true,
-    status: 200,
-    text: async () => JSON.stringify(payload),
-    json: async () => payload
-  }
-}
+import { jsonResponse } from "./test-utils/mocks"
 
 beforeEach(() => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => "[]",
-      json: async () => []
-    }))
+    vi.fn(async () => jsonResponse([]))
   )
 })
 

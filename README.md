@@ -144,6 +144,7 @@ npm test -- --coverage
 ```
 
 When writing frontend tests, import shared domain types from `frontend/src/App.tsx` exports instead of redefining local copies.
+Use shared mock helpers from `frontend/src/test-utils/mocks.ts` for `jsonResponse`, `textResponse`, and `buildMockAPI` to keep response behavior and fixture data consistent across test files.
 
 ## License
 
