@@ -100,7 +100,7 @@ go run ./cmd/plato
 
 ### Backend environment
 
-- `PLATO_ADDR` default `:8080`
+- `PLATO_ADDR` default `:8070`
 - `PLATO_DATA_FILE` default `./plato_runtime_data.json`
 - `PLATO_DEV_USER_ID` default `dev-user`
 - `PLATO_DEV_ORG_ID` default empty
@@ -143,7 +143,22 @@ cd frontend
 npm test -- --coverage
 ```
 
-When writing frontend tests, import shared domain types from `frontend/src/App.tsx` exports instead of redefining local copies.
+### Frontend test boundaries
+
+Use these scopes to avoid overlap and keep maintenance cost low:
+
+| File | Scope | Typical assertion style |
+| --- | --- | --- |
+| `frontend/src/App.helpers.test.ts` | Unit tests for helper functions only | Pure input and output checks |
+| `frontend/src/App.test.tsx` | Focused component behavior and panel-level integration | One behavior or edge case per test |
+| `frontend/src/App.flows.test.tsx` | Multi-step workflows that cross panels | Journey milestones and outcomes |
+
+Placement rule:
+- If a test validates one behavior or one failure path, place it in `frontend/src/App.test.tsx`
+- If a test needs multiple panels and sequential user actions, place it in `frontend/src/App.flows.test.tsx`
+- If a test has no UI rendering, place it in `frontend/src/App.helpers.test.ts`
+
+When writing frontend tests, import shared domain types from `frontend/src/app/types.ts` (or the equivalent re-exports in `frontend/src/App.tsx`) instead of redefining local copies.
 Use shared mock helpers from `frontend/src/test-utils/mocks.ts` for `jsonResponse`, `textResponse`, and `buildMockAPI` to keep response behavior and fixture data consistent across test files.
 
 ## License

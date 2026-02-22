@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, vi } from "vitest"
 import App from "./App"
-import { buildMockAPI, jsonResponse } from "./test-utils/mocks"
+import { buildMockAPI } from "./test-utils/mocks"
+
+/**
+ * Scope: multi-step integration workflows.
+ * These tests cover cross-panel journeys and verify milestone outcomes.
+ * Focused behavior and error-path assertions live in App.test.tsx.
+ */
 
 function sectionByHeading(name: RegExp): ReturnType<typeof within> {
   const heading = screen.getByRole("heading", { name })
@@ -15,7 +21,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("App broad flows", () => {
+describe("App multi-step flows", () => {
   it("covers management and report actions across sections", async () => {
     const { fetchMock, restore } = buildMockAPI()
 
@@ -455,73 +461,6 @@ describe("App broad flows", () => {
     })
   })
 
-  it("does not batch-delete allocations when confirmation is declined", async () => {
-    buildMockAPI({
-      allocations: [
-        {
-          id: "allocation_1",
-          organisation_id: "org_1",
-          target_type: "person",
-          target_id: "person_1",
-          project_id: "project_1",
-          start_date: "2026-01-01",
-          end_date: "2026-12-31",
-          percent: 20
-        },
-        {
-          id: "allocation_2",
-          organisation_id: "org_1",
-          target_type: "person",
-          target_id: "person_2",
-          project_id: "project_1",
-          start_date: "2026-01-01",
-          end_date: "2026-12-31",
-          percent: 15
-        }
-      ]
-    })
-    vi.spyOn(window, "confirm").mockReturnValue(false)
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
-    })
-
-    const allocationsPanel = sectionByHeading(/^allocations$/i)
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
-    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
-    fireEvent.click(allocationsPanel.getByRole("button", { name: /^delete selected items$/i }))
-
-    await waitFor(() => {
-      expect(screen.queryByText("selected allocations deleted")).not.toBeInTheDocument()
-      expect(allocationsPanel.getByRole("cell", { name: /person:\s*Alice/i })).toBeInTheDocument()
-    })
-  })
-
-  it("does not create organisation unavailability when no organisation is selected", async () => {
-    const { fetchMock } = buildMockAPI()
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
-    })
-
-    const authPanel = sectionByHeading(/^auth and tenant$/i)
-    const holidaysPanel = sectionByHeading(/^holidays and unavailability$/i)
-    fireEvent.change(authPanel.getByLabelText(/^active organisation$/i), { target: { value: "" } })
-    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add org unavailability$/i }))
-
-    await waitFor(() => {
-      const postUnavailabilityCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
-        return /\/api\/persons\/.+\/unavailability$/.test(String(requestURL))
-          && (requestInit as RequestInit | undefined)?.method === "POST"
-      })
-      expect(postUnavailabilityCalls).toHaveLength(0)
-    })
-  })
-
   it("covers select-all toggles and edit actions for each list", async () => {
     buildMockAPI({
       allocations: [
@@ -629,6 +568,12 @@ describe("App broad flows", () => {
       expect(reportPanel.getAllByRole("cell", { name: "2026-01-01" })).toHaveLength(1)
     })
 
+    fireEvent.click(reportPanel.getByRole("button", { name: /^hide entries$/i }))
+    await waitFor(() => {
+      expect(reportPanel.getByRole("button", { name: /^show 2 entries$/i })).toBeInTheDocument()
+      expect(reportPanel.queryByRole("cell", { name: "Alice (100%)" })).not.toBeInTheDocument()
+    })
+
     const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
       return String(requestURL).endsWith("/api/reports/availability-load")
         && (requestInit as RequestInit | undefined)?.method === "POST"
@@ -641,43 +586,7 @@ describe("App broad flows", () => {
     expect(sortedReportIDs).toEqual(["person_1", "person_2"])
   })
 
-  it("shows a scoped report error when one object report request fails", async () => {
-    const { fetchMock } = buildMockAPI()
-    const baseImpl = fetchMock.getMockImplementation() as
-      | ((input: string | URL | Request, options?: RequestInit) => unknown)
-      | undefined
-    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
-      const url = typeof input === "string" ? input : input.toString()
-      const path = new URL(url, "http://localhost").pathname
-      const method = options?.method ?? "GET"
-      if (path === "/api/reports/availability-load" && method === "POST") {
-        const payload = JSON.parse(String(options?.body ?? "{}")) as { ids?: string[] }
-        if (Array.isArray(payload.ids) && payload.ids[0] === "person_2") {
-          return jsonResponse({ error: "report failed" }, 500)
-        }
-      }
-      if (!baseImpl) {
-        return jsonResponse([])
-      }
-      return baseImpl(input, options)
-    })
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
-    })
-
-    const reportPanel = sectionByHeading(/^report$/i)
-    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
-    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("report failed for 1 object(s)")
-    })
-  })
-
-  it("runs organisation and project reports and renders project columns", async () => {
+  it("runs report workflow across organisation and project scopes", async () => {
     const { fetchMock } = buildMockAPI()
 
     render(<App />)
@@ -697,119 +606,14 @@ describe("App broad flows", () => {
     fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
 
     await waitFor(() => {
-      expect(reportPanel.getByRole("columnheader", { name: /^project load hours$/i })).toBeInTheDocument()
-      expect(reportPanel.getByRole("columnheader", { name: /^project estimation hours$/i })).toBeInTheDocument()
-      expect(reportPanel.getByRole("columnheader", { name: /^project completion %$/i })).toBeInTheDocument()
-      expect(reportPanel.getByText("100.00")).toBeInTheDocument()
-      expect(reportPanel.getAllByText("60.00").length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText("report calculated")).toBeInTheDocument()
+      expect(reportPanel.getByRole("cell", { name: "Apollo" })).toBeInTheDocument()
     })
 
     const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
       return String(requestURL).endsWith("/api/reports/availability-load")
         && (requestInit as RequestInit | undefined)?.method === "POST"
     })
-    expect(reportCalls.length).toBeGreaterThanOrEqual(2)
-  })
-
-  it("covers request parsing failures and displays errors", async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
-      const method = options?.method ?? "GET"
-      const url = typeof input === "string" ? input : input.toString()
-      const path = new URL(url, "http://localhost").pathname
-
-      if (path === "/api/organisations" && method === "GET") {
-        return {
-          ok: true,
-          status: 204,
-          text: async () => "",
-          json: async () => ({})
-        }
-      }
-      if (path === "/api/persons" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/projects" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/groups" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/allocations" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/organisations" && method === "POST") {
-        return {
-          ok: true,
-          status: 200,
-          text: async () => "",
-          json: async () => ({})
-        }
-      }
-      return jsonResponse([])
-    })
-    vi.stubGlobal("fetch", fetchMock)
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("request returned no content for /api/organisations")
-    })
-
-    const organisationPanel = sectionByHeading(/^organisation$/i)
-    fireEvent.change(organisationPanel.getByLabelText(/^name$/i), { target: { value: "Broken Org" } })
-    fireEvent.click(organisationPanel.getByRole("button", { name: /^create organisation$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("request returned empty body for /api/organisations")
-    })
-  })
-
-  it("handles non-json no-content error responses", async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
-      const method = options?.method ?? "GET"
-      const url = typeof input === "string" ? input : input.toString()
-      const path = new URL(url, "http://localhost").pathname
-
-      if (path === "/api/organisations" && method === "GET") {
-        return jsonResponse([
-          { id: "org_1", name: "Org", hours_per_day: 8, hours_per_week: 40, hours_per_year: 2080 }
-        ])
-      }
-      if (path === "/api/persons" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/projects" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/groups" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/allocations" && method === "GET") {
-        return jsonResponse([])
-      }
-      if (path === "/api/organisations/org_1" && method === "DELETE") {
-        return {
-          ok: false,
-          status: 502,
-          text: async () => "upstream unavailable",
-          json: async () => ({})
-        }
-      }
-      return jsonResponse([])
-    })
-    vi.stubGlobal("fetch", fetchMock)
-
-    render(<App />)
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("option", { name: "Org" }).length).toBeGreaterThan(0)
-    })
-
-    const organisationPanel = sectionByHeading(/^organisation$/i)
-    fireEvent.click(organisationPanel.getByRole("button", { name: /^delete selected organisation$/i }))
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("request failed with status 502: upstream unavailable")
-    })
+    expect(reportCalls).toHaveLength(2)
   })
 })

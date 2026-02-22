@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, vi } from "vitest"
 import App from "./App"
-import { jsonResponse } from "./test-utils/mocks"
+import { buildMockAPI, jsonResponse } from "./test-utils/mocks"
+
+/**
+ * Scope: focused component and panel-level integration behavior.
+ * These tests validate one behavior or edge case per test.
+ * Cross-panel journeys live in App.flows.test.tsx.
+ */
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -15,7 +21,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("App", () => {
+function sectionByHeading(name: RegExp): ReturnType<typeof within> {
+  const heading = screen.getByRole("heading", { name })
+  const section = heading.closest("section")
+  if (!section) {
+    throw new Error(`section for heading ${name.toString()} not found`)
+  }
+  return within(section as HTMLElement)
+}
+
+describe("App focused behaviors", () => {
   it("renders the title", async () => {
     render(<App />)
     expect(screen.getByRole("heading", { name: /plato mvp/i })).toBeInTheDocument()
@@ -112,6 +127,40 @@ describe("App", () => {
     expect(report.getByRole("columnheader", { name: /^project load hours$/i })).toBeInTheDocument()
     expect(report.getByRole("columnheader", { name: /^project estimation hours$/i })).toBeInTheDocument()
     expect(report.getByRole("columnheader", { name: /^project completion %$/i })).toBeInTheDocument()
+  })
+
+  it("runs organisation and project reports and renders project columns", async () => {
+    const { fetchMock } = buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const reportPanel = sectionByHeading(/^report$/i)
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+    await waitFor(() => {
+      expect(screen.getByText("report calculated")).toBeInTheDocument()
+    })
+
+    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "project" } })
+    fireEvent.click(reportPanel.getByRole("checkbox", { name: /apollo/i }))
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+
+    await waitFor(() => {
+      expect(reportPanel.getByRole("columnheader", { name: /^project load hours$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("columnheader", { name: /^project estimation hours$/i })).toBeInTheDocument()
+      expect(reportPanel.getByRole("columnheader", { name: /^project completion %$/i })).toBeInTheDocument()
+      expect(reportPanel.getByText("100.00")).toBeInTheDocument()
+      expect(reportPanel.getAllByText("60.00").length).toBeGreaterThanOrEqual(1)
+    })
+
+    const reportCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+      return String(requestURL).endsWith("/api/reports/availability-load")
+        && (requestInit as RequestInit | undefined)?.method === "POST"
+    })
+    expect(reportCalls.length).toBeGreaterThanOrEqual(2)
   })
 
   it("sends month-scoped employment updates for person edits", async () => {
@@ -303,6 +352,53 @@ describe("App", () => {
         project_id: "project_1",
         percent: 50
       })
+    })
+  })
+
+  it("requires selecting at least one user before saving an allocation", async () => {
+    buildMockAPI()
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Apollo" })).toBeInTheDocument()
+    })
+
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("select at least one user to allocate")
+    })
+  })
+
+  it("requires an active organisation before saving an allocation", async () => {
+    buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const authPanel = sectionByHeading(/^auth and tenant$/i)
+    fireEvent.change(authPanel.getByLabelText(/^active organisation$/i), { target: { value: "" } })
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "person_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("select an organisation first")
     })
   })
 
@@ -744,6 +840,400 @@ describe("App", () => {
     })
   })
 
+  it("warns with sorted person names when multiple users become over-allocated", async () => {
+    const organisations = [
+      { id: "org_1", name: "Org One", hours_per_day: 8, hours_per_week: 40, hours_per_year: 2080 }
+    ]
+    const persons = [
+      { id: "person_1", organisation_id: "org_1", name: "Alice", employment_pct: 50 },
+      { id: "person_2", organisation_id: "org_1", name: "Bob", employment_pct: 40 }
+    ]
+    const groups = [
+      { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
+    ]
+    const projects = [
+      {
+        id: "project_1",
+        organisation_id: "org_1",
+        name: "Project One",
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        estimated_effort_hours: 1000
+      }
+    ]
+
+    const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const method = options?.method ?? "GET"
+
+      if (url.endsWith("/api/organisations") && method === "GET") {
+        return jsonResponse(organisations)
+      }
+      if (url.endsWith("/api/persons") && method === "GET") {
+        return jsonResponse(persons)
+      }
+      if (url.endsWith("/api/projects") && method === "GET") {
+        return jsonResponse(projects)
+      }
+      if (url.endsWith("/api/groups") && method === "GET") {
+        return jsonResponse(groups)
+      }
+      if (url.endsWith("/api/allocations") && method === "GET") {
+        return jsonResponse([])
+      }
+      if (url.endsWith("/api/persons/person_1/unavailability") && method === "GET") {
+        return jsonResponse([])
+      }
+      if (url.endsWith("/api/persons/person_2/unavailability") && method === "GET") {
+        return jsonResponse([])
+      }
+      if (url.endsWith("/api/allocations") && method === "POST") {
+        return jsonResponse({})
+      }
+
+      return jsonResponse([])
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(false)
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Project One" })).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^target type$/i), { target: { value: "group" } })
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Team" })).toBeInTheDocument()
+    })
+    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "group_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "60" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalledWith(
+        "Warning: allocation exceeds employment percentage for Alice, Bob. Continue?"
+      )
+    })
+
+    const postCalls = fetchMock.mock.calls.filter((call) => {
+      const [callURL, callOptions] = call
+      return String(callURL).endsWith("/api/allocations")
+        && (callOptions as RequestInit | undefined)?.method === "POST"
+    })
+    expect(postCalls).toHaveLength(0)
+  })
+
+  it("restores deleted allocations when replace flow partially fails", async () => {
+    const { fetchMock } = buildMockAPI({
+      groups: [
+        { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
+      ],
+      allocations: [
+        {
+          id: "allocation_person_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        }
+      ]
+    })
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+      if (path === "/api/allocations" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { target_id?: string }
+        if (payload.target_id === "person_2") {
+          return jsonResponse({ error: "create failed for person_2" }, 500)
+        }
+      }
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Alice" })).toBeInTheDocument()
+      expect(allocationPanel.getByRole("option", { name: "Apollo" })).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^target type$/i), { target: { value: "group" } })
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Team" })).toBeInTheDocument()
+    })
+    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "group_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
+
+    await waitFor(() => {
+      expect(allocationPanel.getByLabelText(/^merge strategy$/i)).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^merge strategy$/i), { target: { value: "replace" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "25" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("created 1 of 2 allocations")
+    })
+
+    const deleteCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+      return String(requestURL).includes("/api/allocations/allocation_person_1")
+        && (requestInit as RequestInit | undefined)?.method === "DELETE"
+    })
+    expect(deleteCalls).toHaveLength(1)
+
+    // Expected POST sequence: create person_1 succeeds, create person_2 fails, rollback restore posts original conflict.
+    const createCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+      return String(requestURL).endsWith("/api/allocations")
+        && (requestInit as RequestInit | undefined)?.method === "POST"
+    })
+    expect(createCalls.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("reports rollback restore failures when replace flow cannot restore conflicts", async () => {
+    const { fetchMock } = buildMockAPI({
+      groups: [
+        { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
+      ],
+      allocations: [
+        {
+          id: "allocation_person_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        }
+      ]
+    })
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+      if (path === "/api/allocations" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { target_id?: string, percent?: number }
+        if (payload.target_id === "person_2") {
+          return jsonResponse({ error: "create failed for person_2" }, 500)
+        }
+        if (payload.target_id === "person_1" && payload.percent === 20) {
+          return jsonResponse({ error: "restore failed for person_1" }, 500)
+        }
+      }
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Alice" })).toBeInTheDocument()
+      expect(allocationPanel.getByRole("option", { name: "Apollo" })).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^target type$/i), { target: { value: "group" } })
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Team" })).toBeInTheDocument()
+    })
+    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "group_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
+
+    await waitFor(() => {
+      expect(allocationPanel.getByLabelText(/^merge strategy$/i)).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^merge strategy$/i), { target: { value: "replace" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "25" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("rollback restore failed for 1 allocation(s)")
+    })
+  })
+
+  it("reports refresh failures after rollback processing", async () => {
+    const { fetchMock } = buildMockAPI({
+      groups: [
+        { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
+      ],
+      allocations: [
+        {
+          id: "allocation_person_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        }
+      ]
+    })
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
+    let failReload = false
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+
+      if (path === "/api/allocations" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { target_id?: string }
+        if (payload.target_id === "person_2") {
+          failReload = true
+          return jsonResponse({ error: "create failed for person_2" }, 500)
+        }
+      }
+
+      if (failReload && method === "GET" && path === "/api/projects") {
+        return jsonResponse({ error: "reload failed" }, 500)
+      }
+
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Alice" })).toBeInTheDocument()
+      expect(allocationPanel.getByRole("option", { name: "Apollo" })).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^target type$/i), { target: { value: "group" } })
+    await waitFor(() => {
+      expect(allocationPanel.getByRole("option", { name: "Team" })).toBeInTheDocument()
+    })
+    fireEvent.change(allocationPanel.getByLabelText(/^target$/i), { target: { value: "group_1" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^project$/i), { target: { value: "project_1" } })
+
+    await waitFor(() => {
+      expect(allocationPanel.getByLabelText(/^merge strategy$/i)).toBeInTheDocument()
+    })
+
+    fireEvent.change(allocationPanel.getByLabelText(/^merge strategy$/i), { target: { value: "replace" } })
+    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "25" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("refresh failed")
+    })
+  })
+
+  it("restores the edited group allocation when group edit replace flow fails", async () => {
+    const { fetchMock } = buildMockAPI({
+      groups: [
+        { id: "group_1", organisation_id: "org_1", name: "Team", member_ids: ["person_1", "person_2"] }
+      ],
+      allocations: [
+        {
+          id: "allocation_group_1",
+          organisation_id: "org_1",
+          target_type: "group",
+          target_id: "group_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        }
+      ]
+    })
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+      if (path === "/api/allocations" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { target_type?: string, target_id?: string }
+        if (payload.target_type === "person" && payload.target_id === "person_2") {
+          return jsonResponse({ error: "create failed for person_2" }, 500)
+        }
+      }
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    const allocationsHeading = screen.getByRole("heading", { name: /^allocations$/i })
+    const allocationsSection = allocationsHeading.closest("section")
+    expect(allocationsSection).not.toBeNull()
+    const allocationPanel = within(allocationsSection as HTMLElement)
+
+    await waitFor(() => {
+      expect(allocationPanel.getByText(/group:\s*Team/i)).toBeInTheDocument()
+    })
+
+    const groupRow = allocationPanel.getByText(/group:\s*Team/i).closest("tr")
+    expect(groupRow).not.toBeNull()
+    fireEvent.click(within(groupRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
+    fireEvent.change(allocationPanel.getByLabelText(/^fte % per day$/i), { target: { value: "25" } })
+    fireEvent.click(allocationPanel.getByRole("button", { name: /^save allocation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("created 1 of 2 allocations")
+    })
+
+    const deleteGroupCall = fetchMock.mock.calls.find(([requestURL, requestInit]) => {
+      return String(requestURL).includes("/api/allocations/allocation_group_1")
+        && (requestInit as RequestInit | undefined)?.method === "DELETE"
+    })
+    expect(deleteGroupCall).toBeDefined()
+
+    const createCalls = fetchMock.mock.calls
+      .filter(([requestURL, requestInit]) => {
+        return String(requestURL).endsWith("/api/allocations")
+          && (requestInit as RequestInit | undefined)?.method === "POST"
+      })
+      .map(([, requestInit]) => JSON.parse(String((requestInit as RequestInit).body)) as { target_type?: string })
+    expect(createCalls.some((payload) => payload.target_type === "group")).toBe(true)
+  })
+
   it("switches allocation form between creation and edit context via row actions", async () => {
     const organisations = [
       { id: "org_1", name: "Org One", hours_per_day: 8, hours_per_week: 40, hours_per_year: 2080 }
@@ -906,6 +1396,10 @@ describe("App", () => {
 
     const personRow = allocationPanel.getByText("person: Alice").closest("tr")
     expect(personRow).not.toBeNull()
+    fireEvent.click(within(personRow as HTMLElement).getByRole("button", { name: /^edit$/i }))
+    await waitFor(() => {
+      expect(allocationPanel.getByText(/^edit context:/i)).toBeInTheDocument()
+    })
     fireEvent.click(within(personRow as HTMLElement).getByRole("button", { name: /^delete$/i }))
 
     await waitFor(() => {
@@ -916,8 +1410,257 @@ describe("App", () => {
       })
       expect(deleteCalls).toHaveLength(1)
       expect(String(deleteCalls[0][0])).toContain("/api/allocations/allocation_person_1")
+      expect(allocationPanel.getByText(/^creation context:/i)).toBeInTheDocument()
     })
 
     expect(allocationPanel.queryByLabelText(/^delete merge strategy$/i)).not.toBeInTheDocument()
+  })
+
+  it("does not batch-delete allocations when confirmation is declined", async () => {
+    buildMockAPI({
+      allocations: [
+        {
+          id: "allocation_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        },
+        {
+          id: "allocation_2",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_2",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 15
+        }
+      ]
+    })
+    vi.spyOn(window, "confirm").mockReturnValue(false)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const allocationsPanel = sectionByHeading(/^allocations$/i)
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
+    fireEvent.click(allocationsPanel.getByRole("button", { name: /^delete selected items$/i }))
+
+    await waitFor(() => {
+      expect(screen.queryByText("selected allocations deleted")).not.toBeInTheDocument()
+      expect(allocationsPanel.getByRole("cell", { name: /person:\s*Alice/i })).toBeInTheDocument()
+    })
+  })
+
+  it("shows allocation batch-delete action only when at least two rows are selected", async () => {
+    buildMockAPI({
+      allocations: [
+        {
+          id: "allocation_1",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_1",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 20
+        },
+        {
+          id: "allocation_2",
+          organisation_id: "org_1",
+          target_type: "person",
+          target_id: "person_2",
+          project_id: "project_1",
+          start_date: "2026-01-01",
+          end_date: "2026-12-31",
+          percent: 15
+        }
+      ]
+    })
+    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const allocationsPanel = sectionByHeading(/^allocations$/i)
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_1/i))
+
+    expect(allocationsPanel.queryByRole("button", { name: /^delete selected items$/i })).not.toBeInTheDocument()
+
+    fireEvent.click(allocationsPanel.getByLabelText(/select allocation allocation_2/i))
+    expect(allocationsPanel.getByRole("button", { name: /^delete selected items$/i })).toBeInTheDocument()
+    expect(confirmMock).not.toHaveBeenCalled()
+  })
+
+  it("does not create organisation unavailability when no organisation is selected", async () => {
+    const { fetchMock } = buildMockAPI()
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const authPanel = sectionByHeading(/^auth and tenant$/i)
+    const holidaysPanel = sectionByHeading(/^holidays and unavailability$/i)
+    fireEvent.change(authPanel.getByLabelText(/^active organisation$/i), { target: { value: "" } })
+    fireEvent.click(holidaysPanel.getByRole("button", { name: /^add org unavailability$/i }))
+
+    await waitFor(() => {
+      const postUnavailabilityCalls = fetchMock.mock.calls.filter(([requestURL, requestInit]) => {
+        return /\/api\/persons\/.+\/unavailability$/.test(String(requestURL))
+          && (requestInit as RequestInit | undefined)?.method === "POST"
+      })
+      expect(postUnavailabilityCalls).toHaveLength(0)
+    })
+  })
+
+  it("shows a scoped report error when one object report request fails", async () => {
+    const { fetchMock } = buildMockAPI()
+    const baseImpl = fetchMock.getMockImplementation() as
+      | ((input: string | URL | Request, options?: RequestInit) => unknown)
+      | undefined
+    fetchMock.mockImplementation(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+      const method = options?.method ?? "GET"
+      if (path === "/api/reports/availability-load" && method === "POST") {
+        const payload = JSON.parse(String(options?.body ?? "{}")) as { ids?: string[] }
+        if (Array.isArray(payload.ids) && payload.ids.includes("person_2")) {
+          return jsonResponse({ error: "report failed" }, 500)
+        }
+      }
+      if (!baseImpl) {
+        return jsonResponse([])
+      }
+      return baseImpl(input, options)
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const reportPanel = sectionByHeading(/^report$/i)
+    fireEvent.change(reportPanel.getByLabelText(/^scope$/i), { target: { value: "person" } })
+    fireEvent.click(reportPanel.getByRole("button", { name: /^run report$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("report failed for 1 object(s)")
+    })
+  })
+
+  it("covers request parsing failures and displays errors", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+      const method = options?.method ?? "GET"
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+
+      if (path === "/api/organisations" && method === "GET") {
+        return {
+          ok: true,
+          status: 204,
+          text: async () => "",
+          json: async () => ({})
+        }
+      }
+      if (path === "/api/persons" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/projects" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/groups" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/allocations" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/organisations" && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => "",
+          json: async () => ({})
+        }
+      }
+      return jsonResponse([])
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("request returned no content for /api/organisations")
+    })
+
+    const organisationPanel = sectionByHeading(/^organisation$/i)
+    fireEvent.change(organisationPanel.getByLabelText(/^name$/i), { target: { value: "Broken Org" } })
+    fireEvent.click(organisationPanel.getByRole("button", { name: /^create organisation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("request returned empty body for /api/organisations")
+    })
+  })
+
+  it("handles non-json no-content error responses", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+      const method = options?.method ?? "GET"
+      const url = typeof input === "string" ? input : input.toString()
+      const path = new URL(url, "http://localhost").pathname
+
+      if (path === "/api/organisations" && method === "GET") {
+        return jsonResponse([
+          { id: "org_1", name: "Org", hours_per_day: 8, hours_per_week: 40, hours_per_year: 2080 }
+        ])
+      }
+      if (path === "/api/persons" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/projects" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/groups" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/allocations" && method === "GET") {
+        return jsonResponse([])
+      }
+      if (path === "/api/organisations/org_1" && method === "DELETE") {
+        return {
+          ok: false,
+          status: 502,
+          text: async () => "upstream unavailable",
+          json: async () => ({})
+        }
+      }
+      return jsonResponse([])
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Org" }).length).toBeGreaterThan(0)
+    })
+
+    const organisationPanel = sectionByHeading(/^organisation$/i)
+    fireEvent.click(organisationPanel.getByRole("button", { name: /^delete selected organisation$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("request failed with status 502: upstream unavailable")
+    })
   })
 })

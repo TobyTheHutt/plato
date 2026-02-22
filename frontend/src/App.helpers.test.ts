@@ -32,6 +32,10 @@ import {
 } from "./app/helpers"
 import type { Allocation, Person, ReportObjectResult, ReportTableRow } from "./app/types"
 
+/**
+ * Scope: pure helper unit tests.
+ * These tests do not render React components or exercise API workflows.
+ */
 describe("App helpers", () => {
   it("builds the default allocation form state", () => {
     expect(newAllocationFormState()).toEqual({
