@@ -7,7 +7,7 @@ import type {
   PersonUnavailability,
   Project,
   ReportBucket
-} from "../App"
+} from "../app/types"
 
 export type MockStore = {
   organisations: Organisation[]

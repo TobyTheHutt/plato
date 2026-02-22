@@ -167,6 +167,7 @@ Available targets:
 - `make lint-makefile` runs `checkmake` on `Makefile`
 - `make lint-scripts` runs `shellcheck` on scripts in `scripts/`
 - `make lint-backend` runs `golangci-lint` on the Go backend with `.golangci.yml`
+- `make lint-frontend` runs ESLint for the React and TypeScript frontend
 - `make scan-vulnerabilities` runs `govulncheck` with severity policy and accepted-risk overrides
 - `make typecheck` runs TypeScript type checking with `tsc --noEmit`
 - `make test-frontend` runs Vitest with coverage
@@ -190,6 +191,7 @@ Frontend:
 
 ```bash
 cd frontend
+npm run lint
 npm test -- --coverage
 ```
 

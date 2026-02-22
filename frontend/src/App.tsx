@@ -9,7 +9,6 @@ import {
   dateRangesOverlap,
   formatHours,
   hasPersonIntersection,
-  isExpandableReportPeriodRow,
   isPersonOverallocated,
   isReportRowVisible,
   isSubsetOf,
@@ -18,8 +17,6 @@ import {
   normalizeAllocationTargetType,
   personDailyHours,
   personEmploymentPctOnDate,
-  reportDetailToggleLabel,
-  reportUtilizationForDisplay,
   toErrorMessage,
   toWorkingHours
 } from "./app/helpers"
@@ -28,8 +25,6 @@ import { usePlatoApi } from "./hooks/usePlatoApi"
 import type {
   Allocation,
   AllocationFormState,
-  AllocationLoadInputType,
-  AllocationLoadUnit,
   AllocationMergeStrategy,
   AllocationTargetType,
   AvailabilityScope,
@@ -47,7 +42,6 @@ import type {
   PersonUnavailability,
   Project,
   ProjectFormState,
-  ReportBucket,
   ReportGranularity,
   ReportObjectResult,
   Role,
@@ -64,65 +58,6 @@ import { OrganisationPanel } from "./panels/OrganisationPanel"
 import { PersonsPanel } from "./panels/PersonsPanel"
 import { ProjectsPanel } from "./panels/ProjectsPanel"
 import { ReportPanel } from "./panels/ReportPanel"
-
-export type {
-  Allocation,
-  AllocationFormState,
-  AllocationLoadInputType,
-  AllocationLoadUnit,
-  AllocationMergeStrategy,
-  AllocationTargetType,
-  AvailabilityScope,
-  AvailabilityUnitScope,
-  DateHoursEntry,
-  EmploymentChange,
-  Group,
-  Organisation,
-  Person,
-  PersonAllocationLoadSegment,
-  PersonDateHoursEntry,
-  PersonUnavailability,
-  Project,
-  ReportBucket,
-  ReportGranularity,
-  ReportObjectResult,
-  ReportTableRow,
-  Role,
-  WorkingTimeUnit
-} from "./app/types"
-
-export {
-  allocationPercentFromInput,
-  asNumber,
-  buildDayRangeDateHours,
-  buildReportTableRows,
-  buildWeekRangeDateHours,
-  buildWeekdayEntries,
-  dateAfterValue,
-  dateRangesOverlap,
-  formatDateValue,
-  formatHours,
-  hasPersonIntersection,
-  isExpandableReportPeriodRow,
-  isPersonOverallocated,
-  isReportRowVisible,
-  isSubsetOf,
-  isValidMonthValue,
-  newAllocationFormState,
-  normalizeAllocationTargetID,
-  normalizeAllocationTargetType,
-  parseDateValue,
-  parseWeekStartValue,
-  personDailyHours,
-  personEmploymentPctOnDate,
-  reportBucketTotal,
-  reportDetailToggleLabel,
-  reportUtilizationForDisplay,
-  roundHours,
-  toErrorMessage,
-  toWorkingHours,
-  workingHoursForAllocationUnit
-} from "./app/helpers"
 
 export default function App() {
   const canUseNetwork = typeof fetch === "function"

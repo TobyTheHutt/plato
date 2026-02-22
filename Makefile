@@ -1,7 +1,7 @@
-.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend scan-vulnerabilities test-frontend test-backend typecheck
+.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend typecheck
 
 # Run all quality checks
-check: lint-makefile lint-scripts lint-backend scan-vulnerabilities typecheck test-frontend test-backend
+check: lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
 
 # Validate target graph and command expansion without execution
 check-dry-run:
@@ -19,6 +19,10 @@ lint-scripts:
 lint-backend:
 	cd backend && golangci-lint run -c ../.golangci.yml ./...
 
+# Frontend static analysis
+lint-frontend:
+	cd frontend && npm --silent run lint
+
 # Go dependency vulnerability scan with reachability-aware policy
 scan-vulnerabilities:
 	bash ./scripts/check_vuln.sh
@@ -34,10 +38,3 @@ test-backend:
 # TypeScript type checking
 typecheck:
 	cd frontend && npx tsc --noEmit --pretty false
-
-# Optional future targets once tooling is configured:
-# lint-frontend:
-# 	cd frontend && npm run lint
-#
-# format-check:
-# 	# add format checking commands once formatter is configured
