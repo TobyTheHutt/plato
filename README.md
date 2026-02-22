@@ -145,7 +145,11 @@ Select `Demo Org` in the frontend tenant selector.
 
 ## Testing
 
-Coverage target is 90% or higher.
+Coverage thresholds are enforced for frontend tests:
+- Lines: 90%
+- Statements: 90%
+- Functions: 90%
+- Branches: 80%
 
 Backend:
 
