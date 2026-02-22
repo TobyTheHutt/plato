@@ -151,6 +151,24 @@ Coverage thresholds are enforced for frontend tests:
 - Functions: 90%
 - Branches: 80%
 
+### Unified quality checks
+
+Run quality checks from the repository root with `make`.
+
+Run this before every push:
+
+```bash
+make check
+```
+
+Available targets:
+- `make check` runs all quality checks in one command
+- `make typecheck` runs TypeScript type checking with `tsc --noEmit`
+- `make test-frontend` runs Vitest with coverage
+- `make test-backend` runs Go tests with coverage reporting
+
+If you want to run checks directly without `make`:
+
 Backend:
 
 ```bash
