@@ -167,6 +167,7 @@ Available targets:
 - `make lint-makefile` runs `checkmake` on `Makefile`
 - `make lint-scripts` runs `shellcheck` on scripts in `scripts/`
 - `make lint-backend` runs `golangci-lint` on the Go backend with `.golangci.yml`
+- `make scan-vulnerabilities` runs `govulncheck` with severity policy and accepted-risk overrides
 - `make typecheck` runs TypeScript type checking with `tsc --noEmit`
 - `make test-frontend` runs Vitest with coverage
 - `make test-backend` runs Go tests with coverage reporting
@@ -177,8 +178,10 @@ Backend:
 
 ```bash
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 cd backend
 golangci-lint run -c ../.golangci.yml ./...
+../scripts/check_vuln.sh
 go test ./... -coverprofile=coverage.out
 go tool cover -func=coverage.out
 ```
@@ -189,6 +192,36 @@ Frontend:
 cd frontend
 npm test -- --coverage
 ```
+
+### Dependency vulnerability scanning
+
+`govulncheck` runs in CI for every pull request and every push to `main` through `make check`.
+
+Policy:
+- Reachable `HIGH` and `CRITICAL` vulnerabilities fail the build
+- Reachable `MEDIUM` and `LOW` vulnerabilities emit warnings
+- Reachability is taken from `govulncheck` trace data to reduce false positives
+
+Local usage:
+
+```bash
+go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+make scan-vulnerabilities
+```
+
+Accepted risk override process:
+- Add temporary exceptions to `docs/security-vulnerability-overrides.json`
+- Each override must include `id`, `reason`, and `expires_on`
+- Overrides may use either a `GO-...` ID or a `CVE-...` alias
+- Expired overrides fail the scan
+- Remove overrides once fixes are released and deployed
+
+Handling vulnerability reports:
+1. Run `make scan-vulnerabilities` and capture the failing IDs
+2. Upgrade to a fixed version shown by `govulncheck` output when available
+3. If immediate upgrade is not possible, add a temporary override with owner, reason, and expiry
+4. Open a follow-up task to remove the override before expiry
+5. Follow the Go security policy for disclosure and response expectations: https://go.dev/doc/security/policy
 
 ### Makefile and shell boundaries
 
