@@ -5,7 +5,7 @@ check: lint-makefile lint-scripts typecheck test-frontend test-backend
 
 # Validate target graph and command expansion without execution
 check-dry-run:
-	MAKE="$(MAKE)" ./scripts/check_make_dry_run.sh
+	MAKE="$(MAKE)" bash ./scripts/check_make_dry_run.sh
 
 # Makefile static analysis
 lint-makefile:
