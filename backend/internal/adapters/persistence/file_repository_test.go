@@ -621,3 +621,223 @@ func TestFileRepositoryClose(t *testing.T) {
 		t.Fatalf("expected persisted organisation after close, got %+v", organisations)
 	}
 }
+
+func TestFileRepositoryContextCancellation(t *testing.T) {
+	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-repo.json"))
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := repo.ListOrganisations(cancelledCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled from list organisations, got %v", err)
+	}
+	if _, err := repo.CreateOrganisation(cancelledCtx, domain.Organisation{
+		Name:         "Canceled Org",
+		HoursPerDay:  8,
+		HoursPerWeek: 40,
+		HoursPerYear: 2080,
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled from create organisation, got %v", err)
+	}
+
+	organisations, err := repo.ListOrganisations(context.Background())
+	if err != nil {
+		t.Fatalf("list organisations after canceled create: %v", err)
+	}
+	if len(organisations) != 0 {
+		t.Fatalf("expected no organisations after canceled create, got %+v", organisations)
+	}
+
+	created, err := repo.CreateOrganisation(context.Background(), domain.Organisation{
+		Name:         "Active Org",
+		HoursPerDay:  8,
+		HoursPerWeek: 40,
+		HoursPerYear: 2080,
+	})
+	if err != nil {
+		t.Fatalf("create organisation: %v", err)
+	}
+
+	if err := repo.DeleteOrganisation(cancelledCtx, created.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled from delete organisation, got %v", err)
+	}
+
+	if _, err := repo.GetOrganisation(context.Background(), created.ID); err != nil {
+		t.Fatalf("expected organisation to remain after canceled delete, got %v", err)
+	}
+}
+
+func TestFileRepositoryCancelledContextAcrossMethods(t *testing.T) {
+	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-all-methods.json"))
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	backgroundCtx := context.Background()
+	organisation, err := repo.CreateOrganisation(backgroundCtx, domain.Organisation{
+		Name:         "Org",
+		HoursPerDay:  8,
+		HoursPerWeek: 40,
+		HoursPerYear: 2080,
+	})
+	if err != nil {
+		t.Fatalf("create organisation: %v", err)
+	}
+	person, err := repo.CreatePerson(backgroundCtx, domain.Person{
+		OrganisationID: organisation.ID,
+		Name:           "Person",
+		EmploymentPct:  100,
+	})
+	if err != nil {
+		t.Fatalf("create person: %v", err)
+	}
+	project, err := repo.CreateProject(backgroundCtx, domain.Project{
+		OrganisationID: organisation.ID,
+		Name:           "Project",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	group, err := repo.CreateGroup(backgroundCtx, domain.Group{
+		OrganisationID: organisation.ID,
+		Name:           "Group",
+		MemberIDs:      []string{person.ID},
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	allocation, err := repo.CreateAllocation(backgroundCtx, domain.Allocation{
+		OrganisationID: organisation.ID,
+		TargetType:     domain.AllocationTargetPerson,
+		TargetID:       person.ID,
+		ProjectID:      project.ID,
+		StartDate:      "2026-01-01",
+		EndDate:        "2026-01-02",
+		Percent:        25,
+	})
+	if err != nil {
+		t.Fatalf("create allocation: %v", err)
+	}
+	holiday, err := repo.CreateOrgHoliday(backgroundCtx, domain.OrgHoliday{
+		OrganisationID: organisation.ID,
+		Date:           "2026-01-01",
+		Hours:          8,
+	})
+	if err != nil {
+		t.Fatalf("create holiday: %v", err)
+	}
+	groupUnavailable, err := repo.CreateGroupUnavailability(backgroundCtx, domain.GroupUnavailability{
+		OrganisationID: organisation.ID,
+		GroupID:        group.ID,
+		Date:           "2026-01-02",
+		Hours:          4,
+	})
+	if err != nil {
+		t.Fatalf("create group unavailability: %v", err)
+	}
+	personUnavailable, err := repo.CreatePersonUnavailability(backgroundCtx, domain.PersonUnavailability{
+		OrganisationID: organisation.ID,
+		PersonID:       person.ID,
+		Date:           "2026-01-03",
+		Hours:          2,
+	})
+	if err != nil {
+		t.Fatalf("create person unavailability: %v", err)
+	}
+
+	cancelledCtx, cancel := context.WithCancel(backgroundCtx)
+	cancel()
+	expectCanceled := func(err error) {
+		t.Helper()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context canceled error, got %v", err)
+		}
+	}
+
+	_, err = repo.ListOrganisations(cancelledCtx)
+	expectCanceled(err)
+	_, err = repo.GetOrganisation(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.CreateOrganisation(cancelledCtx, domain.Organisation{})
+	expectCanceled(err)
+	_, err = repo.UpdateOrganisation(cancelledCtx, organisation)
+	expectCanceled(err)
+	err = repo.DeleteOrganisation(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListPersons(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.GetPerson(cancelledCtx, organisation.ID, person.ID)
+	expectCanceled(err)
+	_, err = repo.CreatePerson(cancelledCtx, person)
+	expectCanceled(err)
+	_, err = repo.UpdatePerson(cancelledCtx, person)
+	expectCanceled(err)
+	err = repo.DeletePerson(cancelledCtx, organisation.ID, person.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListProjects(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.GetProject(cancelledCtx, organisation.ID, project.ID)
+	expectCanceled(err)
+	_, err = repo.CreateProject(cancelledCtx, project)
+	expectCanceled(err)
+	_, err = repo.UpdateProject(cancelledCtx, project)
+	expectCanceled(err)
+	err = repo.DeleteProject(cancelledCtx, organisation.ID, project.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListGroups(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.GetGroup(cancelledCtx, organisation.ID, group.ID)
+	expectCanceled(err)
+	_, err = repo.CreateGroup(cancelledCtx, group)
+	expectCanceled(err)
+	_, err = repo.UpdateGroup(cancelledCtx, group)
+	expectCanceled(err)
+	err = repo.DeleteGroup(cancelledCtx, organisation.ID, group.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListAllocations(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.GetAllocation(cancelledCtx, organisation.ID, allocation.ID)
+	expectCanceled(err)
+	_, err = repo.CreateAllocation(cancelledCtx, allocation)
+	expectCanceled(err)
+	_, err = repo.UpdateAllocation(cancelledCtx, allocation)
+	expectCanceled(err)
+	err = repo.DeleteAllocation(cancelledCtx, organisation.ID, allocation.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListOrgHolidays(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.CreateOrgHoliday(cancelledCtx, holiday)
+	expectCanceled(err)
+	err = repo.DeleteOrgHoliday(cancelledCtx, organisation.ID, holiday.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListGroupUnavailability(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.CreateGroupUnavailability(cancelledCtx, groupUnavailable)
+	expectCanceled(err)
+	err = repo.DeleteGroupUnavailability(cancelledCtx, organisation.ID, groupUnavailable.ID)
+	expectCanceled(err)
+
+	_, err = repo.ListPersonUnavailability(cancelledCtx, organisation.ID)
+	expectCanceled(err)
+	_, err = repo.ListPersonUnavailabilityByPerson(cancelledCtx, organisation.ID, person.ID)
+	expectCanceled(err)
+	_, err = repo.ListPersonUnavailabilityByPersonAndDate(cancelledCtx, organisation.ID, person.ID, personUnavailable.Date)
+	expectCanceled(err)
+	_, err = repo.CreatePersonUnavailability(cancelledCtx, personUnavailable)
+	expectCanceled(err)
+	_, err = repo.CreatePersonUnavailabilityWithDailyLimit(cancelledCtx, personUnavailable, 8)
+	expectCanceled(err)
+	err = repo.DeletePersonUnavailability(cancelledCtx, organisation.ID, personUnavailable.ID)
+	expectCanceled(err)
+	err = repo.DeletePersonUnavailabilityByPerson(cancelledCtx, organisation.ID, person.ID, personUnavailable.ID)
+	expectCanceled(err)
+}

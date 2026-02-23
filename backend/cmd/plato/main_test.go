@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"plato/backend/internal/httpapi"
 )
 
 func TestGetenv(t *testing.T) {
@@ -416,21 +418,26 @@ func TestRunLogsCleanupFailure(t *testing.T) {
 	}
 }
 
-func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
+func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 	previousRunServer := runServer
 	previousMakeRouter := makeRouter
-	previousLogFatalf := logFatalf
+	previousLoadRuntimeConfig := loadRuntimeConfig
 	previousLogPrintf := logPrintf
+	previousExitProcess := exitProcess
 	t.Cleanup(func() {
 		runServer = previousRunServer
 		makeRouter = previousMakeRouter
-		logFatalf = previousLogFatalf
+		loadRuntimeConfig = previousLoadRuntimeConfig
 		logPrintf = previousLogPrintf
+		exitProcess = previousExitProcess
 	})
 
+	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
+		return httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeProduction}, nil
+	}
 	t.Setenv("PLATO_ADDR", ":8123")
-	makeRouter = func() http.Handler {
-		return http.NewServeMux()
+	makeRouter = func(httpapi.RuntimeConfig) (http.Handler, error) {
+		return http.NewServeMux(), nil
 	}
 
 	runCalled := false
@@ -459,14 +466,19 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 		}
 		return nil
 	}
-	logPrintf = func(_ string, _ ...any) {}
-	logFatalf = func(_ string, _ ...any) {
-		t.Fatal("fatal logger should not be called on success")
+
+	exitCode := -1
+	exitProcess = func(code int) {
+		exitCode = code
 	}
+	logPrintf = func(_ string, _ ...any) {}
 
 	main()
 	if !runCalled {
 		t.Fatal("expected main to call runServer")
+	}
+	if exitCode != -1 {
+		t.Fatalf("expected no exit on success, got %d", exitCode)
 	}
 
 	t.Setenv("PLATO_ADDR", "")
@@ -481,13 +493,119 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 	runServer = func(_ string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
 		return errors.New("boom")
 	}
-	var fatalMessage string
-	logFatalf = func(format string, args ...any) {
-		fatalMessage = format
+	var logMessages []string
+	logPrintf = func(format string, args ...any) {
+		logMessages = append(logMessages, fmt.Sprintf(format, args...))
 	}
 	main()
-	if !strings.Contains(fatalMessage, "server failed") {
-		t.Fatalf("expected fatal message to include server failed, got %q", fatalMessage)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1 when runServer fails, got %d", exitCode)
+	}
+	if !logsContain(logMessages, "server failed") {
+		t.Fatalf("expected log message to include server failed, got %v", logMessages)
+	}
+}
+
+func TestMainUsesModeDefaultsAndHandlesBootstrapErrors(t *testing.T) {
+	previousRunServer := runServer
+	previousMakeRouter := makeRouter
+	previousLoadRuntimeConfig := loadRuntimeConfig
+	previousLogPrintf := logPrintf
+	previousExitProcess := exitProcess
+	t.Cleanup(func() {
+		runServer = previousRunServer
+		makeRouter = previousMakeRouter
+		loadRuntimeConfig = previousLoadRuntimeConfig
+		logPrintf = previousLogPrintf
+		exitProcess = previousExitProcess
+	})
+
+	makeRouter = func(httpapi.RuntimeConfig) (http.Handler, error) {
+		return http.NewServeMux(), nil
+	}
+	runServer = func(addr string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
+		if addr != "127.0.0.1:8070" {
+			t.Fatalf("expected development mode default addr, got %s", addr)
+		}
+		return nil
+	}
+
+	var logMessages []string
+	logPrintf = func(format string, args ...any) {
+		logMessages = append(logMessages, fmt.Sprintf(format, args...))
+	}
+
+	exitCode := -1
+	exitProcess = func(code int) {
+		exitCode = code
+	}
+
+	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
+		return httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeDevelopment}, nil
+	}
+	t.Setenv("PLATO_ADDR", "")
+	main()
+	if exitCode != -1 {
+		t.Fatalf("expected no exit during successful startup, got %d", exitCode)
+	}
+	if !logsContain(logMessages, "development mode") {
+		t.Fatalf("expected development mode warnings, got %v", logMessages)
+	}
+
+	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
+		return httpapi.RuntimeConfig{}, errors.New("config failed")
+	}
+	logMessages = []string{}
+	exitCode = -1
+	main()
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1 on runtime config failure, got %d", exitCode)
+	}
+	if !logsContain(logMessages, "failed to load runtime config") {
+		t.Fatalf("expected config failure log, got %v", logMessages)
+	}
+
+	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
+		return httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeProduction}, nil
+	}
+	makeRouter = func(httpapi.RuntimeConfig) (http.Handler, error) {
+		return nil, errors.New("router failed")
+	}
+	logMessages = []string{}
+	exitCode = -1
+	main()
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1 on router initialization failure, got %d", exitCode)
+	}
+	if !logsContain(logMessages, "failed to initialize router") {
+		t.Fatalf("expected router failure log, got %v", logMessages)
+	}
+}
+
+func TestLogStartupWarnings(t *testing.T) {
+	logMessages := []string{}
+	logger := func(format string, args ...any) {
+		logMessages = append(logMessages, fmt.Sprintf(format, args...))
+	}
+
+	logStartupWarnings(httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeProduction}, logger)
+	for _, message := range logMessages {
+		if strings.Contains(strings.ToLower(message), "development mode") {
+			t.Fatalf("expected no development warning in production mode, got %v", logMessages)
+		}
+	}
+
+	logMessages = []string{}
+	logStartupWarnings(httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeDevelopment}, logger)
+	expectedWarnings := []string{
+		"development mode",
+		"header-based dev auth",
+		"do not expose",
+	}
+	for _, expectedWarning := range expectedWarnings {
+		if !logsContain(logMessages, expectedWarning) {
+			t.Fatalf("expected warning containing %q, got %v", expectedWarning, logMessages)
+		}
 	}
 }
 

@@ -59,6 +59,15 @@ import { PersonsPanel } from "./panels/PersonsPanel"
 import { ProjectsPanel } from "./panels/ProjectsPanel"
 import { ReportPanel } from "./panels/ReportPanel"
 
+const BOOTSTRAP_TIMEOUT_MS = 10_000
+
+function isAbortError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("name" in error)) {
+    return false
+  }
+  return (error as { name?: unknown }).name === "AbortError"
+}
+
 export default function App() {
   const canUseNetwork = typeof fetch === "function"
 
@@ -180,14 +189,17 @@ export default function App() {
         setSuccessMessage(success)
       }
     } catch (error) {
+      if (isAbortError(error)) {
+        return
+      }
       if (!tracksFeedback || feedbackRequestIDRef.current === requestID) {
         setErrorMessage(toErrorMessage(error))
       }
     }
   }, [])
 
-  const loadOrganisations = useCallback(async () => {
-    const loaded = await fetchOrganisations()
+  const loadOrganisations = useCallback(async (signal?: AbortSignal) => {
+    const loaded = await fetchOrganisations({ signal })
     setOrganisations(loaded)
     setSelectedOrganisationID((current) => {
       if (loaded.length === 0) {
@@ -200,8 +212,8 @@ export default function App() {
     })
   }, [fetchOrganisations])
 
-  const loadOrganisationScopedData = useCallback(async () => {
-    const scopedData = await fetchOrganisationScopedData(selectedOrganisationID)
+  const loadOrganisationScopedData = useCallback(async (signal?: AbortSignal) => {
+    const scopedData = await fetchOrganisationScopedData(selectedOrganisationID, { signal })
     setPersons(scopedData.persons)
     setProjects(scopedData.projects)
     setGroups(scopedData.groups)
@@ -209,25 +221,72 @@ export default function App() {
     setPersonUnavailability(scopedData.personUnavailability)
   }, [fetchOrganisationScopedData, selectedOrganisationID])
 
+  const runBootstrapLoad = useCallback(async (
+    signal: AbortSignal,
+    timedOut: () => boolean,
+    operation: (abortSignal: AbortSignal) => Promise<void>
+  ) => {
+    try {
+      await operation(signal)
+    } catch (error) {
+      if (timedOut() && isAbortError(error)) {
+        throw new Error(`bootstrap request timed out after ${BOOTSTRAP_TIMEOUT_MS / 1000} seconds`)
+      }
+      throw error
+    }
+  }, [])
+
   useEffect(() => {
     if (!canUseNetwork) {
       return
     }
 
+    const controller = new AbortController()
+    let timedOut = false
+    const timeoutHandle = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, BOOTSTRAP_TIMEOUT_MS)
+
     void withFeedback(async () => {
-      await loadOrganisations()
+      try {
+        await runBootstrapLoad(controller.signal, () => timedOut, loadOrganisations)
+      } finally {
+        window.clearTimeout(timeoutHandle)
+      }
     }, "")
-  }, [canUseNetwork, loadOrganisations, withFeedback])
+
+    return () => {
+      window.clearTimeout(timeoutHandle)
+      controller.abort()
+    }
+  }, [canUseNetwork, loadOrganisations, runBootstrapLoad, withFeedback])
 
   useEffect(() => {
     if (!canUseNetwork) {
       return
     }
 
+    const controller = new AbortController()
+    let timedOut = false
+    const timeoutHandle = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, BOOTSTRAP_TIMEOUT_MS)
+
     void withFeedback(async () => {
-      await loadOrganisationScopedData()
+      try {
+        await runBootstrapLoad(controller.signal, () => timedOut, loadOrganisationScopedData)
+      } finally {
+        window.clearTimeout(timeoutHandle)
+      }
     }, "")
-  }, [canUseNetwork, loadOrganisationScopedData, withFeedback])
+
+    return () => {
+      window.clearTimeout(timeoutHandle)
+      controller.abort()
+    }
+  }, [canUseNetwork, loadOrganisationScopedData, runBootstrapLoad, withFeedback])
 
   const activeOrganisation = useMemo(
     () => organisations.find((organisation) => organisation.id === selectedOrganisationID),

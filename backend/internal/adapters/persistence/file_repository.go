@@ -158,6 +158,21 @@ func (r *FileRepository) persistLocked() error {
 	return nil
 }
 
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func (r *FileRepository) persistLockedWithContext(ctx context.Context) error {
+	if err := contextErr(ctx); err != nil {
+		r.state = cloneFileState(r.persistedState)
+		return err
+	}
+	return r.persistLocked()
+}
+
 func copyGroup(group domain.Group) domain.Group {
 	group.MemberIDs = append([]string{}, group.MemberIDs...)
 	return group
@@ -311,7 +326,11 @@ func sortedPersonUnavailability(items []domain.PersonUnavailability) {
 	})
 }
 
-func (r *FileRepository) ListOrganisations(_ context.Context) ([]domain.Organisation, error) {
+func (r *FileRepository) ListOrganisations(ctx context.Context) ([]domain.Organisation, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -323,7 +342,11 @@ func (r *FileRepository) ListOrganisations(_ context.Context) ([]domain.Organisa
 	return result, nil
 }
 
-func (r *FileRepository) GetOrganisation(_ context.Context, id string) (domain.Organisation, error) {
+func (r *FileRepository) GetOrganisation(ctx context.Context, id string) (domain.Organisation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Organisation{}, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -334,7 +357,11 @@ func (r *FileRepository) GetOrganisation(_ context.Context, id string) (domain.O
 	return organisation, nil
 }
 
-func (r *FileRepository) CreateOrganisation(_ context.Context, organisation domain.Organisation) (domain.Organisation, error) {
+func (r *FileRepository) CreateOrganisation(ctx context.Context, organisation domain.Organisation) (domain.Organisation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Organisation{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -344,14 +371,18 @@ func (r *FileRepository) CreateOrganisation(_ context.Context, organisation doma
 	organisation.UpdatedAt = now
 	r.state.Organisations[organisation.ID] = organisation
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Organisation{}, err
 	}
 
 	return organisation, nil
 }
 
-func (r *FileRepository) UpdateOrganisation(_ context.Context, organisation domain.Organisation) (domain.Organisation, error) {
+func (r *FileRepository) UpdateOrganisation(ctx context.Context, organisation domain.Organisation) (domain.Organisation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Organisation{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -364,14 +395,18 @@ func (r *FileRepository) UpdateOrganisation(_ context.Context, organisation doma
 	organisation.UpdatedAt = time.Now().UTC()
 	r.state.Organisations[organisation.ID] = organisation
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Organisation{}, err
 	}
 
 	return organisation, nil
 }
 
-func (r *FileRepository) DeleteOrganisation(_ context.Context, id string) error {
+func (r *FileRepository) DeleteOrganisation(ctx context.Context, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -416,10 +451,14 @@ func (r *FileRepository) DeleteOrganisation(_ context.Context, id string) error 
 		}
 	}
 
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListPersons(_ context.Context, organisationID string) ([]domain.Person, error) {
+func (r *FileRepository) ListPersons(ctx context.Context, organisationID string) ([]domain.Person, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -433,7 +472,11 @@ func (r *FileRepository) ListPersons(_ context.Context, organisationID string) (
 	return result, nil
 }
 
-func (r *FileRepository) GetPerson(_ context.Context, organisationID, id string) (domain.Person, error) {
+func (r *FileRepository) GetPerson(ctx context.Context, organisationID, id string) (domain.Person, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Person{}, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -444,7 +487,11 @@ func (r *FileRepository) GetPerson(_ context.Context, organisationID, id string)
 	return person, nil
 }
 
-func (r *FileRepository) CreatePerson(_ context.Context, person domain.Person) (domain.Person, error) {
+func (r *FileRepository) CreatePerson(ctx context.Context, person domain.Person) (domain.Person, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Person{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -454,14 +501,18 @@ func (r *FileRepository) CreatePerson(_ context.Context, person domain.Person) (
 	person.UpdatedAt = now
 	r.state.Persons[person.ID] = person
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Person{}, err
 	}
 
 	return person, nil
 }
 
-func (r *FileRepository) UpdatePerson(_ context.Context, person domain.Person) (domain.Person, error) {
+func (r *FileRepository) UpdatePerson(ctx context.Context, person domain.Person) (domain.Person, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Person{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -474,14 +525,18 @@ func (r *FileRepository) UpdatePerson(_ context.Context, person domain.Person) (
 	person.UpdatedAt = time.Now().UTC()
 	r.state.Persons[person.ID] = person
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Person{}, err
 	}
 
 	return person, nil
 }
 
-func (r *FileRepository) DeletePerson(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeletePerson(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -518,10 +573,14 @@ func (r *FileRepository) DeletePerson(_ context.Context, organisationID, id stri
 		}
 	}
 
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListProjects(_ context.Context, organisationID string) ([]domain.Project, error) {
+func (r *FileRepository) ListProjects(ctx context.Context, organisationID string) ([]domain.Project, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -535,7 +594,11 @@ func (r *FileRepository) ListProjects(_ context.Context, organisationID string) 
 	return result, nil
 }
 
-func (r *FileRepository) GetProject(_ context.Context, organisationID, id string) (domain.Project, error) {
+func (r *FileRepository) GetProject(ctx context.Context, organisationID, id string) (domain.Project, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Project{}, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -546,7 +609,11 @@ func (r *FileRepository) GetProject(_ context.Context, organisationID, id string
 	return project, nil
 }
 
-func (r *FileRepository) CreateProject(_ context.Context, project domain.Project) (domain.Project, error) {
+func (r *FileRepository) CreateProject(ctx context.Context, project domain.Project) (domain.Project, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Project{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -556,14 +623,18 @@ func (r *FileRepository) CreateProject(_ context.Context, project domain.Project
 	project.UpdatedAt = now
 	r.state.Projects[project.ID] = project
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Project{}, err
 	}
 
 	return project, nil
 }
 
-func (r *FileRepository) UpdateProject(_ context.Context, project domain.Project) (domain.Project, error) {
+func (r *FileRepository) UpdateProject(ctx context.Context, project domain.Project) (domain.Project, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Project{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -576,14 +647,18 @@ func (r *FileRepository) UpdateProject(_ context.Context, project domain.Project
 	project.UpdatedAt = time.Now().UTC()
 	r.state.Projects[project.ID] = project
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Project{}, err
 	}
 
 	return project, nil
 }
 
-func (r *FileRepository) DeleteProject(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeleteProject(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -599,10 +674,14 @@ func (r *FileRepository) DeleteProject(_ context.Context, organisationID, id str
 		}
 	}
 
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListGroups(_ context.Context, organisationID string) ([]domain.Group, error) {
+func (r *FileRepository) ListGroups(ctx context.Context, organisationID string) ([]domain.Group, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -616,7 +695,11 @@ func (r *FileRepository) ListGroups(_ context.Context, organisationID string) ([
 	return result, nil
 }
 
-func (r *FileRepository) GetGroup(_ context.Context, organisationID, id string) (domain.Group, error) {
+func (r *FileRepository) GetGroup(ctx context.Context, organisationID, id string) (domain.Group, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Group{}, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -627,7 +710,11 @@ func (r *FileRepository) GetGroup(_ context.Context, organisationID, id string) 
 	return copyGroup(group), nil
 }
 
-func (r *FileRepository) CreateGroup(_ context.Context, group domain.Group) (domain.Group, error) {
+func (r *FileRepository) CreateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Group{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -638,14 +725,18 @@ func (r *FileRepository) CreateGroup(_ context.Context, group domain.Group) (dom
 	group.UpdatedAt = now
 	r.state.Groups[group.ID] = copyGroup(group)
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Group{}, err
 	}
 
 	return group, nil
 }
 
-func (r *FileRepository) UpdateGroup(_ context.Context, group domain.Group) (domain.Group, error) {
+func (r *FileRepository) UpdateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Group{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -659,14 +750,18 @@ func (r *FileRepository) UpdateGroup(_ context.Context, group domain.Group) (dom
 	group.UpdatedAt = time.Now().UTC()
 	r.state.Groups[group.ID] = copyGroup(group)
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Group{}, err
 	}
 
 	return group, nil
 }
 
-func (r *FileRepository) DeleteGroup(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeleteGroup(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -688,10 +783,14 @@ func (r *FileRepository) DeleteGroup(_ context.Context, organisationID, id strin
 		}
 	}
 
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListAllocations(_ context.Context, organisationID string) ([]domain.Allocation, error) {
+func (r *FileRepository) ListAllocations(ctx context.Context, organisationID string) ([]domain.Allocation, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -705,7 +804,11 @@ func (r *FileRepository) ListAllocations(_ context.Context, organisationID strin
 	return result, nil
 }
 
-func (r *FileRepository) GetAllocation(_ context.Context, organisationID, id string) (domain.Allocation, error) {
+func (r *FileRepository) GetAllocation(ctx context.Context, organisationID, id string) (domain.Allocation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Allocation{}, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -716,7 +819,11 @@ func (r *FileRepository) GetAllocation(_ context.Context, organisationID, id str
 	return allocation, nil
 }
 
-func (r *FileRepository) CreateAllocation(_ context.Context, allocation domain.Allocation) (domain.Allocation, error) {
+func (r *FileRepository) CreateAllocation(ctx context.Context, allocation domain.Allocation) (domain.Allocation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Allocation{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -732,14 +839,18 @@ func (r *FileRepository) CreateAllocation(_ context.Context, allocation domain.A
 	allocation.UpdatedAt = now
 	r.state.Allocations[allocation.ID] = allocation
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Allocation{}, err
 	}
 
 	return allocation, nil
 }
 
-func (r *FileRepository) UpdateAllocation(_ context.Context, allocation domain.Allocation) (domain.Allocation, error) {
+func (r *FileRepository) UpdateAllocation(ctx context.Context, allocation domain.Allocation) (domain.Allocation, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.Allocation{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -758,14 +869,18 @@ func (r *FileRepository) UpdateAllocation(_ context.Context, allocation domain.A
 	allocation.UpdatedAt = time.Now().UTC()
 	r.state.Allocations[allocation.ID] = allocation
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.Allocation{}, err
 	}
 
 	return allocation, nil
 }
 
-func (r *FileRepository) DeleteAllocation(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeleteAllocation(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -774,10 +889,14 @@ func (r *FileRepository) DeleteAllocation(_ context.Context, organisationID, id 
 		return domain.ErrNotFound
 	}
 	delete(r.state.Allocations, id)
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListOrgHolidays(_ context.Context, organisationID string) ([]domain.OrgHoliday, error) {
+func (r *FileRepository) ListOrgHolidays(ctx context.Context, organisationID string) ([]domain.OrgHoliday, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -791,7 +910,11 @@ func (r *FileRepository) ListOrgHolidays(_ context.Context, organisationID strin
 	return result, nil
 }
 
-func (r *FileRepository) CreateOrgHoliday(_ context.Context, entry domain.OrgHoliday) (domain.OrgHoliday, error) {
+func (r *FileRepository) CreateOrgHoliday(ctx context.Context, entry domain.OrgHoliday) (domain.OrgHoliday, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.OrgHoliday{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -801,14 +924,18 @@ func (r *FileRepository) CreateOrgHoliday(_ context.Context, entry domain.OrgHol
 	entry.UpdatedAt = now
 	r.state.OrgHolidays[entry.ID] = entry
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.OrgHoliday{}, err
 	}
 
 	return entry, nil
 }
 
-func (r *FileRepository) DeleteOrgHoliday(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeleteOrgHoliday(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -817,10 +944,14 @@ func (r *FileRepository) DeleteOrgHoliday(_ context.Context, organisationID, id 
 		return domain.ErrNotFound
 	}
 	delete(r.state.OrgHolidays, id)
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListGroupUnavailability(_ context.Context, organisationID string) ([]domain.GroupUnavailability, error) {
+func (r *FileRepository) ListGroupUnavailability(ctx context.Context, organisationID string) ([]domain.GroupUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -834,7 +965,11 @@ func (r *FileRepository) ListGroupUnavailability(_ context.Context, organisation
 	return result, nil
 }
 
-func (r *FileRepository) CreateGroupUnavailability(_ context.Context, entry domain.GroupUnavailability) (domain.GroupUnavailability, error) {
+func (r *FileRepository) CreateGroupUnavailability(ctx context.Context, entry domain.GroupUnavailability) (domain.GroupUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.GroupUnavailability{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -844,14 +979,18 @@ func (r *FileRepository) CreateGroupUnavailability(_ context.Context, entry doma
 	entry.UpdatedAt = now
 	r.state.GroupUnavailability[entry.ID] = entry
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.GroupUnavailability{}, err
 	}
 
 	return entry, nil
 }
 
-func (r *FileRepository) DeleteGroupUnavailability(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeleteGroupUnavailability(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -860,10 +999,14 @@ func (r *FileRepository) DeleteGroupUnavailability(_ context.Context, organisati
 		return domain.ErrNotFound
 	}
 	delete(r.state.GroupUnavailability, id)
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) ListPersonUnavailability(_ context.Context, organisationID string) ([]domain.PersonUnavailability, error) {
+func (r *FileRepository) ListPersonUnavailability(ctx context.Context, organisationID string) ([]domain.PersonUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -877,7 +1020,11 @@ func (r *FileRepository) ListPersonUnavailability(_ context.Context, organisatio
 	return result, nil
 }
 
-func (r *FileRepository) ListPersonUnavailabilityByPerson(_ context.Context, organisationID, personID string) ([]domain.PersonUnavailability, error) {
+func (r *FileRepository) ListPersonUnavailabilityByPerson(ctx context.Context, organisationID, personID string) ([]domain.PersonUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -891,7 +1038,11 @@ func (r *FileRepository) ListPersonUnavailabilityByPerson(_ context.Context, org
 	return result, nil
 }
 
-func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(_ context.Context, organisationID, personID, date string) ([]domain.PersonUnavailability, error) {
+func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(ctx context.Context, organisationID, personID, date string) ([]domain.PersonUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -905,7 +1056,11 @@ func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(_ context.Conte
 	return result, nil
 }
 
-func (r *FileRepository) CreatePersonUnavailability(_ context.Context, entry domain.PersonUnavailability) (domain.PersonUnavailability, error) {
+func (r *FileRepository) CreatePersonUnavailability(ctx context.Context, entry domain.PersonUnavailability) (domain.PersonUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.PersonUnavailability{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -915,14 +1070,18 @@ func (r *FileRepository) CreatePersonUnavailability(_ context.Context, entry dom
 	entry.UpdatedAt = now
 	r.state.PersonUnavailability[entry.ID] = entry
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.PersonUnavailability{}, err
 	}
 
 	return entry, nil
 }
 
-func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(_ context.Context, entry domain.PersonUnavailability, maxHours float64) (domain.PersonUnavailability, error) {
+func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(ctx context.Context, entry domain.PersonUnavailability, maxHours float64) (domain.PersonUnavailability, error) {
+	if err := contextErr(ctx); err != nil {
+		return domain.PersonUnavailability{}, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -942,14 +1101,18 @@ func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(_ context.Cont
 	entry.UpdatedAt = now
 	r.state.PersonUnavailability[entry.ID] = entry
 
-	if err := r.persistLocked(); err != nil {
+	if err := r.persistLockedWithContext(ctx); err != nil {
 		return domain.PersonUnavailability{}, err
 	}
 
 	return entry, nil
 }
 
-func (r *FileRepository) DeletePersonUnavailability(_ context.Context, organisationID, id string) error {
+func (r *FileRepository) DeletePersonUnavailability(ctx context.Context, organisationID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -958,10 +1121,14 @@ func (r *FileRepository) DeletePersonUnavailability(_ context.Context, organisat
 		return domain.ErrNotFound
 	}
 	delete(r.state.PersonUnavailability, id)
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
-func (r *FileRepository) DeletePersonUnavailabilityByPerson(_ context.Context, organisationID, personID, id string) error {
+func (r *FileRepository) DeletePersonUnavailabilityByPerson(ctx context.Context, organisationID, personID, id string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -973,7 +1140,7 @@ func (r *FileRepository) DeletePersonUnavailabilityByPerson(_ context.Context, o
 		return domain.ErrForbidden
 	}
 	delete(r.state.PersonUnavailability, id)
-	return r.persistLocked()
+	return r.persistLockedWithContext(ctx)
 }
 
 func uniqueStrings(values []string) []string {

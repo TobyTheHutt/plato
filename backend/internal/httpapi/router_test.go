@@ -410,8 +410,12 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 }
 
 func TestRouterNewRouterAndAuthFailure(t *testing.T) {
+	t.Setenv("DEV_MODE", "true")
 	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "router-data.json"))
-	router := NewRouter()
+	router, err := NewRouterFromEnv()
+	if err != nil {
+		t.Fatalf("create router: %v", err)
+	}
 	health := doRawRequest(t, router, http.MethodGet, "/healthz", nil, nil)
 	if health.Code != http.StatusOK {
 		t.Fatalf("expected health from NewRouter, got %d", health.Code)
@@ -430,6 +434,46 @@ func TestRouterNewRouterAndAuthFailure(t *testing.T) {
 	response := doRawRequest(t, routerWithFailingAuth, http.MethodGet, "/api/organisations", nil, nil)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized for failing auth provider, got %d", response.Code)
+	}
+}
+
+func TestRouterNewRouterProductionModeRequiresJWTSecret(t *testing.T) {
+	t.Setenv("PRODUCTION_MODE", "true")
+	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "")
+	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "prod-data.json"))
+
+	if _, err := NewRouterFromEnv(); err == nil {
+		t.Fatal("expected router creation to fail without production JWT secret")
+	}
+}
+
+func TestRouterNewRouterProductionModeCORSAllowlistAndAuth(t *testing.T) {
+	t.Setenv("PRODUCTION_MODE", "true")
+	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "test-secret")
+	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "prod-router-data.json"))
+
+	router, err := NewRouterFromEnv()
+	if err != nil {
+		t.Fatalf("create production router: %v", err)
+	}
+
+	allowlistedOriginResponse := doRawRequest(t, router, http.MethodGet, "/api/organisations", nil, map[string]string{
+		"Origin": "https://app.example.com",
+	})
+	if allowlistedOriginResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized without bearer token, got %d", allowlistedOriginResponse.Code)
+	}
+	if got := allowlistedOriginResponse.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+		t.Fatalf("expected allowlisted origin header, got %q", got)
+	}
+
+	blockedOriginResponse := doRawRequest(t, router, http.MethodGet, "/api/organisations", nil, map[string]string{
+		"Origin": "https://blocked.example.com",
+	})
+	if got := blockedOriginResponse.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected blocked origin to be omitted from CORS header, got %q", got)
 	}
 }
 

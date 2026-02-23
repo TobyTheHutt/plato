@@ -117,13 +117,35 @@ cd backend
 go run ./cmd/plato
 ```
 
+### Backend runtime mode
+
+The backend supports explicit runtime modes:
+- `DEV_MODE=true` enables development mode with header-based dev auth
+- `PRODUCTION_MODE=true` enables production mode with JWT auth
+- If both are unset, the backend defaults to production mode
+- `DEV_MODE` and `PRODUCTION_MODE` cannot both be `true`
+
 ### Backend environment
 
-- `PLATO_ADDR` default `:8070`
+- `PLATO_ADDR` default:
+  - `127.0.0.1:8070` in development mode
+  - `:8070` in production mode
 - `PLATO_DATA_FILE` default `./plato_runtime_data.json`
+- `PLATO_CORS_ALLOWED_ORIGINS` comma-separated origin allowlist. In production mode, wildcard `*` is rejected.
+- `PLATO_AUTH_JWT_HS256_SIGNING_KEY` required in production mode
+
+Development-mode auth settings:
 - `PLATO_DEV_USER_ID` default `dev-user`
 - `PLATO_DEV_ORG_ID` default empty
 - `PLATO_DEV_ROLES` default `org_admin`
+
+Production JWT requirements:
+- `Authorization: Bearer <token>` header is required
+- Token algorithm must be `HS256`
+- Token must include `exp`
+- Token must include `roles` as a comma-separated string or a string array
+- User identity can be provided by `sub` or `user_id`
+- Tenant scope can be provided by `org_id` or `organisation_id`
 
 ### Backend shutdown and HTTP timeouts
 
@@ -145,10 +167,32 @@ Monitoring recommendations:
 - Alert on repeated `server forced to shutdown` log entries
 - Track spikes in request timeouts and connection reset errors during deploy windows
 
-The frontend uses these dev auth headers on each request:
+The frontend uses these headers in development mode:
 - `X-User-ID`
 - `X-Org-ID`
 - `X-Role`
+
+### Production deployment guide
+
+1. Disable development mode
+2. Set production auth and CORS settings
+3. Provide JWTs from your identity provider or auth gateway
+
+Example startup:
+
+```bash
+cd backend
+PRODUCTION_MODE=true \
+PLATO_AUTH_JWT_HS256_SIGNING_KEY='replace-with-strong-signing-key' \
+PLATO_CORS_ALLOWED_ORIGINS='https://app.example.com,https://admin.example.com' \
+go run ./cmd/plato
+```
+
+Security checklist for production:
+- `DEV_MODE` is unset or `false`
+- `PLATO_AUTH_JWT_HS256_SIGNING_KEY` is configured
+- `PLATO_CORS_ALLOWED_ORIGINS` includes only trusted origins
+- `PLATO_ADDR` is explicitly set for your deployment network topology
 
 ### Demo seed data
 

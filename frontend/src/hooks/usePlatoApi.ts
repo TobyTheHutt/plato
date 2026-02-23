@@ -72,14 +72,21 @@ type OrganisationScopedData = {
   personUnavailability: PersonUnavailability[]
 }
 
+type RequestControlOptions = {
+  signal?: AbortSignal
+}
+
 export function usePlatoApi(options: UsePlatoApiOptions) {
   const { requestJSON, requestNoContent } = useApiClient(options)
 
-  const fetchOrganisations = useCallback(async (): Promise<Organisation[]> => {
-    return requestJSON<Organisation[]>("/api/organisations", { method: "GET" }, "", [])
+  const fetchOrganisations = useCallback(async (control?: RequestControlOptions): Promise<Organisation[]> => {
+    return requestJSON<Organisation[]>("/api/organisations", { method: "GET", signal: control?.signal }, "", [])
   }, [requestJSON])
 
-  const fetchOrganisationScopedData = useCallback(async (organisationID: string): Promise<OrganisationScopedData> => {
+  const fetchOrganisationScopedData = useCallback(async (
+    organisationID: string,
+    control?: RequestControlOptions
+  ): Promise<OrganisationScopedData> => {
     if (!organisationID) {
       return {
         persons: [],
@@ -91,10 +98,10 @@ export function usePlatoApi(options: UsePlatoApiOptions) {
     }
 
     const [persons, projects, groups, allocations] = await Promise.all([
-      requestJSON<Person[]>("/api/persons", { method: "GET" }, undefined, []),
-      requestJSON<Project[]>("/api/projects", { method: "GET" }, undefined, []),
-      requestJSON<Group[]>("/api/groups", { method: "GET" }, undefined, []),
-      requestJSON<Allocation[]>("/api/allocations", { method: "GET" }, undefined, [])
+      requestJSON<Person[]>("/api/persons", { method: "GET", signal: control?.signal }, undefined, []),
+      requestJSON<Project[]>("/api/projects", { method: "GET", signal: control?.signal }, undefined, []),
+      requestJSON<Group[]>("/api/groups", { method: "GET", signal: control?.signal }, undefined, []),
+      requestJSON<Allocation[]>("/api/allocations", { method: "GET", signal: control?.signal }, undefined, [])
     ])
 
     const personUnavailability: PersonUnavailability[] = []
@@ -106,7 +113,7 @@ export function usePlatoApi(options: UsePlatoApiOptions) {
         personBatch.map((person) =>
           requestJSON<PersonUnavailability[]>(
             `/api/persons/${person.id}/unavailability`,
-            { method: "GET" },
+            { method: "GET", signal: control?.signal },
             undefined,
             []
           )
@@ -118,7 +125,7 @@ export function usePlatoApi(options: UsePlatoApiOptions) {
           personUnavailability.push(...result.value)
           return
         }
-        const failedPersonID = personBatch[resultIndex]?.id ?? "unknown"
+        const failedPersonID = personBatch[resultIndex].id
         personLoadErrors.push(`${failedPersonID}: ${toErrorMessage(result.reason)}`)
       })
     }

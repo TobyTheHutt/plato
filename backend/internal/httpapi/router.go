@@ -19,34 +19,76 @@ const maxJSONBodyBytes int64 = 1 << 20
 
 type API struct {
 	authProvider ports.AuthProvider
+	corsPolicy   corsPolicy
 	service      *service.Service
 	cleanup      func() error
 	closeOnce    sync.Once
 	closeErr     error
 }
 
-func NewRouter() http.Handler {
+func NewRouter(runtimeConfig RuntimeConfig) (http.Handler, error) {
 	dataFile := strings.TrimSpace(os.Getenv("PLATO_DATA_FILE"))
 	repo, err := persistence.NewFileRepository(dataFile)
 	if err != nil {
-		panic(fmt.Sprintf("create repository (%q): %v", dataFile, err))
+		return nil, fmt.Errorf("create repository (%q): %w", dataFile, err)
 	}
+	cleanupOnError := func(cause error) error {
+		if closeErr := repo.Close(); closeErr != nil {
+			return fmt.Errorf("%w (cleanup repository: %s)", cause, closeErr.Error())
+		}
+		return cause
+	}
+
 	svc, err := service.New(repo, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
 	if err != nil {
-		panic(fmt.Sprintf("create service (%q): %v", dataFile, err))
+		return nil, cleanupOnError(fmt.Errorf("create service (%q): %w", dataFile, err))
+	}
+
+	authProvider, err := authProviderFromMode(runtimeConfig.Mode)
+	if err != nil {
+		return nil, cleanupOnError(err)
 	}
 
 	api := &API{
-		authProvider: auth.NewDevAuthProvider(),
+		authProvider: authProvider,
+		corsPolicy:   newCORSPolicy(runtimeConfig),
 		service:      svc,
 		cleanup:      repo.Close,
 	}
 
-	return api
+	return api, nil
+}
+
+func NewRouterFromEnv() (http.Handler, error) {
+	runtimeConfig, err := LoadRuntimeConfigFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("load runtime config: %w", err)
+	}
+	return NewRouter(runtimeConfig)
 }
 
 func NewRouterWithDependencies(authProvider ports.AuthProvider, svc *service.Service) http.Handler {
-	return &API{authProvider: authProvider, service: svc}
+	return &API{
+		authProvider: authProvider,
+		corsPolicy: newCORSPolicy(RuntimeConfig{
+			Mode:               RuntimeModeDevelopment,
+			AllowAnyCORSOrigin: true,
+		}),
+		service: svc,
+	}
+}
+
+func authProviderFromMode(mode RuntimeMode) (ports.AuthProvider, error) {
+	if mode.IsDevelopment() {
+		return auth.NewDevAuthProvider(), nil
+	}
+
+	provider, err := auth.NewJWTAuthProviderFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("create production auth provider: %w", err)
+	}
+
+	return provider, nil
 }
 
 func (a *API) Close() error {
@@ -64,7 +106,7 @@ func (a *API) Close() error {
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	setCORS(w)
+	setCORS(w, r, a.corsPolicy)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return

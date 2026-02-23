@@ -18,8 +18,9 @@ import (
 var (
 	runServer          = run
 	makeRouter         = httpapi.NewRouter
+	loadRuntimeConfig  = httpapi.LoadRuntimeConfigFromEnv
 	logPrintf          = log.Printf
-	logFatalf          = log.Fatalf
+	exitProcess        = os.Exit
 	signalNotify       = signal.Notify
 	signalStop         = signal.Stop
 	newShutdownContext = context.WithTimeout
@@ -28,13 +29,40 @@ var (
 const shutdownTimeout = 30 * time.Second
 
 func main() {
-	addr := getenv("PLATO_ADDR", ":8070")
+	runtimeConfig, err := loadRuntimeConfig()
+	if err != nil {
+		logPrintf("failed to load runtime config: %v", err)
+		exitProcess(1)
+		return
+	}
 
-	if err := runServer(addr, makeRouter(), func(server *http.Server, listener net.Listener) error {
+	logStartupWarnings(runtimeConfig, logPrintf)
+	addr := getenv("PLATO_ADDR", httpapi.DefaultListenAddr(runtimeConfig.Mode))
+
+	router, err := makeRouter(runtimeConfig)
+	if err != nil {
+		logPrintf("failed to initialize router: %v", err)
+		exitProcess(1)
+		return
+	}
+
+	if err := runServer(addr, router, func(server *http.Server, listener net.Listener) error {
 		return server.Serve(listener)
 	}, logPrintf); err != nil {
-		logFatalf("server failed: %v", err)
+		logPrintf("server failed: %v", err)
+		exitProcess(1)
+		return
 	}
+}
+
+func logStartupWarnings(runtimeConfig httpapi.RuntimeConfig, logger func(string, ...any)) {
+	if logger == nil || !runtimeConfig.Mode.IsDevelopment() {
+		return
+	}
+
+	logger("WARNING: backend is running in development mode")
+	logger("WARNING: development mode enables header-based dev auth and permissive CORS defaults")
+	logger("WARNING: do not expose development mode to untrusted networks")
 }
 
 func getenv(key, fallback string) string {

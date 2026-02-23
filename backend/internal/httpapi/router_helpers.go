@@ -11,6 +11,26 @@ import (
 	"plato/backend/internal/domain"
 )
 
+type corsPolicy struct {
+	allowAnyOrigin bool
+	allowedOrigins map[string]struct{}
+	allowHeaders   string
+	allowMethods   string
+}
+
+func newCORSPolicy(config RuntimeConfig) corsPolicy {
+	policy := corsPolicy{
+		allowAnyOrigin: config.AllowAnyCORSOrigin,
+		allowedOrigins: make(map[string]struct{}, len(config.CORSAllowedOrigins)),
+		allowHeaders:   "Content-Type, Authorization, X-User-ID, X-Org-ID, X-Role",
+		allowMethods:   "GET, POST, PUT, DELETE, OPTIONS",
+	}
+	for _, origin := range config.CORSAllowedOrigins {
+		policy.allowedOrigins[origin] = struct{}{}
+	}
+	return policy
+}
+
 func splitPath(path string) []string {
 	trimmed := strings.Trim(path, "/")
 	if trimmed == "" {
@@ -76,10 +96,26 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	}
 }
 
-func setCORS(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-User-ID, X-Org-ID, X-Role")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+func setCORS(w http.ResponseWriter, r *http.Request, policy corsPolicy) {
+	if policy.allowAnyOrigin {
+		w.Header().Set("Access-Control-Allow-Headers", policy.allowHeaders)
+		w.Header().Set("Access-Control-Allow-Methods", policy.allowMethods)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		return
+	}
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return
+	}
+	if _, allowed := policy.allowedOrigins[origin]; !allowed {
+		return
+	}
+
+	w.Header().Set("Access-Control-Allow-Headers", policy.allowHeaders)
+	w.Header().Set("Access-Control-Allow-Methods", policy.allowMethods)
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin")
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
