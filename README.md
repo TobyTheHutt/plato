@@ -151,7 +151,7 @@ Frontend thresholds:
 - Lines: 90%
 - Statements: 90%
 - Functions: 90%
-- Branches: 80%
+- Branches: 90%
 
 Backend thresholds:
 - Statements: 90%
@@ -217,7 +217,7 @@ Frontend:
 cd frontend
 npm run lint
 npm run typecheck
-npm test -- --coverage
+npm run test:coverage
 ```
 
 ### Dependency vulnerability scanning
@@ -268,7 +268,7 @@ Examples:
 
 ```makefile
 test-frontend:
-	cd frontend && npm test -- --coverage
+	cd frontend && npm run test:coverage
 
 deploy:
 	./scripts/deploy.sh "$(ENV)"
