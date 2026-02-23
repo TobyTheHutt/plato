@@ -34,6 +34,13 @@ type FileRepository struct {
 	persistedState fileState
 }
 
+func (r *FileRepository) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.persistLocked()
+}
+
 func NewFileRepository(path string) (*FileRepository, error) {
 	if path == "" {
 		path = "./plato_runtime_data.json"

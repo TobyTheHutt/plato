@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestGetenv(t *testing.T) {
@@ -22,16 +29,26 @@ func TestGetenv(t *testing.T) {
 func TestRun(t *testing.T) {
 	handler := http.NewServeMux()
 	loggerCalled := false
+	addr := "127.0.0.1:0"
 
-	if err := run(":8070", handler, func(server *http.Server) error {
-		if server.Addr != ":8070" {
+	if err := run(addr, handler, func(server *http.Server, _ net.Listener) error {
+		if server.Addr != addr {
 			t.Fatalf("unexpected server addr %s", server.Addr)
 		}
 		if server.Handler != handler {
 			t.Fatalf("unexpected server handler")
 		}
-		if server.ReadHeaderTimeout == 0 {
-			t.Fatalf("expected read header timeout to be set")
+		if server.ReadHeaderTimeout != 10*time.Second {
+			t.Fatalf("expected read header timeout 10s, got %v", server.ReadHeaderTimeout)
+		}
+		if server.ReadTimeout != 15*time.Second {
+			t.Fatalf("expected read timeout 15s, got %v", server.ReadTimeout)
+		}
+		if server.WriteTimeout != 15*time.Second {
+			t.Fatalf("expected write timeout 15s, got %v", server.WriteTimeout)
+		}
+		if server.IdleTimeout != 60*time.Second {
+			t.Fatalf("expected idle timeout 60s, got %v", server.IdleTimeout)
 		}
 		return nil
 	}, func(_ string, _ ...any) {
@@ -43,21 +60,359 @@ func TestRun(t *testing.T) {
 		t.Fatal("expected logger callback to be called")
 	}
 
-	if err := run(":8070", handler, func(_ *http.Server) error {
+	if err := run(addr, handler, func(_ *http.Server, _ net.Listener) error {
 		return http.ErrServerClosed
 	}, nil); err != nil {
 		t.Fatalf("expected nil on server closed, got %v", err)
 	}
 
 	expected := errors.New("boom")
-	if err := run(":8070", handler, func(_ *http.Server) error {
+	if err := run(addr, handler, func(_ *http.Server, _ net.Listener) error {
 		return expected
 	}, nil); !errors.Is(err, expected) {
 		t.Fatalf("expected propagated error, got %v", err)
 	}
 
-	if err := run(":8070", handler, nil, nil); err == nil {
+	if err := run(addr, handler, nil, nil); err == nil {
 		t.Fatal("expected error for nil start function")
+	}
+}
+
+func TestRunGracefulShutdownCallsCleanup(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+
+	startRelease := make(chan struct{})
+	handler := &testClosableHandler{Handler: http.NewServeMux()}
+	logs := make(chan string, 16)
+
+	runErrors := make(chan error, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", handler, func(_ *http.Server, _ net.Listener) error {
+			<-startRelease
+			return http.ErrServerClosed
+		}, func(format string, args ...any) {
+			logs <- fmt.Sprintf(format, args...)
+		})
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	signalChannel <- syscall.SIGTERM
+	close(startRelease)
+
+	if err := <-runErrors; err != nil {
+		t.Fatalf("expected graceful shutdown to return nil, got %v", err)
+	}
+	if !handler.closed {
+		t.Fatal("expected handler cleanup to run on shutdown")
+	}
+	logEntries := drainLogChannel(logs)
+	if !logsContain(logEntries, "shutdown signal received") {
+		t.Fatalf("expected shutdown log message, got %v", logEntries)
+	}
+	if !logsContain(logEntries, "resource cleanup completed") {
+		t.Fatalf("expected cleanup completion log message, got %v", logEntries)
+	}
+}
+
+func TestRunLogsTimeoutWaitingForServerGoroutine(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	previousNewShutdownContext := newShutdownContext
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+		newShutdownContext = previousNewShutdownContext
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+	newShutdownContext = func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(parent)
+		cancel()
+		return ctx, func() {}
+	}
+
+	startRelease := make(chan struct{})
+	logs := make(chan string, 16)
+	runErrors := make(chan error, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
+			<-startRelease
+			return nil
+		}, func(format string, args ...any) {
+			logs <- fmt.Sprintf(format, args...)
+		})
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	signalChannel <- syscall.SIGTERM
+
+	if err := <-runErrors; err != nil {
+		t.Fatalf("expected shutdown path to return nil, got %v", err)
+	}
+	close(startRelease)
+
+	logEntries := drainLogChannel(logs)
+	if !logsContain(logEntries, "timed out waiting for server goroutine to exit") {
+		t.Fatalf("expected timeout waiting for server goroutine log message, got %v", logEntries)
+	}
+}
+
+func TestRunLogsForcedShutdownWhenSlowRequestExceedsGracePeriod(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	previousNewShutdownContext := newShutdownContext
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+		newShutdownContext = previousNewShutdownContext
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+	newShutdownContext = func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(parent, 10*time.Millisecond)
+	}
+
+	slowRequestStarted := make(chan struct{})
+	releaseSlowRequest := make(chan struct{})
+	router := http.NewServeMux()
+	router.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	router.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
+		close(slowRequestStarted)
+		<-releaseSlowRequest
+		w.WriteHeader(http.StatusOK)
+	})
+
+	logs := make(chan string, 16)
+	runErrors := make(chan error, 1)
+	listenAddr := make(chan string, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", router, func(server *http.Server, listener net.Listener) error {
+			listenAddr <- listener.Addr().String()
+			return server.Serve(listener)
+		}, func(format string, args ...any) {
+			logs <- fmt.Sprintf(format, args...)
+		})
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	baseURL := "http://" + <-listenAddr
+	waitForReady(t, baseURL+"/ready")
+	go func() {
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, requestErr := doGetRequest(client, baseURL+"/slow")
+		if requestErr == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	<-slowRequestStarted
+	signalChannel <- syscall.SIGTERM
+	waitForLogMessage(t, logs, "server forced to shutdown")
+
+	if err := <-runErrors; err != nil {
+		t.Fatalf("expected shutdown flow to return nil after timeout, got %v", err)
+	}
+	close(releaseSlowRequest)
+}
+
+func TestRunReturnsServeErrorAfterShutdownSignal(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+
+	startRelease := make(chan struct{})
+	expected := errors.New("serve failure")
+	runErrors := make(chan error, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
+			<-startRelease
+			return expected
+		}, nil)
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	signalChannel <- syscall.SIGINT
+	close(startRelease)
+
+	if err := <-runErrors; !errors.Is(err, expected) {
+		t.Fatalf("expected serve error %v after shutdown, got %v", expected, err)
+	}
+}
+
+func TestRunAllowsInFlightRequestAndRejectsNewRequestsOnShutdown(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+
+	slowRequestStarted := make(chan struct{})
+	releaseSlowRequest := make(chan struct{})
+	router := http.NewServeMux()
+	router.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	router.HandleFunc("/slow", func(w http.ResponseWriter, _ *http.Request) {
+		close(slowRequestStarted)
+		<-releaseSlowRequest
+		w.WriteHeader(http.StatusOK)
+		if _, writeErr := w.Write([]byte("ok")); writeErr != nil {
+			return
+		}
+	})
+
+	logs := make(chan string, 16)
+	runErrors := make(chan error, 1)
+	listenAddr := make(chan string, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", router, func(server *http.Server, listener net.Listener) error {
+			listenAddr <- listener.Addr().String()
+			return server.Serve(listener)
+		}, func(format string, args ...any) {
+			logs <- fmt.Sprintf(format, args...)
+		})
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	baseURL := "http://" + <-listenAddr
+	waitForReady(t, baseURL+"/ready")
+
+	slowResponseErrors := make(chan error, 1)
+	go func() {
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, requestErr := doGetRequest(client, baseURL+"/slow")
+		if requestErr != nil {
+			slowResponseErrors <- requestErr
+			return
+		}
+		defer resp.Body.Close()
+		if _, readErr := io.ReadAll(resp.Body); readErr != nil {
+			slowResponseErrors <- fmt.Errorf("read slow response body: %w", readErr)
+			return
+		}
+		if resp.StatusCode != http.StatusOK {
+			slowResponseErrors <- fmt.Errorf("expected slow response 200, got %d", resp.StatusCode)
+			return
+		}
+		slowResponseErrors <- nil
+	}()
+
+	<-slowRequestStarted
+	signalChannel <- syscall.SIGINT
+	waitForLogMessage(t, logs, "shutdown signal received")
+
+	if err := waitForRequestRejection(baseURL + "/ready"); err != nil {
+		t.Fatalf("expected new requests to be rejected after shutdown signal: %v", err)
+	}
+
+	close(releaseSlowRequest)
+	if err := <-slowResponseErrors; err != nil {
+		t.Fatalf("expected in-flight request to complete successfully: %v", err)
+	}
+	if err := <-runErrors; err != nil {
+		t.Fatalf("expected graceful shutdown to complete without error, got %v", err)
+	}
+}
+
+func TestCloseResources(t *testing.T) {
+	if err := closeResources(nil); err != nil {
+		t.Fatalf("expected nil for nil handler, got %v", err)
+	}
+
+	if err := closeResources(http.NewServeMux()); err != nil {
+		t.Fatalf("expected nil for non-closable handler, got %v", err)
+	}
+
+	expected := errors.New("close failed")
+	handler := &testClosableHandler{
+		Handler:  http.NewServeMux(),
+		closeErr: expected,
+	}
+	if err := closeResources(handler); !errors.Is(err, expected) {
+		t.Fatalf("expected close error %v, got %v", expected, err)
+	}
+	if !handler.closed {
+		t.Fatal("expected close to be called on closable handler")
+	}
+}
+
+func TestRunLogsCleanupFailure(t *testing.T) {
+	previousSignalNotify := signalNotify
+	previousSignalStop := signalStop
+	t.Cleanup(func() {
+		signalNotify = previousSignalNotify
+		signalStop = previousSignalStop
+	})
+
+	registeredSignalChannel := make(chan chan<- os.Signal, 1)
+	signalNotify = func(c chan<- os.Signal, _ ...os.Signal) {
+		registeredSignalChannel <- c
+	}
+	signalStop = func(chan<- os.Signal) {}
+
+	startRelease := make(chan struct{})
+	logs := make(chan string, 16)
+	handler := &testClosableHandler{
+		Handler:  http.NewServeMux(),
+		closeErr: errors.New("cleanup failed"),
+	}
+	runErrors := make(chan error, 1)
+	go func() {
+		runErrors <- run("127.0.0.1:0", handler, func(_ *http.Server, _ net.Listener) error {
+			<-startRelease
+			return nil
+		}, func(format string, args ...any) {
+			logs <- fmt.Sprintf(format, args...)
+		})
+	}()
+
+	signalChannel := <-registeredSignalChannel
+	signalChannel <- syscall.SIGTERM
+	close(startRelease)
+
+	if err := <-runErrors; err != nil {
+		t.Fatalf("expected shutdown to continue when cleanup fails, got %v", err)
+	}
+	logEntries := drainLogChannel(logs)
+	if !logsContain(logEntries, "resource cleanup failed") {
+		t.Fatalf("expected cleanup failure to be logged, got %v", logEntries)
 	}
 }
 
@@ -79,7 +434,7 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 	}
 
 	runCalled := false
-	runServer = func(addr string, handler http.Handler, start func(*http.Server) error, logger func(string, ...any)) error {
+	runServer = func(addr string, handler http.Handler, start func(*http.Server, net.Listener) error, logger func(string, ...any)) error {
 		runCalled = true
 		if addr != ":8123" {
 			t.Fatalf("expected main to pass env addr, got %s", addr)
@@ -89,6 +444,18 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 		}
 		if logger == nil {
 			t.Fatal("expected logger function")
+		}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("create listener for main callback: %v", err)
+		}
+		startErr := make(chan error, 1)
+		go func() {
+			startErr <- start(&http.Server{}, listener)
+		}()
+		_ = listener.Close()
+		if serveErr := <-startErr; serveErr == nil {
+			t.Fatal("expected start callback from main to return serve error when listener closes")
 		}
 		return nil
 	}
@@ -103,7 +470,7 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 	}
 
 	t.Setenv("PLATO_ADDR", "")
-	runServer = func(addr string, _ http.Handler, _ func(*http.Server) error, _ func(string, ...any)) error {
+	runServer = func(addr string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
 		if addr != ":8070" {
 			t.Fatalf("expected fallback addr in main, got %s", addr)
 		}
@@ -111,7 +478,7 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 	}
 	main()
 
-	runServer = func(_ string, _ http.Handler, _ func(*http.Server) error, _ func(string, ...any)) error {
+	runServer = func(_ string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
 		return errors.New("boom")
 	}
 	var fatalMessage string
@@ -122,4 +489,112 @@ func TestMainUsesRunServerAndFatalHandler(t *testing.T) {
 	if !strings.Contains(fatalMessage, "server failed") {
 		t.Fatalf("expected fatal message to include server failed, got %q", fatalMessage)
 	}
+}
+
+type testClosableHandler struct {
+	http.Handler
+	closeErr error
+	closed   bool
+}
+
+func (h *testClosableHandler) Close() error {
+	h.closed = true
+	return h.closeErr
+}
+
+func logsContain(logs []string, substring string) bool {
+	for _, entry := range logs {
+		if strings.Contains(entry, substring) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func waitForReady(t *testing.T, url string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := doGetRequest(client, url)
+		if err == nil {
+			_ = resp.Body.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("server did not become ready: %s", url)
+}
+
+func waitForLogMessage(t *testing.T, logs <-chan string, substring string) {
+	t.Helper()
+
+	timeout := time.NewTimer(2 * time.Second)
+	defer timeout.Stop()
+
+	for {
+		select {
+		case entry := <-logs:
+			if strings.Contains(entry, substring) {
+				return
+			}
+		case <-timeout.C:
+			t.Fatalf("did not observe log message containing %q", substring)
+		}
+	}
+}
+
+func waitForRequestRejection(url string) error {
+	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 150 * time.Millisecond}
+
+	for time.Now().Before(deadline) {
+		resp, requestErr := doGetRequest(client, url)
+		if requestErr == nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				return fmt.Errorf("close probe response body: %w", closeErr)
+			}
+		}
+		if requestRejected(resp, requestErr) {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return fmt.Errorf("request to %s kept succeeding during shutdown", url)
+}
+
+func drainLogChannel(logs <-chan string) []string {
+	entries := make([]string, 0, 8)
+	for {
+		select {
+		case entry := <-logs:
+			entries = append(entries, entry)
+		default:
+			return entries
+		}
+	}
+}
+
+func requestRejected(resp *http.Response, requestErr error) bool {
+	if requestErr != nil {
+		return true
+	}
+
+	return resp.StatusCode >= http.StatusInternalServerError
+}
+
+func doGetRequest(client *http.Client, url string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), client.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Do(req)
 }

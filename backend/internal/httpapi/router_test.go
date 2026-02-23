@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"plato/backend/internal/adapters/auth"
@@ -144,6 +145,46 @@ func TestDefaultAuthValuesEnableDevFlow(t *testing.T) {
 	rec := doJSONRequest(t, router, http.MethodPost, "/api/organisations", map[string]any{"name": "Org dev", "hours_per_day": 8, "hours_per_week": 40, "hours_per_year": 2080}, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected create organisation with default auth, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPICloseRunsCleanupOnceAcrossConcurrentCallers(t *testing.T) {
+	expected := errors.New("cleanup failed")
+	callCount := 0
+	var countMu sync.Mutex
+
+	api := &API{
+		cleanup: func() error {
+			countMu.Lock()
+			callCount++
+			countMu.Unlock()
+			return expected
+		},
+	}
+
+	const callerCount = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, callerCount)
+	for i := 0; i < callerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- api.Close()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if !errors.Is(err, expected) {
+			t.Fatalf("expected close error %v, got %v", expected, err)
+		}
+	}
+
+	countMu.Lock()
+	defer countMu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("expected cleanup to run once, got %d calls", callCount)
 	}
 }
 

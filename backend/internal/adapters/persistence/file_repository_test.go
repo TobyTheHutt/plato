@@ -581,3 +581,43 @@ func TestSortingHelpers(t *testing.T) {
 		t.Fatalf("unexpected person unavailability sort order: %+v", personUnavailable)
 	}
 }
+
+func TestFileRepositoryClose(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "repo.json")
+
+	repo, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+
+	created, err := repo.CreateOrganisation(ctx, domain.Organisation{
+		Name:         "Close Persisted Org",
+		HoursPerDay:  8,
+		HoursPerWeek: 40,
+		HoursPerYear: 2080,
+	})
+	if err != nil {
+		t.Fatalf("create organisation: %v", err)
+	}
+
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repository: %v", err)
+	}
+
+	if err := repo.Close(); err != nil {
+		t.Fatalf("close repository second time: %v", err)
+	}
+
+	reopened, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf("reopen repository: %v", err)
+	}
+	organisations, err := reopened.ListOrganisations(ctx)
+	if err != nil {
+		t.Fatalf("list organisations after reopen: %v", err)
+	}
+	if len(organisations) != 1 || organisations[0].ID != created.ID {
+		t.Fatalf("expected persisted organisation after close, got %+v", organisations)
+	}
+}

@@ -125,6 +125,26 @@ go run ./cmd/plato
 - `PLATO_DEV_ORG_ID` default empty
 - `PLATO_DEV_ROLES` default `org_admin`
 
+### Backend shutdown and HTTP timeouts
+
+The backend handles `SIGINT` and `SIGTERM` with a graceful shutdown sequence:
+- Stop accepting new requests
+- Drain in-flight requests for up to 30 seconds
+- Close repository resources before process exit
+
+HTTP server timeouts are configured with production-safe defaults:
+- `ReadHeaderTimeout`: 10 seconds, mitigates slowloris-style header attacks
+- `ReadTimeout`: 15 seconds, limits slow request body uploads
+- `WriteTimeout`: 15 seconds, limits slow client response reads
+- `IdleTimeout`: 60 seconds, limits idle keep-alive connection buildup
+
+For deployments and orchestrators, allow at least 30 seconds for termination so in-flight requests can complete under normal load.
+
+Monitoring recommendations:
+- Track shutdown duration from signal receipt to process exit
+- Alert on repeated `server forced to shutdown` log entries
+- Track spikes in request timeouts and connection reset errors during deploy windows
+
 The frontend uses these dev auth headers on each request:
 - `X-User-ID`
 - `X-Org-ID`

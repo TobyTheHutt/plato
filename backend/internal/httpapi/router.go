@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"plato/backend/internal/adapters/auth"
 	"plato/backend/internal/adapters/impexp"
@@ -19,6 +20,9 @@ const maxJSONBodyBytes int64 = 1 << 20
 type API struct {
 	authProvider ports.AuthProvider
 	service      *service.Service
+	cleanup      func() error
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 func NewRouter() http.Handler {
@@ -35,6 +39,7 @@ func NewRouter() http.Handler {
 	api := &API{
 		authProvider: auth.NewDevAuthProvider(),
 		service:      svc,
+		cleanup:      repo.Close,
 	}
 
 	return api
@@ -42,6 +47,20 @@ func NewRouter() http.Handler {
 
 func NewRouterWithDependencies(authProvider ports.AuthProvider, svc *service.Service) http.Handler {
 	return &API{authProvider: authProvider, service: svc}
+}
+
+func (a *API) Close() error {
+	a.closeOnce.Do(func() {
+		if a.cleanup == nil {
+			return
+		}
+
+		cleanup := a.cleanup
+		a.cleanup = nil
+		a.closeErr = cleanup()
+	})
+
+	return a.closeErr
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
