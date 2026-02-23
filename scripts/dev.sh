@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Run frontend in one terminal"
+echo "Recommended workflow"
+echo "  make start"
+echo "  make status"
+echo "  make stop"
+echo "  make restart"
+
+echo "Manual fallback for frontend"
 echo "  cd frontend"
 echo "  npm install"
 echo "  npm run dev"
 
-echo "Run backend in another terminal"
+echo "Manual fallback for backend"
 echo "  cd backend"
 echo "  go run ./cmd/plato"

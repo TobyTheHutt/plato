@@ -102,15 +102,32 @@ Router logic is organized by domain in `backend/internal/httpapi`:
 
 ### Run in development
 
-Frontend:
+Use the coordinated Make targets from the repository root:
+
+```bash
+make start
+make status
+make stop
+make restart
+```
+
+Available service control targets:
+- `make start-backend`
+- `make start-frontend` (starts backend first if needed)
+- `make stop-backend`
+- `make stop-frontend`
+
+`make start` waits for backend `GET /healthz` before starting the frontend.
+Service PID files, logs, and the local backend binary are written to `.make/`.
+By default, these targets run the backend with `DEV_MODE=true` and `PRODUCTION_MODE=false` for local development.
+
+Manual fallback:
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-Backend:
 
 ```bash
 cd backend

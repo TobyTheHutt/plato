@@ -33,10 +33,13 @@ backend/plato_data.json
 
 # Editor/IDE
 # .idea/
-# .vscode/
+.vscode/
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
 frontend/.vite/
+
+# Development service runtime artifacts
+.make/
