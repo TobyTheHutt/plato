@@ -190,58 +190,94 @@ func TestAPICloseRunsCleanupOnceAcrossConcurrentCallers(t *testing.T) {
 
 func TestEndToEndCRUDRoutes(t *testing.T) {
 	router := newTestRouter(t)
-	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
-	adminHeaders := map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID}
+	state := setupEndToEndCRUDRoutesState(t, router)
+	validateEndToEndCRUDOrganisationPersonsProjects(t, router, state)
+	validateEndToEndCRUDGroupsAllocationsCalendar(t, router, state)
+	validateEndToEndCRUDReportsAndDeletion(t, router, state)
+}
 
-	organisations := doJSONRequest(t, router, http.MethodGet, "/api/organisations", nil, adminHeaders)
+type endToEndCRUDRoutesState struct {
+	orgID                  string
+	adminHeaders           map[string]string
+	personA                string
+	personB                string
+	projectA               string
+	projectB               string
+	groupID                string
+	allocationID           string
+	holidayID              string
+	personUnavailabilityID string
+	groupUnavailabilityID  string
+}
+
+func setupEndToEndCRUDRoutesState(t *testing.T, router http.Handler) *endToEndCRUDRoutesState {
+	t.Helper()
+	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
+	return &endToEndCRUDRoutesState{
+		orgID:        orgID,
+		adminHeaders: map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID},
+	}
+}
+
+func validateEndToEndCRUDOrganisationPersonsProjects(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
+
+	organisations := doJSONRequest(t, router, http.MethodGet, "/api/organisations", nil, state.adminHeaders)
 	if organisations.Code != http.StatusOK {
 		t.Fatalf("expected list organisations success, got %d", organisations.Code)
 	}
 
-	updateOrg := doJSONRequest(t, router, http.MethodPut, "/api/organisations/"+orgID, map[string]any{
+	updateOrg := doJSONRequest(t, router, http.MethodPut, "/api/organisations/"+state.orgID, map[string]any{
 		"name":           "Updated Org",
 		"hours_per_day":  7.5,
 		"hours_per_week": 37.5,
 		"hours_per_year": 1950,
-	}, adminHeaders)
+	}, state.adminHeaders)
 	if updateOrg.Code != http.StatusOK {
 		t.Fatalf("expected update organisation success, got %d body=%s", updateOrg.Code, updateOrg.Body.String())
 	}
 
-	personA := createPerson(t, router, orgID, "Alice", 100)
-	personB := createPerson(t, router, orgID, "Bob", 80)
+	state.personA = createPerson(t, router, state.orgID, "Alice", 100)
+	state.personB = createPerson(t, router, state.orgID, "Bob", 80)
 
-	getPerson := doJSONRequest(t, router, http.MethodGet, "/api/persons/"+personA, nil, adminHeaders)
+	getPerson := doJSONRequest(t, router, http.MethodGet, "/api/persons/"+state.personA, nil, state.adminHeaders)
 	if getPerson.Code != http.StatusOK {
 		t.Fatalf("expected get person success, got %d", getPerson.Code)
 	}
 
-	updatePerson := doJSONRequest(t, router, http.MethodPut, "/api/persons/"+personB, map[string]any{"name": "Bob Updated", "employment_pct": 75}, adminHeaders)
+	updatePerson := doJSONRequest(t, router, http.MethodPut, "/api/persons/"+state.personB, map[string]any{"name": "Bob Updated", "employment_pct": 75}, state.adminHeaders)
 	if updatePerson.Code != http.StatusOK {
 		t.Fatalf("expected update person success, got %d body=%s", updatePerson.Code, updatePerson.Body.String())
 	}
-	listPersons := doJSONRequest(t, router, http.MethodGet, "/api/persons", nil, adminHeaders)
+
+	listPersons := doJSONRequest(t, router, http.MethodGet, "/api/persons", nil, state.adminHeaders)
 	if listPersons.Code != http.StatusOK {
 		t.Fatalf("expected list persons success, got %d", listPersons.Code)
 	}
 
-	projectA := createProject(t, router, orgID, "Project A")
-	projectB := createProject(t, router, orgID, "Project B")
-	getProject := doJSONRequest(t, router, http.MethodGet, "/api/projects/"+projectA, nil, adminHeaders)
+	state.projectA = createProject(t, router, state.orgID, "Project A")
+	state.projectB = createProject(t, router, state.orgID, "Project B")
+
+	getProject := doJSONRequest(t, router, http.MethodGet, "/api/projects/"+state.projectA, nil, state.adminHeaders)
 	if getProject.Code != http.StatusOK {
 		t.Fatalf("expected get project success, got %d", getProject.Code)
 	}
 
-	updateProject := doJSONRequest(t, router, http.MethodPut, "/api/projects/"+projectB, projectPayload("Project B Updated"), adminHeaders)
+	updateProject := doJSONRequest(t, router, http.MethodPut, "/api/projects/"+state.projectB, projectPayload("Project B Updated"), state.adminHeaders)
 	if updateProject.Code != http.StatusOK {
 		t.Fatalf("expected update project success, got %d body=%s", updateProject.Code, updateProject.Body.String())
 	}
-	listProjects := doJSONRequest(t, router, http.MethodGet, "/api/projects", nil, adminHeaders)
+
+	listProjects := doJSONRequest(t, router, http.MethodGet, "/api/projects", nil, state.adminHeaders)
 	if listProjects.Code != http.StatusOK {
 		t.Fatalf("expected list projects success, got %d", listProjects.Code)
 	}
+}
 
-	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Team One", "member_ids": []string{personA}}, adminHeaders)
+func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
+
+	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Team One", "member_ids": []string{state.personA}}, state.adminHeaders)
 	if createGroup.Code != http.StatusCreated {
 		t.Fatalf("expected create group success, got %d body=%s", createGroup.Code, createGroup.Body.String())
 	}
@@ -249,27 +285,24 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if err := json.Unmarshal(createGroup.Body.Bytes(), &group); err != nil {
 		t.Fatalf("decode group: %v", err)
 	}
+	state.groupID = group.ID
 
-	getGroup := doJSONRequest(t, router, http.MethodGet, "/api/groups/"+group.ID, nil, adminHeaders)
+	getGroup := doJSONRequest(t, router, http.MethodGet, "/api/groups/"+state.groupID, nil, state.adminHeaders)
 	if getGroup.Code != http.StatusOK {
 		t.Fatalf("expected get group success, got %d", getGroup.Code)
 	}
-	listGroups := doJSONRequest(t, router, http.MethodGet, "/api/groups", nil, adminHeaders)
-	if listGroups.Code != http.StatusOK {
-		t.Fatalf("expected list groups success, got %d", listGroups.Code)
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/groups", nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected list groups success, got %d", code)
 	}
 
-	addMember := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+group.ID+"/members", map[string]any{"person_id": personB}, adminHeaders)
-	if addMember.Code != http.StatusOK {
-		t.Fatalf("expected add group member success, got %d body=%s", addMember.Code, addMember.Body.String())
+	if code := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+state.groupID+"/members", map[string]any{"person_id": state.personB}, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected add group member success, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID+"/members/"+state.personB, nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected remove group member success, got %d", code)
 	}
 
-	removeMember := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+group.ID+"/members/"+personB, nil, adminHeaders)
-	if removeMember.Code != http.StatusOK {
-		t.Fatalf("expected remove group member success, got %d body=%s", removeMember.Code, removeMember.Body.String())
-	}
-
-	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personA, projectA, 50), adminHeaders)
+	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(state.personA, state.projectA, 50), state.adminHeaders)
 	if createAllocation.Code != http.StatusCreated {
 		t.Fatalf("expected create allocation success, got %d body=%s", createAllocation.Code, createAllocation.Body.String())
 	}
@@ -277,22 +310,19 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if err := json.Unmarshal(createAllocation.Body.Bytes(), &allocation); err != nil {
 		t.Fatalf("decode allocation: %v", err)
 	}
+	state.allocationID = allocation.ID
 
-	getAllocation := doJSONRequest(t, router, http.MethodGet, "/api/allocations/"+allocation.ID, nil, adminHeaders)
-	if getAllocation.Code != http.StatusOK {
-		t.Fatalf("expected get allocation success, got %d", getAllocation.Code)
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/allocations/"+state.allocationID, nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected get allocation success, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodPut, "/api/allocations/"+state.allocationID, personAllocationPayload(state.personA, state.projectA, 45), state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected update allocation success, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/allocations", nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected list allocations success, got %d", code)
 	}
 
-	updateAllocation := doJSONRequest(t, router, http.MethodPut, "/api/allocations/"+allocation.ID, personAllocationPayload(personA, projectA, 45), adminHeaders)
-	if updateAllocation.Code != http.StatusOK {
-		t.Fatalf("expected update allocation success, got %d body=%s", updateAllocation.Code, updateAllocation.Body.String())
-	}
-	listAllocations := doJSONRequest(t, router, http.MethodGet, "/api/allocations", nil, adminHeaders)
-	if listAllocations.Code != http.StatusOK {
-		t.Fatalf("expected list allocations success, got %d", listAllocations.Code)
-	}
-
-	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+orgID+"/holidays", map[string]any{"date": "2026-01-01", "hours": 7.5}, adminHeaders)
+	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+state.orgID+"/holidays", map[string]any{"date": "2026-01-01", "hours": 7.5}, state.adminHeaders)
 	if createHoliday.Code != http.StatusCreated {
 		t.Fatalf("expected create holiday success, got %d body=%s", createHoliday.Code, createHoliday.Body.String())
 	}
@@ -300,13 +330,13 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if err := json.Unmarshal(createHoliday.Body.Bytes(), &holiday); err != nil {
 		t.Fatalf("decode holiday: %v", err)
 	}
+	state.holidayID = holiday.ID
 
-	listHolidays := doJSONRequest(t, router, http.MethodGet, "/api/organisations/"+orgID+"/holidays", nil, adminHeaders)
-	if listHolidays.Code != http.StatusOK {
-		t.Fatalf("expected list holidays success, got %d", listHolidays.Code)
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/organisations/"+state.orgID+"/holidays", nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected list holidays success, got %d", code)
 	}
 
-	createPersonUnavailable := doJSONRequest(t, router, http.MethodPost, "/api/persons/"+personA+"/unavailability", map[string]any{"date": "2026-01-02", "hours": 2}, adminHeaders)
+	createPersonUnavailable := doJSONRequest(t, router, http.MethodPost, "/api/persons/"+state.personA+"/unavailability", map[string]any{"date": "2026-01-02", "hours": 2}, state.adminHeaders)
 	if createPersonUnavailable.Code != http.StatusCreated {
 		t.Fatalf("expected create person unavailability success, got %d body=%s", createPersonUnavailable.Code, createPersonUnavailable.Body.String())
 	}
@@ -314,13 +344,13 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if err := json.Unmarshal(createPersonUnavailable.Body.Bytes(), &personUnavailable); err != nil {
 		t.Fatalf("decode person unavailability: %v", err)
 	}
+	state.personUnavailabilityID = personUnavailable.ID
 
-	listPersonUnavailable := doJSONRequest(t, router, http.MethodGet, "/api/persons/"+personA+"/unavailability", nil, adminHeaders)
-	if listPersonUnavailable.Code != http.StatusOK {
-		t.Fatalf("expected list person unavailability success, got %d", listPersonUnavailable.Code)
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/persons/"+state.personA+"/unavailability", nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected list person unavailability success, got %d", code)
 	}
 
-	createGroupUnavailable := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+group.ID+"/unavailability", map[string]any{"date": "2026-01-03", "hours": 3}, adminHeaders)
+	createGroupUnavailable := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+state.groupID+"/unavailability", map[string]any{"date": "2026-01-03", "hours": 3}, state.adminHeaders)
 	if createGroupUnavailable.Code != http.StatusCreated {
 		t.Fatalf("expected create group unavailability success, got %d body=%s", createGroupUnavailable.Code, createGroupUnavailable.Body.String())
 	}
@@ -328,22 +358,27 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 	if err := json.Unmarshal(createGroupUnavailable.Body.Bytes(), &groupUnavailable); err != nil {
 		t.Fatalf("decode group unavailability: %v", err)
 	}
+	state.groupUnavailabilityID = groupUnavailable.ID
 
-	listGroupUnavailable := doJSONRequest(t, router, http.MethodGet, "/api/groups/"+group.ID+"/unavailability", nil, adminHeaders)
-	if listGroupUnavailable.Code != http.StatusOK {
-		t.Fatalf("expected list group unavailability success, got %d", listGroupUnavailable.Code)
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/groups/"+state.groupID+"/unavailability", nil, state.adminHeaders).Code; code != http.StatusOK {
+		t.Fatalf("expected list group unavailability success, got %d", code)
 	}
+}
+
+func validateEndToEndCRUDReportsAndDeletion(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
 
 	report := doJSONRequest(t, router, http.MethodPost, "/api/reports/availability-load", map[string]any{
 		"scope":       "project",
-		"ids":         []string{projectA},
+		"ids":         []string{state.projectA},
 		"from_date":   "2026-01-01",
 		"to_date":     "2026-01-03",
 		"granularity": "month",
-	}, map[string]string{"X-Role": "org_user", "X-Org-ID": orgID})
+	}, map[string]string{"X-Role": "org_user", "X-Org-ID": state.orgID})
 	if report.Code != http.StatusOK {
 		t.Fatalf("expected report success, got %d body=%s", report.Code, report.Body.String())
 	}
+
 	var reportPayload struct {
 		Buckets []domain.ReportBucket `json:"buckets"`
 	}
@@ -363,48 +398,47 @@ func TestEndToEndCRUDRoutes(t *testing.T) {
 		t.Fatalf("expected project completion percent in report, got %v", reportPayload.Buckets[0].CompletionPct)
 	}
 
-	options := doRawRequest(t, router, http.MethodOptions, "/api/persons", nil, nil)
-	if options.Code != http.StatusNoContent {
-		t.Fatalf("expected options status 204, got %d", options.Code)
+	if code := doRawRequest(t, router, http.MethodOptions, "/api/persons", nil, nil).Code; code != http.StatusNoContent {
+		t.Fatalf("expected options status 204, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/missing", nil, state.adminHeaders).Code; code != http.StatusNotFound {
+		t.Fatalf("expected not found status, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, state.adminHeaders).Code; code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected report wrong method 405, got %d", code)
 	}
 
-	notFound := doJSONRequest(t, router, http.MethodGet, "/api/missing", nil, adminHeaders)
-	if notFound.Code != http.StatusNotFound {
-		t.Fatalf("expected not found status, got %d", notFound.Code)
-	}
-	reportWrongMethod := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, adminHeaders)
-	if reportWrongMethod.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected report wrong method 405, got %d", reportWrongMethod.Code)
-	}
-
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+group.ID+"/unavailability/"+groupUnavailable.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID+"/unavailability/"+state.groupUnavailabilityID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete group unavailability success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personA+"/unavailability/missing", nil, adminHeaders).Code; code != http.StatusNotFound {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+state.personA+"/unavailability/missing", nil, state.adminHeaders).Code; code != http.StatusNotFound {
 		t.Fatalf("expected delete person unavailability with missing entry to be not found, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personB+"/unavailability/"+personUnavailable.ID, nil, adminHeaders).Code; code != http.StatusForbidden {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+state.personB+"/unavailability/"+state.personUnavailabilityID, nil, state.adminHeaders).Code; code != http.StatusForbidden {
 		t.Fatalf("expected delete person unavailability with mismatched person path to be forbidden, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personA+"/unavailability/"+personUnavailable.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+state.personA+"/unavailability/"+state.personUnavailabilityID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete person unavailability success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/organisations/"+orgID+"/holidays/"+holiday.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/organisations/"+state.orgID+"/holidays/"+state.holidayID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete holiday success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/allocations/"+allocation.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/allocations/"+state.allocationID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete allocation success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/projects/"+projectB, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/projects/"+state.projectB, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete project success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+group.ID, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/projects/"+state.projectA, nil, state.adminHeaders).Code; code != http.StatusNoContent {
+		t.Fatalf("expected delete project A success, got %d", code)
+	}
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete group success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personB, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+state.personB, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete person B success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+personA, nil, adminHeaders).Code; code != http.StatusNoContent {
+	if code := doJSONRequest(t, router, http.MethodDelete, "/api/persons/"+state.personA, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete person A success, got %d", code)
 	}
 }

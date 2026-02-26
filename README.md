@@ -255,6 +255,10 @@ Frontend lint quality gates are also enforced for maintainability:
 Current transitional exception:
 - `frontend/src/App.tsx` has a temporary higher complexity cap of 45 and no `max-lines-per-function` cap until it is split into smaller components
 
+Backend test lint policy:
+- `funlen`, `gocognit`, `gocyclo`, `cyclop`, `nestif`, `maintidx`, `dupl`, and `gosec` are enabled for `_test.go` files to keep test functions readable and maintainable as suites grow
+- Exact linter thresholds and test-file exceptions are defined in `.golangci.yml`.
+
 ### Unified quality checks
 
 Run quality checks from the repository root with `make`.

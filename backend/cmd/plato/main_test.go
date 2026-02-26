@@ -458,7 +458,7 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 		}
 		startErr := make(chan error, 1)
 		go func() {
-			startErr <- start(&http.Server{}, listener)
+			startErr <- start(&http.Server{ReadHeaderTimeout: time.Second}, listener)
 		}()
 		_ = listener.Close()
 		if serveErr := <-startErr; serveErr == nil {

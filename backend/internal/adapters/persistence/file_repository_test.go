@@ -12,22 +12,56 @@ import (
 )
 
 func TestFileRepositoryCRUDAndCascade(t *testing.T) {
-	ctx := context.Background()
+	state := setupRepositoryCascadeState(t)
+	createRepositoryCascadeFixtures(t, state)
+	createRepositoryCascadeAllocationsAndCalendar(t, state)
+	executeRepositoryCascadeDeletions(t, state)
+	verifyRepositoryCascadePersistence(t, state)
+}
+
+type repositoryCascadeState struct {
+	repo                       *FileRepository
+	orgA                       domain.Organisation
+	orgB                       domain.Organisation
+	personA1                   domain.Person
+	personA2                   domain.Person
+	personA3                   domain.Person
+	projectA1                  domain.Project
+	projectA2                  domain.Project
+	groupA                     domain.Group
+	allocationA1               domain.Allocation
+	allocationA2               domain.Allocation
+	groupAllocation            domain.Allocation
+	holiday                    domain.OrgHoliday
+	groupUnavailability        domain.GroupUnavailability
+	personUnavailability       domain.PersonUnavailability
+	personUnavailabilityScoped domain.PersonUnavailability
+}
+
+func setupRepositoryCascadeState(t *testing.T) *repositoryCascadeState {
+	t.Helper()
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "repo.json"))
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
+	return &repositoryCascadeState{repo: repo}
+}
 
-	orgA, err := repo.CreateOrganisation(ctx, domain.Organisation{Name: "Org A", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
+func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState) {
+	t.Helper()
+	ctx := context.Background()
+
+	var err error
+	state.orgA, err = state.repo.CreateOrganisation(ctx, domain.Organisation{Name: "Org A", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
 	if err != nil {
 		t.Fatalf("create org A: %v", err)
 	}
-	orgB, err := repo.CreateOrganisation(ctx, domain.Organisation{Name: "Org B", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
+	state.orgB, err = state.repo.CreateOrganisation(ctx, domain.Organisation{Name: "Org B", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
 	if err != nil {
 		t.Fatalf("create org B: %v", err)
 	}
 
-	organisations, err := repo.ListOrganisations(ctx)
+	organisations, err := state.repo.ListOrganisations(ctx)
 	if err != nil {
 		t.Fatalf("list organisations: %v", err)
 	}
@@ -35,32 +69,32 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("expected 2 organisations, got %d", len(organisations))
 	}
 
-	orgA.Name = "Org A Updated"
-	orgA, err = repo.UpdateOrganisation(ctx, orgA)
+	state.orgA.Name = "Org A Updated"
+	state.orgA, err = state.repo.UpdateOrganisation(ctx, state.orgA)
 	if err != nil {
 		t.Fatalf("update organisation: %v", err)
 	}
-	if orgA.Name != "Org A Updated" {
-		t.Fatalf("unexpected organisation update: %#v", orgA)
+	if state.orgA.Name != "Org A Updated" {
+		t.Fatalf("unexpected organisation update: %#v", state.orgA)
 	}
 
-	personA1, err := repo.CreatePerson(ctx, domain.Person{OrganisationID: orgA.ID, Name: "Alice", EmploymentPct: 100})
+	state.personA1, err = state.repo.CreatePerson(ctx, domain.Person{OrganisationID: state.orgA.ID, Name: "Alice", EmploymentPct: 100})
 	if err != nil {
 		t.Fatalf("create person A1: %v", err)
 	}
-	personA2, err := repo.CreatePerson(ctx, domain.Person{OrganisationID: orgA.ID, Name: "Bob", EmploymentPct: 60})
+	state.personA2, err = state.repo.CreatePerson(ctx, domain.Person{OrganisationID: state.orgA.ID, Name: "Bob", EmploymentPct: 60})
 	if err != nil {
 		t.Fatalf("create person A2: %v", err)
 	}
-	personA3, err := repo.CreatePerson(ctx, domain.Person{OrganisationID: orgA.ID, Name: "Bob", EmploymentPct: 40})
+	state.personA3, err = state.repo.CreatePerson(ctx, domain.Person{OrganisationID: state.orgA.ID, Name: "Bob", EmploymentPct: 40})
 	if err != nil {
 		t.Fatalf("create person A3: %v", err)
 	}
-	_, err = repo.CreatePerson(ctx, domain.Person{OrganisationID: orgB.ID, Name: "Other", EmploymentPct: 100})
-	if err != nil {
+	if _, err = state.repo.CreatePerson(ctx, domain.Person{OrganisationID: state.orgB.ID, Name: "Other", EmploymentPct: 100}); err != nil {
 		t.Fatalf("create person B: %v", err)
 	}
-	personsInA, err := repo.ListPersons(ctx, orgA.ID)
+
+	personsInA, err := state.repo.ListPersons(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list persons in org A: %v", err)
 	}
@@ -68,41 +102,41 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("expected 3 persons in org A, got %d", len(personsInA))
 	}
 
-	personA1.EmploymentPct = 90
-	personA1, err = repo.UpdatePerson(ctx, personA1)
+	state.personA1.EmploymentPct = 90
+	state.personA1, err = state.repo.UpdatePerson(ctx, state.personA1)
 	if err != nil {
 		t.Fatalf("update person: %v", err)
 	}
-	if personA1.EmploymentPct != 90 {
-		t.Fatalf("expected employment update, got %v", personA1.EmploymentPct)
+	if state.personA1.EmploymentPct != 90 {
+		t.Fatalf("expected employment update, got %v", state.personA1.EmploymentPct)
 	}
 
-	if _, err := repo.GetPerson(ctx, orgB.ID, personA1.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.repo.GetPerson(ctx, state.orgB.ID, state.personA1.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found across tenant, got %v", err)
 	}
 
-	projectA1, err := repo.CreateProject(ctx, domain.Project{OrganisationID: orgA.ID, Name: "Project A1"})
+	state.projectA1, err = state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project A1"})
 	if err != nil {
 		t.Fatalf("create project A1: %v", err)
 	}
-	projectA2, err := repo.CreateProject(ctx, domain.Project{OrganisationID: orgA.ID, Name: "Project A2"})
+	state.projectA2, err = state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project A2"})
 	if err != nil {
 		t.Fatalf("create project A2: %v", err)
 	}
-	_, err = repo.CreateProject(ctx, domain.Project{OrganisationID: orgB.ID, Name: "Project B1"})
-	if err != nil {
+	if _, err = state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgB.ID, Name: "Project B1"}); err != nil {
 		t.Fatalf("create project B1: %v", err)
 	}
 
-	projectA1.Name = "Project A1 Updated"
-	projectA1, err = repo.UpdateProject(ctx, projectA1)
+	state.projectA1.Name = "Project A1 Updated"
+	state.projectA1, err = state.repo.UpdateProject(ctx, state.projectA1)
 	if err != nil {
 		t.Fatalf("update project: %v", err)
 	}
-	if projectA1.Name != "Project A1 Updated" {
-		t.Fatalf("project update failed: %#v", projectA1)
+	if state.projectA1.Name != "Project A1 Updated" {
+		t.Fatalf("project update failed: %#v", state.projectA1)
 	}
-	projects, err := repo.ListProjects(ctx, orgA.ID)
+
+	projects, err := state.repo.ListProjects(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list projects: %v", err)
 	}
@@ -110,51 +144,56 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("expected 2 projects in org A, got %d", len(projects))
 	}
 
-	groupA, err := repo.CreateGroup(ctx, domain.Group{OrganisationID: orgA.ID, Name: "Team A", MemberIDs: []string{personA1.ID, personA1.ID}})
+	state.groupA, err = state.repo.CreateGroup(ctx, domain.Group{OrganisationID: state.orgA.ID, Name: "Team A", MemberIDs: []string{state.personA1.ID, state.personA1.ID}})
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	if len(groupA.MemberIDs) != 1 {
-		t.Fatalf("expected de-duplicated members, got %v", groupA.MemberIDs)
+	if len(state.groupA.MemberIDs) != 1 {
+		t.Fatalf("expected de-duplicated members, got %v", state.groupA.MemberIDs)
 	}
-	_, err = repo.CreateGroup(ctx, domain.Group{OrganisationID: orgA.ID, Name: "Team A", MemberIDs: []string{personA3.ID}})
-	if err != nil {
+	if _, err = state.repo.CreateGroup(ctx, domain.Group{OrganisationID: state.orgA.ID, Name: "Team A", MemberIDs: []string{state.personA3.ID}}); err != nil {
 		t.Fatalf("create second group: %v", err)
 	}
 
-	groupA.MemberIDs = []string{personA1.ID, personA2.ID}
-	groupA, err = repo.UpdateGroup(ctx, groupA)
+	state.groupA.MemberIDs = []string{state.personA1.ID, state.personA2.ID}
+	state.groupA, err = state.repo.UpdateGroup(ctx, state.groupA)
 	if err != nil {
 		t.Fatalf("update group: %v", err)
 	}
-	if len(groupA.MemberIDs) != 2 {
-		t.Fatalf("expected 2 members, got %v", groupA.MemberIDs)
+	if len(state.groupA.MemberIDs) != 2 {
+		t.Fatalf("expected 2 members, got %v", state.groupA.MemberIDs)
 	}
-	groups, err := repo.ListGroups(ctx, orgA.ID)
+
+	groups, err := state.repo.ListGroups(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list groups: %v", err)
 	}
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups in org A, got %d", len(groups))
 	}
+}
 
-	allocationA1, err := repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: orgA.ID, PersonID: personA1.ID, ProjectID: projectA1.ID, Percent: 40})
+func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *repositoryCascadeState) {
+	t.Helper()
+	ctx := context.Background()
+
+	var err error
+	state.allocationA1, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA1.ID, ProjectID: state.projectA1.ID, Percent: 40})
 	if err != nil {
 		t.Fatalf("create allocation A1: %v", err)
 	}
-	allocationA2, err := repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: orgA.ID, PersonID: personA2.ID, ProjectID: projectA2.ID, Percent: 30})
+	state.allocationA2, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, ProjectID: state.projectA2.ID, Percent: 30})
 	if err != nil {
 		t.Fatalf("create allocation A2: %v", err)
 	}
-	_, err = repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: orgA.ID, PersonID: personA1.ID, ProjectID: projectA1.ID, Percent: 5})
-	if err != nil {
+	if _, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA1.ID, ProjectID: state.projectA1.ID, Percent: 5}); err != nil {
 		t.Fatalf("create allocation A3: %v", err)
 	}
-	groupAllocation, err := repo.CreateAllocation(ctx, domain.Allocation{
-		OrganisationID: orgA.ID,
+	state.groupAllocation, err = state.repo.CreateAllocation(ctx, domain.Allocation{
+		OrganisationID: state.orgA.ID,
 		TargetType:     domain.AllocationTargetGroup,
-		TargetID:       groupA.ID,
-		ProjectID:      projectA1.ID,
+		TargetID:       state.groupA.ID,
+		ProjectID:      state.projectA1.ID,
 		StartDate:      "2026-01-01",
 		EndDate:        "2026-01-31",
 		Percent:        10,
@@ -163,15 +202,15 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("create group allocation: %v", err)
 	}
 
-	allocationA1.Percent = 45
-	allocationA1, err = repo.UpdateAllocation(ctx, allocationA1)
+	state.allocationA1.Percent = 45
+	state.allocationA1, err = state.repo.UpdateAllocation(ctx, state.allocationA1)
 	if err != nil {
 		t.Fatalf("update allocation: %v", err)
 	}
-	if allocationA1.Percent != 45 {
+	if state.allocationA1.Percent != 45 {
 		t.Fatalf("expected allocation update")
 	}
-	allocationRead, err := repo.GetAllocation(ctx, orgA.ID, allocationA1.ID)
+	allocationRead, err := state.repo.GetAllocation(ctx, state.orgA.ID, state.allocationA1.ID)
 	if err != nil {
 		t.Fatalf("get allocation: %v", err)
 	}
@@ -179,38 +218,36 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("unexpected allocation read: %+v", allocationRead)
 	}
 
-	holiday, err := repo.CreateOrgHoliday(ctx, domain.OrgHoliday{OrganisationID: orgA.ID, Date: "2026-01-01", Hours: 8})
+	state.holiday, err = state.repo.CreateOrgHoliday(ctx, domain.OrgHoliday{OrganisationID: state.orgA.ID, Date: "2026-01-01", Hours: 8})
 	if err != nil {
 		t.Fatalf("create holiday: %v", err)
 	}
-	_, err = repo.CreateOrgHoliday(ctx, domain.OrgHoliday{OrganisationID: orgA.ID, Date: "2026-01-01", Hours: 4})
-	if err != nil {
+	if _, err = state.repo.CreateOrgHoliday(ctx, domain.OrgHoliday{OrganisationID: state.orgA.ID, Date: "2026-01-01", Hours: 4}); err != nil {
 		t.Fatalf("create second holiday: %v", err)
 	}
-	groupUnavailability, err := repo.CreateGroupUnavailability(ctx, domain.GroupUnavailability{OrganisationID: orgA.ID, GroupID: groupA.ID, Date: "2026-01-03", Hours: 4})
+	state.groupUnavailability, err = state.repo.CreateGroupUnavailability(ctx, domain.GroupUnavailability{OrganisationID: state.orgA.ID, GroupID: state.groupA.ID, Date: "2026-01-03", Hours: 4})
 	if err != nil {
 		t.Fatalf("create group unavailability: %v", err)
 	}
-	_, err = repo.CreateGroupUnavailability(ctx, domain.GroupUnavailability{OrganisationID: orgA.ID, GroupID: groupA.ID, Date: "2026-01-03", Hours: 1})
-	if err != nil {
+	if _, err = state.repo.CreateGroupUnavailability(ctx, domain.GroupUnavailability{OrganisationID: state.orgA.ID, GroupID: state.groupA.ID, Date: "2026-01-03", Hours: 1}); err != nil {
 		t.Fatalf("create second group unavailability: %v", err)
 	}
-	personUnavailability, err := repo.CreatePersonUnavailability(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA1.ID, Date: "2026-01-04", Hours: 2})
+	state.personUnavailability, err = state.repo.CreatePersonUnavailability(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA1.ID, Date: "2026-01-04", Hours: 2})
 	if err != nil {
 		t.Fatalf("create person unavailability: %v", err)
 	}
-	_, err = repo.CreatePersonUnavailability(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA1.ID, Date: "2026-01-04", Hours: 1})
-	if err != nil {
+	if _, err = state.repo.CreatePersonUnavailability(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA1.ID, Date: "2026-01-04", Hours: 1}); err != nil {
 		t.Fatalf("create second person unavailability: %v", err)
 	}
-	personUnavailabilityScoped, err := repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA2.ID, Date: "2026-01-05", Hours: 1}, 8)
+	state.personUnavailabilityScoped, err = state.repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, Date: "2026-01-05", Hours: 1}, 8)
 	if err != nil {
 		t.Fatalf("create scoped person unavailability: %v", err)
 	}
-	if _, err := repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: orgA.ID, PersonID: personA2.ID, Date: "2026-01-05", Hours: 8}, 8); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, Date: "2026-01-05", Hours: 8}, 8); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected scoped person unavailability daily cap validation failure, got %v", err)
 	}
-	allocations, err := repo.ListAllocations(ctx, orgA.ID)
+
+	allocations, err := state.repo.ListAllocations(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list allocations: %v", err)
 	}
@@ -221,98 +258,106 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("expected allocations to carry normalized targets, got %+v", allocations[0])
 	}
 
-	holidays, err := repo.ListOrgHolidays(ctx, orgA.ID)
+	holidays, err := state.repo.ListOrgHolidays(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list holidays: %v", err)
 	}
 	if len(holidays) != 2 {
 		t.Fatalf("expected 2 holidays, got %d", len(holidays))
 	}
-	groupUnavailableEntries, err := repo.ListGroupUnavailability(ctx, orgA.ID)
+	groupUnavailableEntries, err := state.repo.ListGroupUnavailability(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list group unavailability: %v", err)
 	}
 	if len(groupUnavailableEntries) != 2 {
 		t.Fatalf("expected 2 group unavailability entries, got %d", len(groupUnavailableEntries))
 	}
-	personUnavailableEntries, err := repo.ListPersonUnavailability(ctx, orgA.ID)
+	personUnavailableEntries, err := state.repo.ListPersonUnavailability(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list person unavailability: %v", err)
 	}
 	if len(personUnavailableEntries) != 3 {
 		t.Fatalf("expected 3 person unavailability entries, got %d", len(personUnavailableEntries))
 	}
-	personUnavailableForA1, err := repo.ListPersonUnavailabilityByPerson(ctx, orgA.ID, personA1.ID)
+	personUnavailableForA1, err := state.repo.ListPersonUnavailabilityByPerson(ctx, state.orgA.ID, state.personA1.ID)
 	if err != nil {
 		t.Fatalf("list person unavailability by person: %v", err)
 	}
 	if len(personUnavailableForA1) != 2 {
 		t.Fatalf("expected 2 person unavailability entries for person A1, got %d", len(personUnavailableForA1))
 	}
-	personUnavailableForA1Date, err := repo.ListPersonUnavailabilityByPersonAndDate(ctx, orgA.ID, personA1.ID, "2026-01-04")
+	personUnavailableForA1Date, err := state.repo.ListPersonUnavailabilityByPersonAndDate(ctx, state.orgA.ID, state.personA1.ID, "2026-01-04")
 	if err != nil {
 		t.Fatalf("list person unavailability by person and date: %v", err)
 	}
 	if len(personUnavailableForA1Date) != 2 {
 		t.Fatalf("expected 2 person unavailability entries for person A1 on date, got %d", len(personUnavailableForA1Date))
 	}
+}
 
-	if err := repo.DeleteAllocation(ctx, orgA.ID, allocationA2.ID); err != nil {
+func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeState) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := state.repo.DeleteAllocation(ctx, state.orgA.ID, state.allocationA2.ID); err != nil {
 		t.Fatalf("delete allocation A2: %v", err)
 	}
-	if err := repo.DeleteGroupUnavailability(ctx, orgA.ID, groupUnavailability.ID); err != nil {
+	if err := state.repo.DeleteGroupUnavailability(ctx, state.orgA.ID, state.groupUnavailability.ID); err != nil {
 		t.Fatalf("delete group unavailability: %v", err)
 	}
-	if err := repo.DeletePersonUnavailabilityByPerson(ctx, orgA.ID, personA1.ID, personUnavailabilityScoped.ID); !errors.Is(err, domain.ErrForbidden) {
+	if err := state.repo.DeletePersonUnavailabilityByPerson(ctx, state.orgA.ID, state.personA1.ID, state.personUnavailabilityScoped.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected person-scoped delete forbidden for mismatched person, got %v", err)
 	}
-	if err := repo.DeletePersonUnavailabilityByPerson(ctx, orgA.ID, personA2.ID, personUnavailabilityScoped.ID); err != nil {
+	if err := state.repo.DeletePersonUnavailabilityByPerson(ctx, state.orgA.ID, state.personA2.ID, state.personUnavailabilityScoped.ID); err != nil {
 		t.Fatalf("delete scoped person unavailability: %v", err)
 	}
-	if err := repo.DeletePersonUnavailability(ctx, orgA.ID, personUnavailability.ID); err != nil {
+	if err := state.repo.DeletePersonUnavailability(ctx, state.orgA.ID, state.personUnavailability.ID); err != nil {
 		t.Fatalf("delete person unavailability: %v", err)
 	}
-	if err := repo.DeleteOrgHoliday(ctx, orgA.ID, holiday.ID); err != nil {
+	if err := state.repo.DeleteOrgHoliday(ctx, state.orgA.ID, state.holiday.ID); err != nil {
 		t.Fatalf("delete holiday: %v", err)
 	}
-
-	if err := repo.DeletePerson(ctx, orgA.ID, personA1.ID); err != nil {
+	if err := state.repo.DeletePerson(ctx, state.orgA.ID, state.personA1.ID); err != nil {
 		t.Fatalf("delete person A1: %v", err)
 	}
-	groupAfterDelete, err := repo.GetGroup(ctx, orgA.ID, groupA.ID)
+
+	groupAfterDelete, err := state.repo.GetGroup(ctx, state.orgA.ID, state.groupA.ID)
 	if err != nil {
 		t.Fatalf("get group after person delete: %v", err)
 	}
-	if len(groupAfterDelete.MemberIDs) != 1 || groupAfterDelete.MemberIDs[0] != personA2.ID {
+	if len(groupAfterDelete.MemberIDs) != 1 || groupAfterDelete.MemberIDs[0] != state.personA2.ID {
 		t.Fatalf("expected remaining member Bob, got %v", groupAfterDelete.MemberIDs)
 	}
 
-	projectWithAllocation, err := repo.CreateProject(ctx, domain.Project{OrganisationID: orgA.ID, Name: "Project With Allocation"})
+	projectWithAllocation, err := state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project With Allocation"})
 	if err != nil {
 		t.Fatalf("create project with allocation: %v", err)
 	}
-	_, err = repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: orgA.ID, PersonID: personA2.ID, ProjectID: projectWithAllocation.ID, Percent: 20})
-	if err != nil {
+	if _, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, ProjectID: projectWithAllocation.ID, Percent: 20}); err != nil {
 		t.Fatalf("create project allocation: %v", err)
 	}
-	if err := repo.DeleteProject(ctx, orgA.ID, projectWithAllocation.ID); err != nil {
+	if err := state.repo.DeleteProject(ctx, state.orgA.ID, projectWithAllocation.ID); err != nil {
 		t.Fatalf("delete project with allocations: %v", err)
 	}
-	if err := repo.DeleteProject(ctx, orgA.ID, projectA2.ID); err != nil {
+	if err := state.repo.DeleteProject(ctx, state.orgA.ID, state.projectA2.ID); err != nil {
 		t.Fatalf("delete project A2: %v", err)
 	}
-	if err := repo.DeleteGroup(ctx, orgA.ID, groupA.ID); err != nil {
+	if err := state.repo.DeleteGroup(ctx, state.orgA.ID, state.groupA.ID); err != nil {
 		t.Fatalf("delete group: %v", err)
 	}
-	if _, err := repo.GetAllocation(ctx, orgA.ID, groupAllocation.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.repo.GetAllocation(ctx, state.orgA.ID, state.groupAllocation.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group allocation to be deleted with group, got %v", err)
 	}
-
-	if err := repo.DeleteOrganisation(ctx, orgA.ID); err != nil {
+	if err := state.repo.DeleteOrganisation(ctx, state.orgA.ID); err != nil {
 		t.Fatalf("delete organisation A: %v", err)
 	}
+}
 
-	personsLeft, err := repo.ListPersons(ctx, orgA.ID)
+func verifyRepositoryCascadePersistence(t *testing.T, state *repositoryCascadeState) {
+	t.Helper()
+	ctx := context.Background()
+
+	personsLeft, err := state.repo.ListPersons(ctx, state.orgA.ID)
 	if err != nil {
 		t.Fatalf("list persons after delete org: %v", err)
 	}
@@ -320,15 +365,15 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 		t.Fatalf("expected no persons in org A, got %d", len(personsLeft))
 	}
 
-	orgBFromRepo, err := repo.GetOrganisation(ctx, orgB.ID)
+	orgBFromRepo, err := state.repo.GetOrganisation(ctx, state.orgB.ID)
 	if err != nil {
 		t.Fatalf("expected org B to remain: %v", err)
 	}
-	if orgBFromRepo.ID != orgB.ID {
+	if orgBFromRepo.ID != state.orgB.ID {
 		t.Fatalf("unexpected org B id: %s", orgBFromRepo.ID)
 	}
 
-	reloaded, err := NewFileRepository(repo.path)
+	reloaded, err := NewFileRepository(state.repo.path)
 	if err != nil {
 		t.Fatalf("reload repository: %v", err)
 	}
@@ -336,7 +381,7 @@ func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list organisations in reloaded repo: %v", err)
 	}
-	if len(remaining) != 1 || remaining[0].ID != orgB.ID {
+	if len(remaining) != 1 || remaining[0].ID != state.orgB.ID {
 		t.Fatalf("expected only org B after reload, got %+v", remaining)
 	}
 }
@@ -404,7 +449,7 @@ func TestFileRepositoryNormalizesLegacyAllocationTargets(t *testing.T) {
 }`
 
 	path := filepath.Join(t.TempDir(), "legacy-allocations.json")
-	if err := os.WriteFile(path, []byte(state), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(state), 0o600); err != nil {
 		t.Fatalf("write legacy state: %v", err)
 	}
 
@@ -429,7 +474,7 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	ctx := context.Background()
 
 	invalidFilePath := filepath.Join(t.TempDir(), "invalid.json")
-	if err := os.WriteFile(invalidFilePath, []byte("{bad json"), 0o644); err != nil {
+	if err := os.WriteFile(invalidFilePath, []byte("{bad json"), 0o600); err != nil {
 		t.Fatalf("write invalid file: %v", err)
 	}
 	if _, err := NewFileRepository(invalidFilePath); err == nil {
@@ -437,7 +482,7 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	}
 
 	emptyStateFile := filepath.Join(t.TempDir(), "empty-state.json")
-	if err := os.WriteFile(emptyStateFile, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(emptyStateFile, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write empty state file: %v", err)
 	}
 	repo, err := NewFileRepository(emptyStateFile)
@@ -476,7 +521,7 @@ func TestPersistenceHelperBranches(t *testing.T) {
 
 	baseDir := t.TempDir()
 	blockerPath := filepath.Join(baseDir, "blocked")
-	if err := os.WriteFile(blockerPath, []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(blockerPath, []byte("x"), 0o600); err != nil {
 		t.Fatalf("create blocker file: %v", err)
 	}
 	repo.path = filepath.Join(blockerPath, "repo.json")

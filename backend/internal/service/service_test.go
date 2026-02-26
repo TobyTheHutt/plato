@@ -114,61 +114,100 @@ func TestNewServiceRequiresDependencies(t *testing.T) {
 }
 
 func TestServiceResourceFlowAndReport(t *testing.T) {
+	state := setupServiceResourceFlowState(t)
+	validateServiceResourceFlowPeopleProjectsGroups(t, state)
+	validateServiceResourceFlowAllocationsAndCalendar(t, state)
+	validateServiceResourceFlowReportsAndCleanup(t, state)
+}
+
+type serviceResourceFlowState struct {
+	svc                       *Service
+	admin                     ports.AuthContext
+	user                      ports.AuthContext
+	person1                   domain.Person
+	person2                   domain.Person
+	project1                  domain.Project
+	project2                  domain.Project
+	group                     domain.Group
+	allocation1               domain.Allocation
+	allocation2               domain.Allocation
+	groupAllocation           domain.Allocation
+	holiday                   domain.OrgHoliday
+	groupUnavailability       domain.GroupUnavailability
+	personUnavailability      domain.PersonUnavailability
+	personUnavailabilityOther domain.PersonUnavailability
+}
+
+func setupServiceResourceFlowState(t *testing.T) *serviceResourceFlowState {
+	t.Helper()
 	svc := newTestService(t)
 	ctx := context.Background()
-
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
 	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Flow")
 
-	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
-	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
+	return &serviceResourceFlowState{
+		svc:   svc,
+		admin: ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}},
+		user:  ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}},
+	}
+}
 
-	person1, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Alice", EmploymentPct: 100})
+func validateServiceResourceFlowPeopleProjectsGroups(t *testing.T, state *serviceResourceFlowState) {
+	t.Helper()
+	ctx := context.Background()
+
+	var err error
+	state.person1, err = state.svc.CreatePerson(ctx, state.admin, domain.Person{Name: "Alice", EmploymentPct: 100})
 	if err != nil {
 		t.Fatalf("create person1: %v", err)
 	}
-	person2, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Bob", EmploymentPct: 60})
+	state.person2, err = state.svc.CreatePerson(ctx, state.admin, domain.Person{Name: "Bob", EmploymentPct: 60})
 	if err != nil {
 		t.Fatalf("create person2: %v", err)
 	}
-	person2Read, err := svc.GetPerson(ctx, admin, person2.ID)
+
+	person2Read, err := state.svc.GetPerson(ctx, state.admin, state.person2.ID)
 	if err != nil {
 		t.Fatalf("get person2: %v", err)
 	}
 	if person2Read.Name != "Bob" {
 		t.Fatalf("unexpected person read: %+v", person2Read)
 	}
-	person2, err = svc.UpdatePerson(ctx, admin, person2.ID, domain.Person{Name: "Bob Updated", EmploymentPct: 70})
+
+	state.person2, err = state.svc.UpdatePerson(ctx, state.admin, state.person2.ID, domain.Person{Name: "Bob Updated", EmploymentPct: 70})
 	if err != nil {
 		t.Fatalf("update person2: %v", err)
 	}
-	if person2.Name != "Bob Updated" {
-		t.Fatalf("unexpected person update: %+v", person2)
+	if state.person2.Name != "Bob Updated" {
+		t.Fatalf("unexpected person update: %+v", state.person2)
 	}
 
-	project1, err := svc.CreateProject(ctx, admin, testProjectInput("Project One"))
+	state.project1, err = state.svc.CreateProject(ctx, state.admin, testProjectInput("Project One"))
 	if err != nil {
 		t.Fatalf("create project1: %v", err)
 	}
-	project2, err := svc.CreateProject(ctx, admin, testProjectInput("Project Two"))
+	state.project2, err = state.svc.CreateProject(ctx, state.admin, testProjectInput("Project Two"))
 	if err != nil {
 		t.Fatalf("create project2: %v", err)
 	}
-	project1Read, err := svc.GetProject(ctx, admin, project1.ID)
+
+	project1Read, err := state.svc.GetProject(ctx, state.admin, state.project1.ID)
 	if err != nil {
 		t.Fatalf("get project1: %v", err)
 	}
 	if project1Read.Name != "Project One" {
 		t.Fatalf("unexpected project read: %+v", project1Read)
 	}
-	project2, err = svc.UpdateProject(ctx, admin, project2.ID, testProjectInput("Project Two Updated"))
+
+	state.project2, err = state.svc.UpdateProject(ctx, state.admin, state.project2.ID, testProjectInput("Project Two Updated"))
 	if err != nil {
 		t.Fatalf("update project2: %v", err)
 	}
-	if project2.Name != "Project Two Updated" {
-		t.Fatalf("unexpected project2 update: %+v", project2)
+	if state.project2.Name != "Project Two Updated" {
+		t.Fatalf("unexpected project2 update: %+v", state.project2)
 	}
-	projectList, err := svc.ListProjects(ctx, user)
+
+	projectList, err := state.svc.ListProjects(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list projects as user: %v", err)
 	}
@@ -176,25 +215,28 @@ func TestServiceResourceFlowAndReport(t *testing.T) {
 		t.Fatalf("expected 2 projects, got %d", len(projectList))
 	}
 
-	group, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Team", MemberIDs: []string{person1.ID}})
+	state.group, err = state.svc.CreateGroup(ctx, state.admin, domain.Group{Name: "Team", MemberIDs: []string{state.person1.ID}})
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	groupRead, err := svc.GetGroup(ctx, admin, group.ID)
+
+	groupRead, err := state.svc.GetGroup(ctx, state.admin, state.group.ID)
 	if err != nil {
 		t.Fatalf("get group: %v", err)
 	}
-	if len(groupRead.MemberIDs) != 1 || groupRead.MemberIDs[0] != person1.ID {
+	if len(groupRead.MemberIDs) != 1 || groupRead.MemberIDs[0] != state.person1.ID {
 		t.Fatalf("unexpected group read: %+v", groupRead)
 	}
-	group, err = svc.UpdateGroup(ctx, admin, group.ID, domain.Group{Name: "Team Updated", MemberIDs: []string{person1.ID}})
+
+	state.group, err = state.svc.UpdateGroup(ctx, state.admin, state.group.ID, domain.Group{Name: "Team Updated", MemberIDs: []string{state.person1.ID}})
 	if err != nil {
 		t.Fatalf("update group: %v", err)
 	}
-	if group.Name != "Team Updated" {
-		t.Fatalf("unexpected group update: %+v", group)
+	if state.group.Name != "Team Updated" {
+		t.Fatalf("unexpected group update: %+v", state.group)
 	}
-	groupList, err := svc.ListGroups(ctx, user)
+
+	groupList, err := state.svc.ListGroups(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list groups as user: %v", err)
 	}
@@ -202,61 +244,78 @@ func TestServiceResourceFlowAndReport(t *testing.T) {
 		t.Fatalf("expected 1 group, got %d", len(groupList))
 	}
 
-	group, err = svc.AddGroupMember(ctx, admin, group.ID, person2.ID)
+	personList, err := state.svc.ListPersons(ctx, state.user)
+	if err != nil {
+		t.Fatalf("list persons as user: %v", err)
+	}
+	if len(personList) != 2 {
+		t.Fatalf("expected 2 persons, got %d", len(personList))
+	}
+}
+
+func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serviceResourceFlowState) {
+	t.Helper()
+	ctx := context.Background()
+
+	var err error
+	state.group, err = state.svc.AddGroupMember(ctx, state.admin, state.group.ID, state.person2.ID)
 	if err != nil {
 		t.Fatalf("add group member: %v", err)
 	}
-	if len(group.MemberIDs) != 2 {
-		t.Fatalf("expected 2 members after add, got %v", group.MemberIDs)
+	if len(state.group.MemberIDs) != 2 {
+		t.Fatalf("expected 2 members after add, got %v", state.group.MemberIDs)
 	}
-	group, err = svc.AddGroupMember(ctx, admin, group.ID, person2.ID)
+
+	state.group, err = state.svc.AddGroupMember(ctx, state.admin, state.group.ID, state.person2.ID)
 	if err != nil {
 		t.Fatalf("add duplicate group member: %v", err)
 	}
-	if len(group.MemberIDs) != 2 {
-		t.Fatalf("expected duplicate add to keep 2 members, got %v", group.MemberIDs)
+	if len(state.group.MemberIDs) != 2 {
+		t.Fatalf("expected duplicate add to keep 2 members, got %v", state.group.MemberIDs)
 	}
 
-	group, err = svc.RemoveGroupMember(ctx, admin, group.ID, person2.ID)
+	state.group, err = state.svc.RemoveGroupMember(ctx, state.admin, state.group.ID, state.person2.ID)
 	if err != nil {
 		t.Fatalf("remove group member: %v", err)
 	}
-	if len(group.MemberIDs) != 1 {
-		t.Fatalf("expected 1 member after remove, got %v", group.MemberIDs)
+	if len(state.group.MemberIDs) != 1 {
+		t.Fatalf("expected 1 member after remove, got %v", state.group.MemberIDs)
 	}
 
-	groupAllocation, err := svc.CreateAllocation(ctx, admin, testGroupAllocationInput(group.ID, project2.ID, 20))
+	state.groupAllocation, err = state.svc.CreateAllocation(ctx, state.admin, testGroupAllocationInput(state.group.ID, state.project2.ID, 20))
 	if err != nil {
 		t.Fatalf("create group allocation: %v", err)
 	}
-	if groupAllocation.TargetType != domain.AllocationTargetGroup {
-		t.Fatalf("expected group allocation target type, got %s", groupAllocation.TargetType)
+	if state.groupAllocation.TargetType != domain.AllocationTargetGroup {
+		t.Fatalf("expected group allocation target type, got %s", state.groupAllocation.TargetType)
 	}
 
-	allocation1, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person1.ID, project1.ID, 60))
+	state.allocation1, err = state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput(state.person1.ID, state.project1.ID, 60))
 	if err != nil {
 		t.Fatalf("create allocation1: %v", err)
 	}
-	allocationRead, err := svc.GetAllocation(ctx, admin, allocation1.ID)
+	allocationRead, err := state.svc.GetAllocation(ctx, state.admin, state.allocation1.ID)
 	if err != nil {
 		t.Fatalf("get allocation1: %v", err)
 	}
 	if allocationRead.Percent != 60 {
 		t.Fatalf("unexpected allocation read: %+v", allocationRead)
 	}
-	allocation2, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person1.ID, project2.ID, 50))
+
+	state.allocation2, err = state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput(state.person1.ID, state.project2.ID, 50))
 	if err != nil {
 		t.Fatalf("create allocation2: %v", err)
 	}
 
-	allocation1, err = svc.UpdateAllocation(ctx, admin, allocation1.ID, testPersonAllocationInput(person1.ID, project1.ID, 40))
+	state.allocation1, err = state.svc.UpdateAllocation(ctx, state.admin, state.allocation1.ID, testPersonAllocationInput(state.person1.ID, state.project1.ID, 40))
 	if err != nil {
 		t.Fatalf("update allocation: %v", err)
 	}
-	if allocation1.Percent != 40 {
-		t.Fatalf("expected updated allocation percent, got %v", allocation1.Percent)
+	if state.allocation1.Percent != 40 {
+		t.Fatalf("expected updated allocation percent, got %v", state.allocation1.Percent)
 	}
-	allocationList, err := svc.ListAllocations(ctx, user)
+
+	allocationList, err := state.svc.ListAllocations(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list allocations as user: %v", err)
 	}
@@ -264,62 +323,63 @@ func TestServiceResourceFlowAndReport(t *testing.T) {
 		t.Fatalf("expected 3 allocations, got %d", len(allocationList))
 	}
 
-	holiday, err := svc.CreateOrgHoliday(ctx, admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
+	state.holiday, err = state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
 	if err != nil {
 		t.Fatalf("create org holiday: %v", err)
 	}
-	groupUnavailability, err := svc.CreateGroupUnavailability(ctx, admin, domain.GroupUnavailability{GroupID: group.ID, Date: "2026-01-03", Hours: 4})
+	state.groupUnavailability, err = state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: "2026-01-03", Hours: 4})
 	if err != nil {
 		t.Fatalf("create group unavailability: %v", err)
 	}
-	personUnavailability, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person1.ID, Date: "2026-01-04", Hours: 2})
+	state.personUnavailability, err = state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person1.ID, Date: "2026-01-04", Hours: 2})
 	if err != nil {
 		t.Fatalf("create person unavailability: %v", err)
 	}
-	personUnavailabilitySecond, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person1.ID, Date: "2026-01-06", Hours: 1})
+	state.personUnavailabilityOther, err = state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person1.ID, Date: "2026-01-06", Hours: 1})
 	if err != nil {
 		t.Fatalf("create second person unavailability: %v", err)
 	}
-	holidayList, err := svc.ListOrgHolidays(ctx, user)
+
+	holidayList, err := state.svc.ListOrgHolidays(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list holidays as user: %v", err)
 	}
 	if len(holidayList) != 1 {
 		t.Fatalf("expected 1 holiday, got %d", len(holidayList))
 	}
-	groupUnavailabilityList, err := svc.ListGroupUnavailability(ctx, user)
+
+	groupUnavailabilityList, err := state.svc.ListGroupUnavailability(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list group unavailability as user: %v", err)
 	}
 	if len(groupUnavailabilityList) != 1 {
 		t.Fatalf("expected 1 group unavailability, got %d", len(groupUnavailabilityList))
 	}
-	personUnavailabilityList, err := svc.ListPersonUnavailability(ctx, user)
+
+	personUnavailabilityList, err := state.svc.ListPersonUnavailability(ctx, state.user)
 	if err != nil {
 		t.Fatalf("list person unavailability as user: %v", err)
 	}
 	if len(personUnavailabilityList) != 2 {
 		t.Fatalf("expected 2 person unavailability entries, got %d", len(personUnavailabilityList))
 	}
-	person1UnavailabilityList, err := svc.ListPersonUnavailabilityByPerson(ctx, user, person1.ID)
+
+	person1UnavailabilityList, err := state.svc.ListPersonUnavailabilityByPerson(ctx, state.user, state.person1.ID)
 	if err != nil {
 		t.Fatalf("list person unavailability for person as user: %v", err)
 	}
 	if len(person1UnavailabilityList) != 2 {
 		t.Fatalf("expected 2 person unavailability entries for person1, got %d", len(person1UnavailabilityList))
 	}
+}
 
-	personList, err := svc.ListPersons(ctx, user)
-	if err != nil {
-		t.Fatalf("list persons as user: %v", err)
-	}
-	if len(personList) != 2 {
-		t.Fatalf("expected 2 persons, got %d", len(personList))
-	}
+func validateServiceResourceFlowReportsAndCleanup(t *testing.T, state *serviceResourceFlowState) {
+	t.Helper()
+	ctx := context.Background()
 
-	report, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{
+	report, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
 		Scope:       domain.ScopePerson,
-		IDs:         []string{person1.ID},
+		IDs:         []string{state.person1.ID},
 		FromDate:    "2026-01-01",
 		ToDate:      "2026-01-02",
 		Granularity: domain.GranularityDay,
@@ -330,9 +390,10 @@ func TestServiceResourceFlowAndReport(t *testing.T) {
 	if len(report) != 2 {
 		t.Fatalf("expected 2 buckets, got %d", len(report))
 	}
-	reportByGroup, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{
+
+	reportByGroup, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
 		Scope:       domain.ScopeGroup,
-		IDs:         []string{group.ID},
+		IDs:         []string{state.group.ID},
 		FromDate:    "2026-01-01",
 		ToDate:      "2026-01-01",
 		Granularity: domain.GranularityDay,
@@ -344,47 +405,47 @@ func TestServiceResourceFlowAndReport(t *testing.T) {
 		t.Fatalf("expected 1 group report bucket, got %d", len(reportByGroup))
 	}
 
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{Scope: domain.ScopeProject, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeProject, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for missing report scope id, got %v", err)
 	}
 
-	if err := svc.DeleteOrgHoliday(ctx, admin, holiday.ID); err != nil {
+	if err := state.svc.DeleteOrgHoliday(ctx, state.admin, state.holiday.ID); err != nil {
 		t.Fatalf("delete holiday: %v", err)
 	}
-	if err := svc.DeleteGroupUnavailability(ctx, admin, groupUnavailability.ID); err != nil {
+	if err := state.svc.DeleteGroupUnavailability(ctx, state.admin, state.groupUnavailability.ID); err != nil {
 		t.Fatalf("delete group unavailability: %v", err)
 	}
-	if err := svc.DeletePersonUnavailabilityByPerson(ctx, admin, person2.ID, personUnavailability.ID); !errors.Is(err, domain.ErrForbidden) {
+	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person2.ID, state.personUnavailability.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected person-scoped delete with mismatched person to fail, got %v", err)
 	}
-	if err := svc.DeletePersonUnavailabilityByPerson(ctx, admin, person1.ID, personUnavailability.ID); err != nil {
+	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person1.ID, state.personUnavailability.ID); err != nil {
 		t.Fatalf("delete person unavailability: %v", err)
 	}
-	if err := svc.DeletePersonUnavailability(ctx, admin, personUnavailabilitySecond.ID); err != nil {
+	if err := state.svc.DeletePersonUnavailability(ctx, state.admin, state.personUnavailabilityOther.ID); err != nil {
 		t.Fatalf("delete second person unavailability: %v", err)
 	}
-	if err := svc.DeleteAllocation(ctx, admin, allocation1.ID); err != nil {
+	if err := state.svc.DeleteAllocation(ctx, state.admin, state.allocation1.ID); err != nil {
 		t.Fatalf("delete allocation: %v", err)
 	}
-	if err := svc.DeleteAllocation(ctx, admin, allocation2.ID); err != nil {
+	if err := state.svc.DeleteAllocation(ctx, state.admin, state.allocation2.ID); err != nil {
 		t.Fatalf("delete allocation2: %v", err)
 	}
-	if err := svc.DeleteAllocation(ctx, admin, groupAllocation.ID); err != nil {
+	if err := state.svc.DeleteAllocation(ctx, state.admin, state.groupAllocation.ID); err != nil {
 		t.Fatalf("delete group allocation: %v", err)
 	}
-	if err := svc.DeleteGroup(ctx, admin, group.ID); err != nil {
+	if err := state.svc.DeleteGroup(ctx, state.admin, state.group.ID); err != nil {
 		t.Fatalf("delete group: %v", err)
 	}
-	if err := svc.DeleteProject(ctx, admin, project2.ID); err != nil {
+	if err := state.svc.DeleteProject(ctx, state.admin, state.project2.ID); err != nil {
 		t.Fatalf("delete project2: %v", err)
 	}
-	if err := svc.DeleteProject(ctx, admin, project1.ID); err != nil {
+	if err := state.svc.DeleteProject(ctx, state.admin, state.project1.ID); err != nil {
 		t.Fatalf("delete project1: %v", err)
 	}
-	if err := svc.DeletePerson(ctx, admin, person2.ID); err != nil {
+	if err := state.svc.DeletePerson(ctx, state.admin, state.person2.ID); err != nil {
 		t.Fatalf("delete person2: %v", err)
 	}
-	if err := svc.DeletePerson(ctx, admin, person1.ID); err != nil {
+	if err := state.svc.DeletePerson(ctx, state.admin, state.person1.ID); err != nil {
 		t.Fatalf("delete person1: %v", err)
 	}
 }
@@ -476,6 +537,26 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 }
 
 func TestServiceRemainingErrorBranches(t *testing.T) {
+	state := setupServiceRemainingErrorBranchesState(t)
+	validateServiceRemainingErrorBranchesForbiddenReads(t, state)
+	validateServiceRemainingErrorBranchesUpdates(t, state)
+	validateServiceRemainingErrorBranchesDeleteAndCreate(t, state)
+	validateServiceRemainingErrorBranchesReports(t, state)
+}
+
+type serviceRemainingErrorBranchesState struct {
+	svc          *Service
+	organisation domain.Organisation
+	admin        ports.AuthContext
+	user         ports.AuthContext
+	person       domain.Person
+	project      domain.Project
+	group        domain.Group
+	allocation   domain.Allocation
+}
+
+func setupServiceRemainingErrorBranchesState(t *testing.T) *serviceRemainingErrorBranchesState {
+	t.Helper()
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
@@ -500,150 +581,182 @@ func TestServiceRemainingErrorBranches(t *testing.T) {
 		t.Fatalf("setup allocation: %v", err)
 	}
 
-	if _, err := svc.GetPerson(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, person.ID); !errors.Is(err, domain.ErrForbidden) {
+	return &serviceRemainingErrorBranchesState{
+		svc:          svc,
+		organisation: organisation,
+		admin:        admin,
+		user:         user,
+		person:       person,
+		project:      project,
+		group:        group,
+		allocation:   allocation,
+	}
+}
+
+func validateServiceRemainingErrorBranchesForbiddenReads(t *testing.T, state *serviceRemainingErrorBranchesState) {
+	t.Helper()
+	ctx := context.Background()
+
+	if _, err := state.svc.GetPerson(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, state.person.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get person, got %v", err)
 	}
-	if _, err := svc.GetProject(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, project.ID); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.GetProject(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, state.project.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get project, got %v", err)
 	}
-	if _, err := svc.GetGroup(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, group.ID); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.GetGroup(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, state.group.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get group, got %v", err)
 	}
-	if _, err := svc.GetAllocation(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, allocation.ID); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.GetAllocation(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, state.allocation.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get allocation, got %v", err)
 	}
-	if _, err := svc.ListPersons(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+
+	if _, err := state.svc.ListPersons(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list persons without role, got %v", err)
 	}
-	if _, err := svc.ListProjects(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListProjects(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list projects without role, got %v", err)
 	}
-	if _, err := svc.ListGroups(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListGroups(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list groups without role, got %v", err)
 	}
-	if _, err := svc.ListAllocations(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListAllocations(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list allocations without role, got %v", err)
 	}
-	if _, err := svc.ListOrgHolidays(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListOrgHolidays(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list holidays without role, got %v", err)
 	}
-	if _, err := svc.ListGroupUnavailability(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListGroupUnavailability(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list group unavailability without role, got %v", err)
 	}
-	if _, err := svc.ListPersonUnavailability(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListPersonUnavailability(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list person unavailability without role, got %v", err)
 	}
-	if _, err := svc.ListPersonUnavailabilityByPerson(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, person.ID); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ListPersonUnavailabilityByPerson(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, state.person.ID); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list person unavailability by person without role, got %v", err)
 	}
+}
 
-	if _, err := svc.UpdatePerson(ctx, admin, "missing", domain.Person{Name: "x", EmploymentPct: 80}); !errors.Is(err, domain.ErrNotFound) {
+func validateServiceRemainingErrorBranchesUpdates(t *testing.T, state *serviceRemainingErrorBranchesState) {
+	t.Helper()
+	ctx := context.Background()
+
+	if _, err := state.svc.UpdatePerson(ctx, state.admin, "missing", domain.Person{Name: "x", EmploymentPct: 80}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected person not found on update, got %v", err)
 	}
-	if _, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{Name: "x", EmploymentPct: 120}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdatePerson(ctx, state.admin, state.person.ID, domain.Person{Name: "x", EmploymentPct: 120}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected person validation failure on update, got %v", err)
 	}
-	if _, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{Name: "x", EmploymentPct: 80, EmploymentEffectiveFromMonth: "bad"}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdatePerson(ctx, state.admin, state.person.ID, domain.Person{Name: "x", EmploymentPct: 80, EmploymentEffectiveFromMonth: "bad"}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected person month validation failure on update, got %v", err)
 	}
-	if _, err := svc.UpdateProject(ctx, admin, "missing", testProjectInput("x")); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateProject(ctx, state.admin, "missing", testProjectInput("x")); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected project not found on update, got %v", err)
 	}
-	if _, err := svc.UpdateProject(ctx, admin, project.ID, testProjectInput("")); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdateProject(ctx, state.admin, state.project.ID, testProjectInput("")); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected project validation failure on update, got %v", err)
 	}
-	if _, err := svc.UpdateGroup(ctx, admin, "missing", domain.Group{Name: "x"}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateGroup(ctx, state.admin, "missing", domain.Group{Name: "x"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group not found on update, got %v", err)
 	}
-	if _, err := svc.UpdateGroup(ctx, admin, group.ID, domain.Group{Name: "", MemberIDs: []string{person.ID}}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdateGroup(ctx, state.admin, state.group.ID, domain.Group{Name: "", MemberIDs: []string{state.person.ID}}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected group validation failure on update, got %v", err)
 	}
-	if _, err := svc.UpdateAllocation(ctx, admin, "missing", testPersonAllocationInput(person.ID, project.ID, 10)); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateAllocation(ctx, state.admin, "missing", testPersonAllocationInput(state.person.ID, state.project.ID, 10)); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected allocation not found on update, got %v", err)
 	}
-	if _, err := svc.UpdateAllocation(ctx, admin, allocation.ID, testPersonAllocationInput("", project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdateAllocation(ctx, state.admin, state.allocation.ID, testPersonAllocationInput("", state.project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected allocation validation failure on update, got %v", err)
 	}
-	if _, err := svc.UpdateOrganisation(ctx, admin, organisation.ID, domain.Organisation{Name: "bad", HoursPerDay: -1, HoursPerWeek: 40, HoursPerYear: 2080}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.UpdateOrganisation(ctx, state.admin, state.organisation.ID, domain.Organisation{Name: "bad", HoursPerDay: -1, HoursPerWeek: 40, HoursPerYear: 2080}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected organisation validation failure on update, got %v", err)
 	}
+}
 
-	if err := svc.DeletePerson(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+func validateServiceRemainingErrorBranchesDeleteAndCreate(t *testing.T, state *serviceRemainingErrorBranchesState) {
+	t.Helper()
+	ctx := context.Background()
+
+	if err := state.svc.DeletePerson(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing person not found, got %v", err)
 	}
-	if err := svc.DeleteProject(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeleteProject(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing project not found, got %v", err)
 	}
-	if err := svc.DeleteGroup(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeleteGroup(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing group not found, got %v", err)
 	}
-	if err := svc.DeleteAllocation(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeleteAllocation(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing allocation not found, got %v", err)
 	}
-	if err := svc.DeleteOrgHoliday(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeleteOrgHoliday(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing holiday not found, got %v", err)
 	}
-	if err := svc.DeleteGroupUnavailability(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeleteGroupUnavailability(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing group unavailability not found, got %v", err)
 	}
-	if err := svc.DeletePersonUnavailability(ctx, admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeletePersonUnavailability(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing person unavailability not found, got %v", err)
 	}
-	if err := svc.DeletePersonUnavailabilityByPerson(ctx, admin, person.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected delete missing person-scoped unavailability not found, got %v", err)
 	}
 
-	if _, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput("", project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput("", state.project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validation for missing person id in allocation, got %v", err)
 	}
-	if _, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person.ID, "", 10)); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput(state.person.ID, "", 10)); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validation for missing project id in allocation, got %v", err)
 	}
 
-	if _, err := svc.AddGroupMember(ctx, admin, group.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.AddGroupMember(ctx, state.admin, state.group.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected add missing member not found, got %v", err)
 	}
-	if _, err := svc.RemoveGroupMember(ctx, admin, "missing", person.ID); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.RemoveGroupMember(ctx, state.admin, "missing", state.person.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected remove member from missing group not found, got %v", err)
 	}
-	if _, err := svc.CreateGroupUnavailability(ctx, admin, domain.GroupUnavailability{GroupID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group unavailability missing group not found, got %v", err)
 	}
-	if _, err := svc.CreateGroupUnavailability(ctx, admin, domain.GroupUnavailability{GroupID: group.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected group unavailability hours validation failure, got %v", err)
 	}
-	if _, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected person unavailability missing person not found, got %v", err)
 	}
-	if _, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "bad", Hours: 2}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "bad", Hours: 2}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected person unavailability bad date validation failure, got %v", err)
 	}
-	if _, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected person unavailability hours validation failure, got %v", err)
 	}
-	if err := svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, person.ID, "missing"); !errors.Is(err, domain.ErrForbidden) {
+	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, state.person.ID, "missing"); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected delete person-scoped unavailability without tenant to fail, got %v", err)
 	}
-	if _, err := svc.CreateOrgHoliday(ctx, admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected org holiday hours validation failure, got %v", err)
 	}
+}
 
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{Scope: "bad", FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+func validateServiceRemainingErrorBranchesReports(t *testing.T, state *serviceRemainingErrorBranchesState) {
+	t.Helper()
+	ctx := context.Background()
+
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: "bad", FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid scope validation, got %v", err)
 	}
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: "bad"}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: "bad"}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid granularity validation, got %v", err)
 	}
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "bad", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "bad", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid from date validation, got %v", err)
 	}
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "bad", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "bad", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid to date validation, got %v", err)
 	}
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected report forbidden without tenant, got %v", err)
 	}
-	if _, err := svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{OrganisationID: organisation.ID, Roles: []string{}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected report forbidden without role, got %v", err)
 	}
 }
