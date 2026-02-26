@@ -17,10 +17,12 @@ func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.Auth
 	if err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateScope(request.Scope); err != nil {
+	err = domain.ValidateScope(request.Scope)
+	if err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateGranularity(request.Granularity); err != nil {
+	err = domain.ValidateGranularity(request.Granularity)
+	if err != nil {
 		return nil, err
 	}
 	fromDate, err := domain.ValidateDate(request.FromDate)
@@ -68,7 +70,8 @@ func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.Auth
 		return nil, err
 	}
 
-	if err := validateScopeIDs(request, persons, groups, projects); err != nil {
+	err = validateScopeIDs(request, persons, groups, projects)
+	if err != nil {
 		return nil, err
 	}
 

@@ -84,16 +84,19 @@ func TestValidationHelpers(t *testing.T) {
 	if pct != 100 {
 		t.Fatalf("expected August employment percent 100, got %v", pct)
 	}
-	if _, err := EmploymentPctOnDate(Person{EmploymentPct: 80, EmploymentChanges: []EmploymentChange{{EffectiveMonth: "bad", EmploymentPct: 70}}}, "2026-01-01"); !errors.Is(err, ErrValidation) {
+	_, err = EmploymentPctOnDate(Person{EmploymentPct: 80, EmploymentChanges: []EmploymentChange{{EffectiveMonth: "bad", EmploymentPct: 70}}}, "2026-01-01")
+	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid employment month to fail, got %v", err)
 	}
-	if _, err := EmploymentPctOnDate(person, "bad-date"); !errors.Is(err, ErrValidation) {
+	_, err = EmploymentPctOnDate(person, "bad-date")
+	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid employment date to fail, got %v", err)
 	}
-	if _, err := EmploymentPctOnDate(Person{EmploymentPct: 101}, "2026-01-01"); !errors.Is(err, ErrValidation) {
+	_, err = EmploymentPctOnDate(Person{EmploymentPct: 101}, "2026-01-01")
+	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid base employment percent to fail, got %v", err)
 	}
-	if _, err := EmploymentPctOnDate(
+	_, err = EmploymentPctOnDate(
 		Person{
 			EmploymentPct: 80,
 			EmploymentChanges: []EmploymentChange{
@@ -101,7 +104,8 @@ func TestValidationHelpers(t *testing.T) {
 			},
 		},
 		"2026-02-01",
-	); !errors.Is(err, ErrValidation) {
+	)
+	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid changed employment percent to fail, got %v", err)
 	}
 
@@ -112,7 +116,8 @@ func TestValidationHelpers(t *testing.T) {
 			{EffectiveMonth: "2026-05", EmploymentPct: 70},
 		},
 	}
-	if _, err := EmploymentPctOnDate(duplicateMonthPerson, "2026-05-10"); !errors.Is(err, ErrValidation) {
+	_, err = EmploymentPctOnDate(duplicateMonthPerson, "2026-05-10")
+	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected duplicate effective month to fail validation, got %v", err)
 	}
 }

@@ -224,7 +224,8 @@ func employmentPctOnMonth(person Person, month string) (float64, error) {
 		return 0, ErrValidation
 	}
 
-	if err := ValidatePercent(person.EmploymentPct); err != nil {
+	err = ValidatePercent(person.EmploymentPct)
+	if err != nil {
 		return 0, ErrValidation
 	}
 
@@ -232,15 +233,15 @@ func employmentPctOnMonth(person Person, month string) (float64, error) {
 	latestMonth := ""
 	seenMonths := map[string]bool{}
 	for _, change := range person.EmploymentChanges {
-		effectiveMonth, err := ValidateMonth(change.EffectiveMonth)
-		if err != nil {
+		effectiveMonth, monthErr := ValidateMonth(change.EffectiveMonth)
+		if monthErr != nil {
 			return 0, ErrValidation
 		}
 		if seenMonths[effectiveMonth] {
 			return 0, ErrValidation
 		}
 		seenMonths[effectiveMonth] = true
-		if err := ValidatePercent(change.EmploymentPct); err != nil {
+		if percentErr := ValidatePercent(change.EmploymentPct); percentErr != nil {
 			return 0, ErrValidation
 		}
 		if effectiveMonth <= normalizedMonth && effectiveMonth > latestMonth {

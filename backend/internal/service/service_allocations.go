@@ -42,14 +42,16 @@ func (s *Service) CreateAllocation(ctx context.Context, auth ports.AuthContext, 
 		return domain.Allocation{}, err
 	}
 	input = normalizeAllocationInput(input)
-	if err := validateAllocation(input); err != nil {
+	err = validateAllocation(input)
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 	project, err := s.repo.GetProject(ctx, organisationID, input.ProjectID)
 	if err != nil {
 		return domain.Allocation{}, err
 	}
-	if err := validateAllocationWithinProjectRange(input, project); err != nil {
+	err = validateAllocationWithinProjectRange(input, project)
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 
@@ -57,7 +59,8 @@ func (s *Service) CreateAllocation(ctx context.Context, auth ports.AuthContext, 
 	if err != nil {
 		return domain.Allocation{}, err
 	}
-	if err := s.validateAllocationLimit(ctx, organisationID, input, targetPersonIDs, ""); err != nil {
+	err = s.validateAllocationLimit(ctx, organisationID, input, targetPersonIDs, "")
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 
@@ -92,7 +95,8 @@ func (s *Service) UpdateAllocation(ctx context.Context, auth ports.AuthContext, 
 		return domain.Allocation{}, err
 	}
 	input = normalizeAllocationInput(input)
-	if err := validateAllocation(input); err != nil {
+	err = validateAllocation(input)
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 
@@ -104,7 +108,8 @@ func (s *Service) UpdateAllocation(ctx context.Context, auth ports.AuthContext, 
 	if err != nil {
 		return domain.Allocation{}, err
 	}
-	if err := validateAllocationWithinProjectRange(input, project); err != nil {
+	err = validateAllocationWithinProjectRange(input, project)
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 
@@ -112,7 +117,8 @@ func (s *Service) UpdateAllocation(ctx context.Context, auth ports.AuthContext, 
 	if err != nil {
 		return domain.Allocation{}, err
 	}
-	if err := s.validateAllocationLimit(ctx, organisationID, input, targetPersonIDs, allocationID); err != nil {
+	err = s.validateAllocationLimit(ctx, organisationID, input, targetPersonIDs, allocationID)
+	if err != nil {
 		return domain.Allocation{}, err
 	}
 
@@ -146,7 +152,8 @@ func (s *Service) DeleteAllocation(ctx context.Context, auth ports.AuthContext, 
 		return err
 	}
 
-	if err := s.repo.DeleteAllocation(ctx, organisationID, allocationID); err != nil {
+	err = s.repo.DeleteAllocation(ctx, organisationID, allocationID)
+	if err != nil {
 		return err
 	}
 
@@ -189,7 +196,8 @@ func (s *Service) validateAllocationLimit(
 	}
 
 	for _, personID := range candidatePersonIDs {
-		if _, err := s.repo.GetPerson(ctx, organisationID, personID); err != nil {
+		_, err = s.repo.GetPerson(ctx, organisationID, personID)
+		if err != nil {
 			return err
 		}
 
@@ -207,7 +215,8 @@ func (s *Service) validateAllocationLimit(
 				continue
 			}
 
-			existingStart, existingEnd, err := parseDateRange(allocation.StartDate, allocation.EndDate)
+			var existingStart, existingEnd time.Time
+			existingStart, existingEnd, err = parseDateRange(allocation.StartDate, allocation.EndDate)
 			if err != nil {
 				return domain.ErrValidation
 			}

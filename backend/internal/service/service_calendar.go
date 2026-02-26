@@ -31,7 +31,8 @@ func (s *Service) CreateOrgHoliday(ctx context.Context, auth ports.AuthContext, 
 	if err != nil {
 		return domain.OrgHoliday{}, err
 	}
-	if err := validateDateHours(input.Date, input.Hours, organisation.HoursPerDay); err != nil {
+	err = validateDateHours(input.Date, input.Hours, organisation.HoursPerDay)
+	if err != nil {
 		return domain.OrgHoliday{}, err
 	}
 
@@ -59,7 +60,8 @@ func (s *Service) DeleteOrgHoliday(ctx context.Context, auth ports.AuthContext, 
 		return err
 	}
 
-	if err := s.repo.DeleteOrgHoliday(ctx, organisationID, holidayID); err != nil {
+	err = s.repo.DeleteOrgHoliday(ctx, organisationID, holidayID)
+	if err != nil {
 		return err
 	}
 
@@ -90,10 +92,12 @@ func (s *Service) CreateGroupUnavailability(ctx context.Context, auth ports.Auth
 	if err != nil {
 		return domain.GroupUnavailability{}, err
 	}
-	if _, err := s.repo.GetGroup(ctx, organisationID, input.GroupID); err != nil {
+	_, err = s.repo.GetGroup(ctx, organisationID, input.GroupID)
+	if err != nil {
 		return domain.GroupUnavailability{}, err
 	}
-	if err := validateDateHours(input.Date, input.Hours, organisation.HoursPerDay); err != nil {
+	err = validateDateHours(input.Date, input.Hours, organisation.HoursPerDay)
+	if err != nil {
 		return domain.GroupUnavailability{}, err
 	}
 
@@ -122,7 +126,8 @@ func (s *Service) DeleteGroupUnavailability(ctx context.Context, auth ports.Auth
 		return err
 	}
 
-	if err := s.repo.DeleteGroupUnavailability(ctx, organisationID, entryID); err != nil {
+	err = s.repo.DeleteGroupUnavailability(ctx, organisationID, entryID)
+	if err != nil {
 		return err
 	}
 
@@ -174,7 +179,8 @@ func (s *Service) CreatePersonUnavailability(ctx context.Context, auth ports.Aut
 		return domain.PersonUnavailability{}, fmt.Errorf("person employment on date: %w", err)
 	}
 	personDailyHours := organisation.HoursPerDay * employmentPct / 100
-	if err := validateDateHours(input.Date, input.Hours, personDailyHours); err != nil {
+	err = validateDateHours(input.Date, input.Hours, personDailyHours)
+	if err != nil {
 		return domain.PersonUnavailability{}, err
 	}
 
@@ -203,7 +209,8 @@ func (s *Service) DeletePersonUnavailability(ctx context.Context, auth ports.Aut
 		return err
 	}
 
-	if err := s.repo.DeletePersonUnavailability(ctx, organisationID, entryID); err != nil {
+	err = s.repo.DeletePersonUnavailability(ctx, organisationID, entryID)
+	if err != nil {
 		return err
 	}
 
@@ -220,7 +227,8 @@ func (s *Service) DeletePersonUnavailabilityByPerson(ctx context.Context, auth p
 		return err
 	}
 
-	if err := s.repo.DeletePersonUnavailabilityByPerson(ctx, organisationID, personID, entryID); err != nil {
+	err = s.repo.DeletePersonUnavailabilityByPerson(ctx, organisationID, personID, entryID)
+	if err != nil {
 		return err
 	}
 

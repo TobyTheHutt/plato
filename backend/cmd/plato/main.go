@@ -46,9 +46,10 @@ func main() {
 		return
 	}
 
-	if err := runServer(addr, router, func(server *http.Server, listener net.Listener) error {
+	err = runServer(addr, router, func(server *http.Server, listener net.Listener) error {
 		return server.Serve(listener)
-	}, logPrintf); err != nil {
+	}, logPrintf)
+	if err != nil {
 		logPrintf("server failed: %v", err)
 		exitProcess(1)
 		return
@@ -118,7 +119,7 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 	defer signalStop(quit)
 
 	select {
-	case err := <-serveErr:
+	case err = <-serveErr:
 		return err
 	case shutdownSignal := <-quit:
 		if logger != nil {
@@ -129,7 +130,8 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 	ctx, cancel := newShutdownContext(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	err = server.Shutdown(ctx)
+	if err != nil {
 		if logger != nil {
 			logger("server forced to shutdown: %v", err)
 		}
@@ -137,7 +139,8 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 		logger("server exited gracefully")
 	}
 
-	if err := closeResources(handler); err != nil {
+	err = closeResources(handler)
+	if err != nil {
 		if logger != nil {
 			logger("resource cleanup failed: %v", err)
 		}
@@ -146,7 +149,7 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 	}
 
 	select {
-	case err := <-serveErr:
+	case err = <-serveErr:
 		if err != nil {
 			return err
 		}

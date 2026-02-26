@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"plato/backend/internal/domain"
@@ -38,11 +40,12 @@ func (s *Service) CreatePerson(ctx context.Context, auth ports.AuthContext, inpu
 	if err != nil {
 		return domain.Person{}, err
 	}
-	if err := validatePerson(input); err != nil {
+	err = validatePerson(input)
+	if err != nil {
 		return domain.Person{}, err
 	}
-	if _, err := s.repo.GetOrganisation(ctx, organisationID); err != nil {
-		return domain.Person{}, err
+	if _, getOrgErr := s.repo.GetOrganisation(ctx, organisationID); getOrgErr != nil {
+		return domain.Person{}, getOrgErr
 	}
 
 	person := domain.Person{
@@ -69,7 +72,8 @@ func (s *Service) UpdatePerson(ctx context.Context, auth ports.AuthContext, pers
 	if err != nil {
 		return domain.Person{}, err
 	}
-	if err := validatePerson(input); err != nil {
+	err = validatePerson(input)
+	if err != nil {
 		return domain.Person{}, err
 	}
 
@@ -82,14 +86,15 @@ func (s *Service) UpdatePerson(ctx context.Context, auth ports.AuthContext, pers
 	if effectiveFromMonth == "" {
 		person.EmploymentPct = input.EmploymentPct
 	} else {
-		normalizedMonth, err := domain.ValidateMonth(effectiveFromMonth)
-		if err != nil {
-			return domain.Person{}, domain.ErrValidation
+		normalizedMonth, validateMonthErr := domain.ValidateMonth(effectiveFromMonth)
+		if validateMonthErr != nil {
+			return domain.Person{}, errors.Join(domain.ErrValidation, fmt.Errorf("invalid employment effective month %q: %w", effectiveFromMonth, validateMonthErr))
 		}
 		person.EmploymentChanges = upsertEmploymentChange(person.EmploymentChanges, normalizedMonth, input.EmploymentPct)
 	}
 	person.EmploymentEffectiveFromMonth = ""
-	if err := validatePerson(person); err != nil {
+	err = validatePerson(person)
+	if err != nil {
 		return domain.Person{}, err
 	}
 
@@ -111,7 +116,8 @@ func (s *Service) DeletePerson(ctx context.Context, auth ports.AuthContext, pers
 		return err
 	}
 
-	if err := s.repo.DeletePerson(ctx, organisationID, personID); err != nil {
+	err = s.repo.DeletePerson(ctx, organisationID, personID)
+	if err != nil {
 		return err
 	}
 

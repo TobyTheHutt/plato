@@ -77,9 +77,9 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 
 	allocationsByPerson := make(map[string][]personAllocation)
 	for _, allocation := range input.Allocations {
-		resolved, ok, err := resolveAllocation(allocation, personsByID, groupsByID)
-		if err != nil {
-			return nil, err
+		resolved, ok, resolveErr := resolveAllocation(allocation, personsByID, groupsByID)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
 		if !ok {
 			continue
@@ -140,8 +140,8 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 				continue
 			}
 
-			employmentPct, err := EmploymentPctOnDate(person, dayKey)
-			if err != nil {
+			employmentPct, employmentErr := EmploymentPctOnDate(person, dayKey)
+			if employmentErr != nil {
 				return nil, ErrValidation
 			}
 			baseCapacity := input.Organisation.HoursPerDay * employmentPct / 100

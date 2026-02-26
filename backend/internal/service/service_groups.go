@@ -38,10 +38,12 @@ func (s *Service) CreateGroup(ctx context.Context, auth ports.AuthContext, input
 	if err != nil {
 		return domain.Group{}, err
 	}
-	if err := validateGroup(input); err != nil {
+	err = validateGroup(input)
+	if err != nil {
 		return domain.Group{}, err
 	}
-	if err := s.ensureMembersBelongToOrg(ctx, organisationID, input.MemberIDs); err != nil {
+	err = s.ensureMembersBelongToOrg(ctx, organisationID, input.MemberIDs)
+	if err != nil {
 		return domain.Group{}, err
 	}
 
@@ -68,10 +70,12 @@ func (s *Service) UpdateGroup(ctx context.Context, auth ports.AuthContext, group
 	if err != nil {
 		return domain.Group{}, err
 	}
-	if err := validateGroup(input); err != nil {
+	err = validateGroup(input)
+	if err != nil {
 		return domain.Group{}, err
 	}
-	if err := s.ensureMembersBelongToOrg(ctx, organisationID, input.MemberIDs); err != nil {
+	err = s.ensureMembersBelongToOrg(ctx, organisationID, input.MemberIDs)
+	if err != nil {
 		return domain.Group{}, err
 	}
 
@@ -100,7 +104,8 @@ func (s *Service) DeleteGroup(ctx context.Context, auth ports.AuthContext, group
 		return err
 	}
 
-	if err := s.repo.DeleteGroup(ctx, organisationID, groupID); err != nil {
+	err = s.repo.DeleteGroup(ctx, organisationID, groupID)
+	if err != nil {
 		return err
 	}
 
@@ -116,7 +121,8 @@ func (s *Service) AddGroupMember(ctx context.Context, auth ports.AuthContext, gr
 	if err != nil {
 		return domain.Group{}, err
 	}
-	if _, err := s.repo.GetPerson(ctx, organisationID, personID); err != nil {
+	_, err = s.repo.GetPerson(ctx, organisationID, personID)
+	if err != nil {
 		return domain.Group{}, err
 	}
 

@@ -111,7 +111,8 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 		t.Fatalf("expected employment update, got %v", state.personA1.EmploymentPct)
 	}
 
-	if _, err := state.repo.GetPerson(ctx, state.orgB.ID, state.personA1.ID); !errors.Is(err, domain.ErrNotFound) {
+	_, err = state.repo.GetPerson(ctx, state.orgB.ID, state.personA1.ID)
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found across tenant, got %v", err)
 	}
 
@@ -243,7 +244,8 @@ func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *reposito
 	if err != nil {
 		t.Fatalf("create scoped person unavailability: %v", err)
 	}
-	if _, err := state.repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, Date: "2026-01-05", Hours: 8}, 8); !errors.Is(err, domain.ErrValidation) {
+	_, err = state.repo.CreatePersonUnavailabilityWithDailyLimit(ctx, domain.PersonUnavailability{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, Date: "2026-01-05", Hours: 8}, 8)
+	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected scoped person unavailability daily cap validation failure, got %v", err)
 	}
 
@@ -336,19 +338,24 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	if _, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, ProjectID: projectWithAllocation.ID, Percent: 20}); err != nil {
 		t.Fatalf("create project allocation: %v", err)
 	}
-	if err := state.repo.DeleteProject(ctx, state.orgA.ID, projectWithAllocation.ID); err != nil {
+	err = state.repo.DeleteProject(ctx, state.orgA.ID, projectWithAllocation.ID)
+	if err != nil {
 		t.Fatalf("delete project with allocations: %v", err)
 	}
-	if err := state.repo.DeleteProject(ctx, state.orgA.ID, state.projectA2.ID); err != nil {
+	err = state.repo.DeleteProject(ctx, state.orgA.ID, state.projectA2.ID)
+	if err != nil {
 		t.Fatalf("delete project A2: %v", err)
 	}
-	if err := state.repo.DeleteGroup(ctx, state.orgA.ID, state.groupA.ID); err != nil {
+	err = state.repo.DeleteGroup(ctx, state.orgA.ID, state.groupA.ID)
+	if err != nil {
 		t.Fatalf("delete group: %v", err)
 	}
-	if _, err := state.repo.GetAllocation(ctx, state.orgA.ID, state.groupAllocation.ID); !errors.Is(err, domain.ErrNotFound) {
+	_, err = state.repo.GetAllocation(ctx, state.orgA.ID, state.groupAllocation.ID)
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group allocation to be deleted with group, got %v", err)
 	}
-	if err := state.repo.DeleteOrganisation(ctx, state.orgA.ID); err != nil {
+	err = state.repo.DeleteOrganisation(ctx, state.orgA.ID)
+	if err != nil {
 		t.Fatalf("delete organisation A: %v", err)
 	}
 }
@@ -393,34 +400,44 @@ func TestFileRepositoryNotFoundCases(t *testing.T) {
 		t.Fatalf("new repo: %v", err)
 	}
 
-	if _, err := repo.GetOrganisation(ctx, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	_, err = repo.GetOrganisation(ctx, "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for organisation, got %v", err)
 	}
-	if err := repo.DeleteOrganisation(ctx, "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeleteOrganisation(ctx, "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for delete organisation, got %v", err)
 	}
-	if _, err := repo.GetProject(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	_, err = repo.GetProject(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for project, got %v", err)
 	}
-	if err := repo.DeletePerson(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeletePerson(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person delete, got %v", err)
 	}
-	if err := repo.DeleteGroup(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeleteGroup(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for group delete, got %v", err)
 	}
-	if err := repo.DeleteAllocation(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeleteAllocation(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for allocation delete, got %v", err)
 	}
-	if err := repo.DeleteOrgHoliday(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeleteOrgHoliday(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for holiday delete, got %v", err)
 	}
-	if err := repo.DeleteGroupUnavailability(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeleteGroupUnavailability(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for group unavailability delete, got %v", err)
 	}
-	if err := repo.DeletePersonUnavailability(ctx, "org", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeletePersonUnavailability(ctx, "org", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person unavailability delete, got %v", err)
 	}
-	if err := repo.DeletePersonUnavailabilityByPerson(ctx, "org", "person", "missing"); !errors.Is(err, domain.ErrNotFound) {
+	err = repo.DeletePersonUnavailabilityByPerson(ctx, "org", "person", "missing")
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person-scoped person unavailability delete, got %v", err)
 	}
 }
@@ -489,7 +506,8 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open empty state repository: %v", err)
 	}
-	if _, err := repo.ListOrganisations(ctx); err != nil {
+	_, err = repo.ListOrganisations(ctx)
+	if err != nil {
 		t.Fatalf("list organisations from empty state: %v", err)
 	}
 
@@ -498,12 +516,14 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new repository with default path: %v", err)
 	}
-	if _, err := repoDefault.CreateOrganisation(ctx, domain.Organisation{Name: "Default Path Org", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080}); err != nil {
+	_, err = repoDefault.CreateOrganisation(ctx, domain.Organisation{Name: "Default Path Org", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
+	if err != nil {
 		t.Fatalf("create org in default path repo: %v", err)
 	}
 
 	if runtime.GOOS != "windows" {
-		if _, err := NewFileRepository(filepath.Join(os.DevNull, "repo.json")); err == nil {
+		_, err = NewFileRepository(filepath.Join(os.DevNull, "repo.json"))
+		if err == nil {
 			t.Fatal("expected path error for unwritable directory")
 		}
 	}
@@ -530,8 +550,8 @@ func TestPersistenceHelperBranches(t *testing.T) {
 	}
 
 	renameFailureDir := filepath.Join(baseDir, "rename-failure-target")
-	if err := os.Mkdir(renameFailureDir, 0o755); err != nil {
-		t.Fatalf("create rename failure target directory: %v", err)
+	if mkdirErr := os.Mkdir(renameFailureDir, 0o755); mkdirErr != nil {
+		t.Fatalf("create rename failure target directory: %v", mkdirErr)
 	}
 	repo.path = renameFailureDir
 	if err := repo.persistLocked(); err == nil {
@@ -555,12 +575,14 @@ func TestFileRepositoryRollsBackStateOnPersistFailure(t *testing.T) {
 	}
 
 	renameFailureTarget := filepath.Join(t.TempDir(), "rename-target-dir")
-	if err := os.Mkdir(renameFailureTarget, 0o755); err != nil {
+	err = os.Mkdir(renameFailureTarget, 0o755)
+	if err != nil {
 		t.Fatalf("create rename target directory: %v", err)
 	}
 	repo.path = renameFailureTarget
 
-	if _, err := repo.CreateOrganisation(ctx, domain.Organisation{Name: "Should Rollback", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080}); err == nil {
+	_, err = repo.CreateOrganisation(ctx, domain.Organisation{Name: "Should Rollback", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
+	if err == nil {
 		t.Fatal("expected create organisation to fail when persist cannot rename to directory path")
 	}
 
@@ -646,11 +668,13 @@ func TestFileRepositoryClose(t *testing.T) {
 		t.Fatalf("create organisation: %v", err)
 	}
 
-	if err := repo.Close(); err != nil {
+	err = repo.Close()
+	if err != nil {
 		t.Fatalf("close repository: %v", err)
 	}
 
-	if err := repo.Close(); err != nil {
+	err = repo.Close()
+	if err != nil {
 		t.Fatalf("close repository second time: %v", err)
 	}
 
@@ -676,15 +700,17 @@ func TestFileRepositoryContextCancellation(t *testing.T) {
 	cancelledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := repo.ListOrganisations(cancelledCtx); !errors.Is(err, context.Canceled) {
+	_, err = repo.ListOrganisations(cancelledCtx)
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled from list organisations, got %v", err)
 	}
-	if _, err := repo.CreateOrganisation(cancelledCtx, domain.Organisation{
+	_, err = repo.CreateOrganisation(cancelledCtx, domain.Organisation{
 		Name:         "Canceled Org",
 		HoursPerDay:  8,
 		HoursPerWeek: 40,
 		HoursPerYear: 2080,
-	}); !errors.Is(err, context.Canceled) {
+	})
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled from create organisation, got %v", err)
 	}
 
@@ -706,11 +732,13 @@ func TestFileRepositoryContextCancellation(t *testing.T) {
 		t.Fatalf("create organisation: %v", err)
 	}
 
-	if err := repo.DeleteOrganisation(cancelledCtx, created.ID); !errors.Is(err, context.Canceled) {
+	err = repo.DeleteOrganisation(cancelledCtx, created.ID)
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled from delete organisation, got %v", err)
 	}
 
-	if _, err := repo.GetOrganisation(context.Background(), created.ID); err != nil {
+	_, err = repo.GetOrganisation(context.Background(), created.ID)
+	if err != nil {
 		t.Fatalf("expected organisation to remain after canceled delete, got %v", err)
 	}
 }

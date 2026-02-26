@@ -38,7 +38,8 @@ func (s *Service) CreateProject(ctx context.Context, auth ports.AuthContext, inp
 	if err != nil {
 		return domain.Project{}, err
 	}
-	if err := validateProject(input); err != nil {
+	err = validateProject(input)
+	if err != nil {
 		return domain.Project{}, err
 	}
 
@@ -67,7 +68,8 @@ func (s *Service) UpdateProject(ctx context.Context, auth ports.AuthContext, pro
 	if err != nil {
 		return domain.Project{}, err
 	}
-	if err := validateProject(input); err != nil {
+	err = validateProject(input)
+	if err != nil {
 		return domain.Project{}, err
 	}
 
@@ -98,7 +100,8 @@ func (s *Service) DeleteProject(ctx context.Context, auth ports.AuthContext, pro
 		return err
 	}
 
-	if err := s.repo.DeleteProject(ctx, organisationID, projectID); err != nil {
+	err = s.repo.DeleteProject(ctx, organisationID, projectID)
+	if err != nil {
 		return err
 	}
 

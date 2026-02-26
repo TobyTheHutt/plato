@@ -27,7 +27,8 @@ func TestNewJWTAuthProviderFromEnv(t *testing.T) {
 		t.Fatal("expected provider")
 	}
 
-	if _, err := NewJWTAuthProvider(""); err == nil {
+	_, err = NewJWTAuthProvider("")
+	if err == nil {
 		t.Fatal("expected error for empty secret")
 	}
 }
@@ -227,7 +228,8 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 			request.Header.Set(headerAuthorization, testCase.headerValue)
 
-			if _, err := provider.FromRequest(request); err == nil {
+			_, authErr := provider.FromRequest(request)
+			if authErr == nil {
 				t.Fatal("expected authentication error")
 			}
 		})
@@ -294,10 +296,12 @@ func TestParseRolesClaim(t *testing.T) {
 		t.Fatalf("expected two roles, got %v", roles)
 	}
 
-	if _, err := parseRolesClaim([]any{"org_admin", 123}); err == nil {
+	_, err = parseRolesClaim([]any{"org_admin", 123})
+	if err == nil {
 		t.Fatal("expected parse error for non-string role entry")
 	}
-	if _, err := parseRolesClaim(123); err == nil {
+	_, err = parseRolesClaim(123)
+	if err == nil {
 		t.Fatal("expected parse error for unsupported roles claim type")
 	}
 }

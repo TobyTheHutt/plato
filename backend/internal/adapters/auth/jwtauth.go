@@ -133,7 +133,8 @@ func (p *JWTAuthProvider) parseAndValidateToken(token string) (map[string]any, e
 	}
 
 	var header map[string]any
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
+	err = json.Unmarshal(headerJSON, &header)
+	if err != nil {
 		return nil, fmt.Errorf("parse token header: %w", err)
 	}
 	if claimString(header, "alg") != "HS256" {
@@ -146,15 +147,18 @@ func (p *JWTAuthProvider) parseAndValidateToken(token string) (map[string]any, e
 	}
 
 	var claims map[string]any
-	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+	err = json.Unmarshal(payloadJSON, &claims)
+	if err != nil {
 		return nil, fmt.Errorf("parse token payload: %w", err)
 	}
 
 	now := p.now().UTC().Unix()
-	if err := validateExpiration(claims, now); err != nil {
+	err = validateExpiration(claims, now)
+	if err != nil {
 		return nil, err
 	}
-	if err := validateNotBefore(claims, now); err != nil {
+	err = validateNotBefore(claims, now)
+	if err != nil {
 		return nil, err
 	}
 

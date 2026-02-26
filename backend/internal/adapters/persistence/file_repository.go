@@ -75,10 +75,7 @@ func (r *FileRepository) load() error {
 	content, err := os.ReadFile(r.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if err := r.persistLocked(); err != nil {
-				return err
-			}
-			return nil
+			return r.persistLocked()
 		}
 		return err
 	}
@@ -87,7 +84,8 @@ func (r *FileRepository) load() error {
 		return nil
 	}
 
-	if err := json.Unmarshal(content, &r.state); err != nil {
+	err = json.Unmarshal(content, &r.state)
+	if err != nil {
 		return fmt.Errorf("decode repository data: %w", err)
 	}
 
@@ -136,19 +134,22 @@ func (r *FileRepository) persistLocked() error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
+	err = os.MkdirAll(filepath.Dir(r.path), 0o755)
+	if err != nil {
 		r.state = cloneFileState(r.persistedState)
 		return err
 	}
 
 	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+	err = os.WriteFile(tmp, body, 0o600)
+	if err != nil {
 		_ = os.Remove(tmp)
 		r.state = cloneFileState(r.persistedState)
 		return err
 	}
 
-	if err := os.Rename(tmp, r.path); err != nil {
+	err = os.Rename(tmp, r.path)
+	if err != nil {
 		_ = os.Remove(tmp)
 		r.state = cloneFileState(r.persistedState)
 		return err

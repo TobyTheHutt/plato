@@ -36,6 +36,13 @@ linters:
     - containedctx
 
 linters-settings:
+  govet:
+    enable:
+      - shadow
+    settings:
+      shadow:
+        strict: true
+
   errcheck:
     check-type-assertions: true
     check-blank: true
