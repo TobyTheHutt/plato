@@ -60,17 +60,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
-      - name: Write optional NVD API key file
-        id: nvd_key
-        if: ${{ secrets.NVD_API_KEY != '' }}
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-        run: |
-          mkdir -p .secrets
-          printf '%s' "$NVD_API_KEY" > .secrets/nvd_api_key
-          chmod 600 .secrets/nvd_api_key
-          echo "key_file=$GITHUB_WORKSPACE/.secrets/nvd_api_key" >> "$GITHUB_OUTPUT"
-
       - name: Dry run dependency validation
         run: make check-dry-run
 
@@ -78,14 +67,12 @@ jobs:
       - name: Full quality checks
         env:
           PLATO_VULN_SCAN_MODE: prefer-cache
-          NVD_API_KEY_FILE: ${{ steps.nvd_key.outputs.key_file }}
         run: make --warn-undefined-variables check
 
       # Second pass validates idempotency and detects tracked file side effects.
       - name: Idempotency check
         env:
           PLATO_VULN_SCAN_MODE: prefer-cache
-          NVD_API_KEY_FILE: ${{ steps.nvd_key.outputs.key_file }}
         run: |
           make --warn-undefined-variables check
           git diff --exit-code
