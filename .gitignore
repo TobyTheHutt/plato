@@ -43,3 +43,6 @@ frontend/.vite/
 
 # Development service runtime artifacts
 .make/
+
+# Vulnerability scan cache artifacts
+.cache/vuln/

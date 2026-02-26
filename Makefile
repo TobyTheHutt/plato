@@ -25,7 +25,7 @@ SERVICE_STOP_TIMEOUT ?= 10
 
 export PID_DIR BACKEND_PID FRONTEND_PID BACKEND_PID_FILE FRONTEND_PID_FILE BACKEND_LOG FRONTEND_LOG BACKEND_BIN BACKEND_ADDR BACKEND_PORT BACKEND_URL BACKEND_HEALTH_URL BACKEND_PROCESS_PATTERN BACKEND_DEV_MODE BACKEND_PRODUCTION_MODE FRONTEND_HOST FRONTEND_PORT FRONTEND_URL FRONTEND_HEALTH_URL FRONTEND_VITE_BIN FRONTEND_PROCESS_PATTERN SERVICE_START_TIMEOUT SERVICE_STOP_TIMEOUT
 
-.PHONY: check check-dry-run lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend test-backend-report typecheck start stop restart status start-backend start-frontend stop-backend stop-frontend
+.PHONY: check check-dry-run check-toolchain lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend test-backend-report typecheck start stop restart status start-backend start-frontend stop-backend stop-frontend
 .NOTPARALLEL: stop
 
 # Start backend and frontend in coordinated order.
@@ -63,7 +63,7 @@ stop-frontend:
 	@SERVICE_PORT="$(FRONTEND_PORT)" SERVICE_PROCESS_PATTERN="$(FRONTEND_PROCESS_PATTERN)" bash ./scripts/service-stop.sh frontend "$(FRONTEND_PID)" "$(SERVICE_STOP_TIMEOUT)"
 
 # Run all quality checks
-check: lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
+check: lint-makefile lint-scripts check-toolchain lint-backend lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
 
 # Validate target graph and command expansion without execution
 check-dry-run:
@@ -76,6 +76,10 @@ lint-makefile:
 # Shell script static analysis
 lint-scripts:
 	[ ! -d scripts ] || find scripts -type f -name '*.sh' -exec shellcheck -x {} +
+
+# Go toolchain compatibility check
+check-toolchain:
+	bash ./scripts/check_go_toolchain.sh
 
 # Backend static analysis
 lint-backend:

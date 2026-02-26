@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -256,5 +257,143 @@ func TestNormalizeSeverity(t *testing.T) {
 	t.Parallel()
 	if normalizeSeverity("", 9.2) != severityCritical {
 		t.Fatal("expected score fallback to CRITICAL")
+	}
+}
+
+func TestResolveNVDAPIKey(t *testing.T) {
+	t.Run("from file", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "from-env")
+		tempDir := t.TempDir()
+		apiKeyPath := filepath.Join(tempDir, "nvd.key")
+		if err := os.WriteFile(apiKeyPath, []byte("from-file\n"), 0o600); err != nil {
+			t.Fatalf("write key file: %v", err)
+		}
+
+		apiKey, err := resolveNVDAPIKey(apiKeyPath)
+		if err != nil {
+			t.Fatalf("resolveNVDAPIKey returned error: %v", err)
+		}
+		if apiKey != "from-file" {
+			t.Fatalf("unexpected api key: %q", apiKey)
+		}
+	})
+
+	t.Run("empty file fails", func(t *testing.T) {
+		tempDir := t.TempDir()
+		apiKeyPath := filepath.Join(tempDir, "empty.key")
+		if err := os.WriteFile(apiKeyPath, []byte("\n"), 0o600); err != nil {
+			t.Fatalf("write key file: %v", err)
+		}
+
+		if _, err := resolveNVDAPIKey(apiKeyPath); err == nil {
+			t.Fatal("expected error for empty key file")
+		}
+	})
+
+	t.Run("fallback to env", func(t *testing.T) {
+		t.Setenv("NVD_API_KEY", "from-env")
+		apiKey, err := resolveNVDAPIKey("")
+		if err != nil {
+			t.Fatalf("resolveNVDAPIKey returned error: %v", err)
+		}
+		if apiKey != "from-env" {
+			t.Fatalf("unexpected api key: %q", apiKey)
+		}
+	})
+}
+
+func TestLoadSeveritySnapshot(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+
+	t.Run("loads valid snapshot", func(t *testing.T) {
+		path := filepath.Join(tempDir, "snapshot.json")
+		content := `{
+  "cves": {
+    "CVE-2026-1000": {"severity": "HIGH", "score": 8.1},
+    "cve-2026-1001": {"severity": "", "score": 4.5}
+  }
+}`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write snapshot file: %v", err)
+		}
+
+		snapshot, err := loadSeveritySnapshot(path)
+		if err != nil {
+			t.Fatalf("loadSeveritySnapshot returned error: %v", err)
+		}
+
+		high := snapshot["CVE-2026-1000"]
+		if high.Severity != severityHigh || high.Score != 8.1 {
+			t.Fatalf("unexpected severity for CVE-2026-1000: %#v", high)
+		}
+
+		medium := snapshot["CVE-2026-1001"]
+		if medium.Severity != severityMedium || medium.Score != 4.5 {
+			t.Fatalf("unexpected severity for CVE-2026-1001: %#v", medium)
+		}
+	})
+
+	t.Run("invalid id fails", func(t *testing.T) {
+		path := filepath.Join(tempDir, "invalid.json")
+		content := `{"cves":{"GHSA-123":{"severity":"HIGH","score":8.0}}}`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write snapshot file: %v", err)
+		}
+
+		if _, err := loadSeveritySnapshot(path); err == nil {
+			t.Fatal("expected invalid id error")
+		}
+	})
+}
+
+func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
+	t.Parallel()
+
+	resolver := &nvdSeverityResolver{
+		offline: true,
+		snapshot: map[string]severityAssessment{
+			"CVE-2026-1000": {
+				Severity: severityHigh,
+				Score:    7.5,
+				Source:   "CVE-2026-1000",
+			},
+		},
+		cache:    make(map[string]severityAssessment),
+		errorMap: make(map[string]error),
+	}
+
+	fromSnapshot, err := resolver.resolveCVE(context.Background(), "CVE-2026-1000")
+	if err != nil {
+		t.Fatalf("resolveCVE returned error for snapshot hit: %v", err)
+	}
+	if fromSnapshot.Severity != severityHigh || fromSnapshot.Score != 7.5 {
+		t.Fatalf("unexpected snapshot assessment: %#v", fromSnapshot)
+	}
+
+	missing, missingErr := resolver.resolveCVE(context.Background(), "CVE-2026-1001")
+	if missingErr == nil {
+		t.Fatal("expected error for missing snapshot CVE in offline mode")
+	}
+	if missing.Severity != severityUnknown {
+		t.Fatalf("expected UNKNOWN severity in offline missing case, got %#v", missing)
+	}
+	if !strings.Contains(missingErr.Error(), "missing from severity snapshot") {
+		t.Fatalf("unexpected missing snapshot error: %v", missingErr)
+	}
+
+	cached, cachedErr := resolver.resolveCVE(context.Background(), "CVE-2026-1001")
+	if cachedErr == nil {
+		t.Fatal("expected cached error for missing snapshot CVE")
+	}
+	if !errors.Is(cachedErr, missingErr) && cachedErr.Error() != missingErr.Error() {
+		t.Fatalf("expected cached error to match original error: got %v want %v", cachedErr, missingErr)
+	}
+	if cached.Severity != severityUnknown {
+		t.Fatalf("expected cached UNKNOWN severity, got %#v", cached)
+	}
+
+	if got := fmt.Sprintf("%s", cached.Source); got != "CVE-2026-1001" {
+		t.Fatalf("unexpected cached source: %s", got)
 	}
 }

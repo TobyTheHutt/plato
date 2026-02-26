@@ -98,7 +98,12 @@ Router logic is organized by domain in `backend/internal/httpapi`:
 ### Prerequisites
 
 - Node.js LTS and npm or pnpm
-- Go stable release
+- Go `1.26.0`
+
+Toolchain policy:
+- Plato enforces the exact Go version from `backend/go.mod` for reproducible local and CI checks
+- `make check` runs `scripts/check_go_toolchain.sh` and fails fast with a clear mismatch message when local Go is not `1.26.0`
+- For containerized local development, use a base image pinned to `golang:1.26.0`
 
 ### Run in development
 
@@ -328,6 +333,48 @@ Local usage:
 go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 make scan-vulnerabilities
 ```
+
+Deterministic scan modes:
+- `PLATO_VULN_SCAN_MODE=live` runs live `govulncheck` and live NVD severity lookups
+- `PLATO_VULN_SCAN_MODE=prefer-cache` reuses cached `govulncheck` JSON from `.cache/vuln` when available, then falls back to a live run
+- `PLATO_VULN_SCAN_MODE=snapshot` performs a fully offline check using pinned inputs, typically with pinned files tracked under `.cache/vuln` or `docs/`
+
+Canonical cache path:
+- Plato-managed `govulncheck` result cache is `.cache/vuln`
+- `~/.cache/govulncheck` is a separate `govulncheck` database cache used by the scanner itself
+
+Optional NVD API key path:
+- Use `NVD_API_KEY_FILE=/path/to/nvd_api_key` to load the NVD API key from a file
+- `NVD_API_KEY` is still supported as an environment variable fallback
+- Use `PLATO_VULN_NVD_API_BASE_URL` only when you need a non-default NVD API endpoint
+
+Optional pinned snapshot mode for offline reproducibility:
+- Set `PLATO_VULN_SCAN_MODE=snapshot`
+- Provide `PLATO_VULN_GOVULNCHECK_INPUT` pointing to pinned `govulncheck -json` output
+- Provide `PLATO_VULN_NVD_SNAPSHOT` pointing to a pinned severity file
+- The severity snapshot format is:
+
+```json
+{
+  "cves": {
+    "CVE-2026-1000": {"severity": "HIGH", "score": 8.1}
+  }
+}
+```
+
+Offline example:
+
+```bash
+PLATO_VULN_SCAN_MODE=snapshot \
+PLATO_VULN_GOVULNCHECK_INPUT=./docs/govulncheck-snapshot.json \
+PLATO_VULN_NVD_SNAPSHOT=./docs/nvd-severity-snapshot.json \
+make scan-vulnerabilities
+```
+
+CI behavior:
+- CI caches `.cache/vuln` for Plato-managed scan results and `~/.cache/govulncheck` for the scanner's vulnerability database
+- CI writes an optional NVD API key file from `NVD_API_KEY` secret and passes the file path via `NVD_API_KEY_FILE`
+- CI runs vulnerability checks in `prefer-cache` mode
 
 Accepted risk override process:
 - Add temporary exceptions to `docs/security-vulnerability-overrides.json`

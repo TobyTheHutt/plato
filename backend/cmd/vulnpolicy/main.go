@@ -71,6 +71,9 @@ type severityResolver interface {
 type nvdSeverityResolver struct {
 	client   *http.Client
 	baseURL  string
+	apiKey   string
+	offline  bool
+	snapshot map[string]severityAssessment
 	mu       sync.RWMutex
 	cache    map[string]severityAssessment
 	errorMap map[string]error
@@ -136,10 +139,22 @@ type nvdMetric struct {
 	} `json:"cvssData"`
 }
 
+type severitySnapshotFile struct {
+	CVEs map[string]severitySnapshotEntry `json:"cves"`
+}
+
+type severitySnapshotEntry struct {
+	Severity string  `json:"severity"`
+	Score    float64 `json:"score"`
+}
+
 func main() {
 	inputPath := flag.String("input", "", "path to govulncheck JSON output")
 	overridesPath := flag.String("overrides", "", "path to vulnerability override config")
 	nvdAPIBaseURL := flag.String("nvd-api-base-url", defaultNVDAPIBaseURL, "NVD CVE API base URL")
+	nvdAPIKeyFile := flag.String("nvd-api-key-file", "", "path to file containing NVD API key")
+	severitySnapshot := flag.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON")
+	offlineMode := flag.Bool("offline", false, "disable live NVD lookups and use pinned snapshot data only")
 	nvdTimeout := flag.Duration("nvd-timeout", 15*time.Second, "timeout per NVD API request")
 	flag.Parse()
 
@@ -166,11 +181,28 @@ func main() {
 		exitf("error: load overrides: %v", err)
 	}
 
+	apiKey, err := resolveNVDAPIKey(*nvdAPIKeyFile)
+	if err != nil {
+		exitf("error: resolve NVD API key: %v", err)
+	}
+
+	snapshot, err := loadSeveritySnapshot(*severitySnapshot)
+	if err != nil {
+		exitf("error: load severity snapshot: %v", err)
+	}
+
+	if *offlineMode && len(snapshot) == 0 {
+		exitf("error: -offline requires -severity-snapshot")
+	}
+
 	resolver := &nvdSeverityResolver{
 		client: &http.Client{
 			Timeout: *nvdTimeout,
 		},
 		baseURL:  *nvdAPIBaseURL,
+		apiKey:   apiKey,
+		offline:  *offlineMode,
+		snapshot: snapshot,
 		cache:    make(map[string]severityAssessment),
 		errorMap: make(map[string]error),
 	}
@@ -414,6 +446,56 @@ func sortEvaluated(items []evaluatedVuln) {
 	})
 }
 
+func resolveNVDAPIKey(apiKeyFile string) (string, error) {
+	trimmedPath := strings.TrimSpace(apiKeyFile)
+	if trimmedPath == "" {
+		return strings.TrimSpace(os.Getenv("NVD_API_KEY")), nil
+	}
+
+	rawValue, err := os.ReadFile(trimmedPath)
+	if err != nil {
+		return "", err
+	}
+	apiKey := strings.TrimSpace(string(rawValue))
+	if apiKey == "" {
+		return "", fmt.Errorf("NVD API key file %q is empty", trimmedPath)
+	}
+	return apiKey, nil
+}
+
+func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return map[string]severityAssessment{}, nil
+	}
+
+	rawValue, err := os.ReadFile(trimmedPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var file severitySnapshotFile
+	if err := json.Unmarshal(rawValue, &file); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]severityAssessment, len(file.CVEs))
+	for rawID, entry := range file.CVEs {
+		normalizedID := normalizeID(rawID)
+		if !strings.HasPrefix(normalizedID, "CVE-") {
+			return nil, fmt.Errorf("snapshot id must start with CVE-: %s", rawID)
+		}
+		severityValue := normalizeSeverity(entry.Severity, entry.Score)
+		result[normalizedID] = severityAssessment{
+			Severity: severityValue,
+			Score:    entry.Score,
+			Source:   normalizedID,
+		}
+	}
+
+	return result, nil
+}
+
 func (resolver *nvdSeverityResolver) Resolve(ctx context.Context, vuln vulnAssessment) (severityAssessment, error) {
 	candidateCVEs := collectCVEIDs(vuln)
 	if len(candidateCVEs) == 0 {
@@ -441,6 +523,18 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 		return cached, cachedErr
 	}
 
+	if snapshotSeverity, ok := resolver.snapshot[normalizedCVE]; ok {
+		resolver.writeCache(normalizedCVE, snapshotSeverity, nil)
+		return snapshotSeverity, nil
+	}
+
+	if resolver.offline {
+		assessment := unknownSeverityAssessment(normalizedCVE)
+		err := fmt.Errorf("offline mode enabled and %s is missing from severity snapshot", normalizedCVE)
+		resolver.writeCache(normalizedCVE, assessment, err)
+		return assessment, err
+	}
+
 	requestURL, err := addQueryParam(resolver.baseURL, "cveId", normalizedCVE)
 	if err != nil {
 		assessment := unknownSeverityAssessment(normalizedCVE)
@@ -460,8 +554,8 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 		request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
 
 		apiKeyConfigured := false
-		if apiKey := strings.TrimSpace(os.Getenv("NVD_API_KEY")); apiKey != "" {
-			request.Header.Set("apiKey", apiKey)
+		if resolver.apiKey != "" {
+			request.Header.Set("apiKey", resolver.apiKey)
 			apiKeyConfigured = true
 		}
 

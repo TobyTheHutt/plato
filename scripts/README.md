@@ -13,4 +13,5 @@ Development helper scripts live here.
 - `path-utils.sh` provides shared repo-relative path resolution helpers for scripts
 - `check_make_dry_run.sh` validates `make --dry-run check` and fails on undefined-variable warnings
 - `check_vuln.sh` runs `govulncheck` and applies Plato severity policy with override support
+- `check_go_toolchain.sh` verifies local Go exactly matches `backend/go.mod` and prints a clear mismatch error
 - `check_backend_coverage.sh` runs backend tests with Go coverage and fails if total statements are below the configured threshold
