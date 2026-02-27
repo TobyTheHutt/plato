@@ -25,7 +25,7 @@ SERVICE_STOP_TIMEOUT ?= 10
 
 export PID_DIR BACKEND_PID FRONTEND_PID BACKEND_PID_FILE FRONTEND_PID_FILE BACKEND_LOG FRONTEND_LOG BACKEND_BIN BACKEND_ADDR BACKEND_PORT BACKEND_URL BACKEND_HEALTH_URL BACKEND_PROCESS_PATTERN BACKEND_DEV_MODE BACKEND_PRODUCTION_MODE FRONTEND_HOST FRONTEND_PORT FRONTEND_URL FRONTEND_HEALTH_URL FRONTEND_VITE_BIN FRONTEND_PROCESS_PATTERN SERVICE_START_TIMEOUT SERVICE_STOP_TIMEOUT
 
-.PHONY: check check-dry-run check-toolchain lint-makefile lint-scripts lint-backend lint-frontend scan-vulnerabilities test-frontend test-backend test-backend-report typecheck start stop restart status start-backend start-frontend stop-backend stop-frontend
+.PHONY: check check-dry-run check-toolchain lint-makefile lint-scripts lint-backend lint-tools lint-frontend scan-vulnerabilities test-frontend test-backend test-tools test-backend-report typecheck start stop restart status start-backend start-frontend stop-backend stop-frontend
 .NOTPARALLEL: stop
 
 # Start backend and frontend in coordinated order.
@@ -63,7 +63,7 @@ stop-frontend:
 	@SERVICE_PORT="$(FRONTEND_PORT)" SERVICE_PROCESS_PATTERN="$(FRONTEND_PROCESS_PATTERN)" bash ./scripts/service-stop.sh frontend "$(FRONTEND_PID)" "$(SERVICE_STOP_TIMEOUT)"
 
 # Run all quality checks
-check: lint-makefile lint-scripts check-toolchain lint-backend lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
+check: lint-makefile lint-scripts check-toolchain lint-backend lint-tools lint-frontend scan-vulnerabilities typecheck test-frontend test-backend
 
 # Validate target graph and command expansion without execution
 check-dry-run:
@@ -85,6 +85,10 @@ check-toolchain:
 lint-backend:
 	cd backend && golangci-lint run -c ../.golangci.yml ./...
 
+# Backend tools-tag static analysis
+lint-tools:
+	cd backend && golangci-lint run -c ../.golangci.yml --build-tags tools ./cmd/vulnpolicy
+
 # Frontend static analysis
 lint-frontend:
 	cd frontend && npm --silent run lint
@@ -100,6 +104,10 @@ test-frontend:
 # Backend tests with coverage threshold enforcement
 test-backend:
 	bash ./scripts/check_backend_coverage.sh "$(BACKEND_COVERAGE_THRESHOLD)"
+
+# Tools-tagged backend tests
+test-tools:
+	cd backend && go test -count=1 -tags tools ./cmd/vulnpolicy
 
 # Generate backend coverage HTML report in backend/coverage.html
 test-backend-report: test-backend

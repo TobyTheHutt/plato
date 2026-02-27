@@ -169,11 +169,14 @@ func main() {
 	if err != nil {
 		exitf("error: open govulncheck output: %v", err)
 	}
-	defer inputFile.Close()
 
 	vulns, err := parseGovulncheckOutput(inputFile)
+	closeErr := inputFile.Close()
 	if err != nil {
 		exitf("error: parse govulncheck output: %v", err)
+	}
+	if closeErr != nil {
+		exitf("error: close govulncheck output: %v", closeErr)
 	}
 
 	overrides, err := loadOverrides(*overridesPath)
@@ -318,8 +321,9 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 	}
 
 	var config overrideConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
+	unmarshalErr := json.Unmarshal(data, &config)
+	if unmarshalErr != nil {
+		return nil, unmarshalErr
 	}
 
 	overrides := make(map[string]riskOverride, len(config.Overrides))
@@ -339,9 +343,9 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 		if expiresOn == "" {
 			return nil, fmt.Errorf("override %s must include expires_on", id)
 		}
-		expiryDate, err := time.Parse("2006-01-02", expiresOn)
-		if err != nil {
-			return nil, fmt.Errorf("override %s has invalid expires_on %q: %w", id, expiresOn, err)
+		expiryDate, parseErr := time.Parse("2006-01-02", expiresOn)
+		if parseErr != nil {
+			return nil, fmt.Errorf("override %s has invalid expires_on %q: %w", id, expiresOn, parseErr)
 		}
 		overrides[id] = riskOverride{
 			ID:        id,
@@ -475,8 +479,9 @@ func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
 	}
 
 	var file severitySnapshotFile
-	if err := json.Unmarshal(rawValue, &file); err != nil {
-		return nil, err
+	unmarshalErr := json.Unmarshal(rawValue, &file)
+	if unmarshalErr != nil {
+		return nil, unmarshalErr
 	}
 
 	result := make(map[string]severityAssessment, len(file.CVEs))
@@ -562,10 +567,9 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 		response, responseErr := resolver.client.Do(request)
 		if responseErr != nil {
 			if attempt < maxAttempts {
-				if err := sleepWithBackoff(ctx, attempt, apiKeyConfigured); err != nil {
-					assessment := unknownSeverityAssessment(normalizedCVE)
-					resolver.writeCache(normalizedCVE, assessment, err)
-					return assessment, err
+				sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured)
+				if sleepErr != nil {
+					return unknownSeverityAssessment(normalizedCVE), sleepErr
 				}
 				continue
 			}
@@ -578,10 +582,9 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusForbidden || response.StatusCode >= http.StatusInternalServerError {
 			response.Body.Close()
 			if attempt < maxAttempts {
-				if err := sleepWithBackoff(ctx, attempt, apiKeyConfigured); err != nil {
-					assessment := unknownSeverityAssessment(normalizedCVE)
-					resolver.writeCache(normalizedCVE, assessment, err)
-					return assessment, err
+				sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured)
+				if sleepErr != nil {
+					return unknownSeverityAssessment(normalizedCVE), sleepErr
 				}
 				continue
 			}
@@ -638,6 +641,7 @@ func sleepWithBackoff(ctx context.Context, attempt int, apiKeyConfigured bool) e
 		baseDelay = 750 * time.Millisecond
 	}
 	backoffDelay := baseDelay * time.Duration(1<<(attempt-1))
+	// #nosec G404 -- non-cryptographic jitter is sufficient for retry backoff.
 	jitter := time.Duration(rand.Int63n(int64(baseDelay / 2)))
 	waitFor := backoffDelay + jitter
 

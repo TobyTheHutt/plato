@@ -3,13 +3,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -87,13 +93,13 @@ func TestLoadOverrides(t *testing.T) {
     }
   ]
 }`
-	if err := os.WriteFile(path, []byte(validContent), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(validContent), 0o600); err != nil {
 		t.Fatalf("write override file: %v", err)
 	}
 
-	overrides, err := loadOverrides(path)
-	if err != nil {
-		t.Fatalf("loadOverrides returned error: %v", err)
+	overrides, overridesErr := loadOverrides(path)
+	if overridesErr != nil {
+		t.Fatalf("loadOverrides returned error: %v", overridesErr)
 	}
 
 	override, ok := overrides["GO-2026-4340"]
@@ -110,10 +116,10 @@ func TestLoadOverrides(t *testing.T) {
 	t.Run("missing expires_on", func(t *testing.T) {
 		invalidPath := filepath.Join(tempDir, "invalid-missing-expires.json")
 		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x"}]}`
-		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o644); err != nil {
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
 			t.Fatalf("write invalid override file: %v", err)
 		}
-		if _, err := loadOverrides(invalidPath); err == nil {
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
 			t.Fatal("expected error for missing expires_on")
 		}
 	})
@@ -126,10 +132,10 @@ func TestLoadOverrides(t *testing.T) {
     {"id": "go-1", "reason": "b", "expires_on": "2026-03-10"}
   ]
 }`
-		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o644); err != nil {
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
 			t.Fatalf("write invalid override file: %v", err)
 		}
-		if _, err := loadOverrides(invalidPath); err == nil {
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
 			t.Fatal("expected error for duplicate override IDs")
 		}
 	})
@@ -137,10 +143,10 @@ func TestLoadOverrides(t *testing.T) {
 	t.Run("missing reason", func(t *testing.T) {
 		invalidPath := filepath.Join(tempDir, "invalid-missing-reason.json")
 		invalidContent := `{"overrides":[{"id":"GO-1","expires_on":"2026-03-01"}]}`
-		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o644); err != nil {
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
 			t.Fatalf("write invalid override file: %v", err)
 		}
-		if _, err := loadOverrides(invalidPath); err == nil {
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
 			t.Fatal("expected error for missing reason")
 		}
 	})
@@ -314,7 +320,7 @@ func TestLoadSeveritySnapshot(t *testing.T) {
     "cve-2026-1001": {"severity": "", "score": 4.5}
   }
 }`
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write snapshot file: %v", err)
 		}
 
@@ -337,7 +343,7 @@ func TestLoadSeveritySnapshot(t *testing.T) {
 	t.Run("invalid id fails", func(t *testing.T) {
 		path := filepath.Join(tempDir, "invalid.json")
 		content := `{"cves":{"GHSA-123":{"severity":"HIGH","score":8.0}}}`
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write snapshot file: %v", err)
 		}
 
@@ -393,7 +399,671 @@ func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 		t.Fatalf("expected cached UNKNOWN severity, got %#v", cached)
 	}
 
-	if got := fmt.Sprintf("%s", cached.Source); got != "CVE-2026-1001" {
+	if got := cached.Source; got != "CVE-2026-1001" {
 		t.Fatalf("unexpected cached source: %s", got)
 	}
+}
+
+func TestParseGovulncheckOutputMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "truncated object",
+			input: `{"osv":{"id":"GO-1"}`,
+		},
+		{
+			name:  "invalid second line",
+			input: `{"osv":{"id":"GO-1"}}` + "\n" + `{"finding":`,
+		},
+		{
+			name:  "unexpected array",
+			input: `[]`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := parseGovulncheckOutput(strings.NewReader(testCase.input)); err == nil {
+				t.Fatalf("expected parse error for %s", testCase.name)
+			}
+		})
+	}
+}
+
+func TestNormalizeSeverityMatrix(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name  string
+		raw   string
+		score float64
+		want  severity
+	}{
+		{name: "explicit critical", raw: "critical", score: 0.0, want: severityCritical},
+		{name: "explicit high", raw: " HIGH ", score: 0.0, want: severityHigh},
+		{name: "explicit medium", raw: "MeDiUm", score: 0.0, want: severityMedium},
+		{name: "explicit low", raw: "low", score: 10.0, want: severityLow},
+		{name: "score critical", raw: "", score: 9.0, want: severityCritical},
+		{name: "score high", raw: "", score: 7.0, want: severityHigh},
+		{name: "score medium", raw: "", score: 4.0, want: severityMedium},
+		{name: "score low", raw: "", score: 0.1, want: severityLow},
+		{name: "score unknown zero", raw: "", score: 0.0, want: severityUnknown},
+		{name: "score unknown negative", raw: "", score: -1.0, want: severityUnknown},
+		{name: "unknown text with score fallback", raw: "unknown-text", score: 8.2, want: severityHigh},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := normalizeSeverity(testCase.raw, testCase.score); got != testCase.want {
+				t.Fatalf("normalizeSeverity(%q, %.1f) = %s, want %s", testCase.raw, testCase.score, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestLoadOverridesErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	t.Run("missing file", func(t *testing.T) {
+		t.Parallel()
+		if _, loadErr := loadOverrides(filepath.Join(tempDir, "missing.json")); loadErr == nil {
+			t.Fatal("expected missing file error")
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tempDir, "invalid-json.json")
+		if err := os.WriteFile(path, []byte(`{"overrides":[`), 0o600); err != nil {
+			t.Fatalf("write invalid file: %v", err)
+		}
+		if _, loadErr := loadOverrides(path); loadErr == nil {
+			t.Fatal("expected invalid json error")
+		}
+	})
+
+	t.Run("missing id", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tempDir, "missing-id.json")
+		content := `{"overrides":[{"reason":"x","expires_on":"2026-03-01"}]}`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write invalid file: %v", err)
+		}
+		if _, loadErr := loadOverrides(path); loadErr == nil {
+			t.Fatal("expected missing id error")
+		}
+	})
+
+	t.Run("invalid expires_on format", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tempDir, "invalid-date.json")
+		content := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"03/01/2026"}]}`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write invalid file: %v", err)
+		}
+		if _, loadErr := loadOverrides(path); loadErr == nil {
+			t.Fatal("expected invalid expires_on error")
+		}
+	})
+}
+
+func TestLoadSeveritySnapshotErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	t.Run("missing file", func(t *testing.T) {
+		t.Parallel()
+		if _, err := loadSeveritySnapshot(filepath.Join(tempDir, "missing-snapshot.json")); err == nil {
+			t.Fatal("expected missing snapshot error")
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tempDir, "snapshot-invalid.json")
+		if err := os.WriteFile(path, []byte(`{"cves":`), 0o600); err != nil {
+			t.Fatalf("write snapshot file: %v", err)
+		}
+		if _, err := loadSeveritySnapshot(path); err == nil {
+			t.Fatal("expected invalid snapshot json error")
+		}
+	})
+}
+
+func TestEvaluateVulnerabilitiesUnknownSeverity(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
+	vulns := []vulnAssessment{
+		{ID: "GO-LOW", Reachable: true},
+		{ID: "GO-UNKNOWN", Reachable: true},
+	}
+
+	resolver := &fakeSeverityResolver{
+		byID: map[string]severityAssessment{
+			"GO-LOW":     {Severity: severityLow, Score: 1.0},
+			"GO-UNKNOWN": {Severity: severityUnknown},
+		},
+		errID: map[string]error{},
+	}
+
+	result := evaluateVulnerabilities(context.Background(), vulns, nil, resolver, now)
+
+	if len(result.Warn) != 1 || result.Warn[0].Vuln.ID != "GO-LOW" {
+		t.Fatalf("unexpected warn list: %#v", result.Warn)
+	}
+	if len(result.Fail) != 1 || result.Fail[0].Vuln.ID != "GO-UNKNOWN" {
+		t.Fatalf("unexpected fail list: %#v", result.Fail)
+	}
+}
+
+func TestSortEvaluated(t *testing.T) {
+	t.Parallel()
+
+	items := []evaluatedVuln{
+		{Vuln: vulnAssessment{ID: "GO-3"}, Severity: severityAssessment{Severity: severityLow}},
+		{Vuln: vulnAssessment{ID: "GO-1"}, Severity: severityAssessment{Severity: severityHigh}},
+		{Vuln: vulnAssessment{ID: "GO-2"}, Severity: severityAssessment{Severity: severityHigh}},
+		{Vuln: vulnAssessment{ID: "GO-4"}, Severity: severityAssessment{Severity: severityCritical}},
+	}
+
+	sortEvaluated(items)
+
+	got := []string{items[0].Vuln.ID, items[1].Vuln.ID, items[2].Vuln.ID, items[3].Vuln.ID}
+	want := []string{"GO-4", "GO-1", "GO-2", "GO-3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected sort order: got %#v want %#v", got, want)
+	}
+}
+
+func TestResolveUsesCachedCVEsAndJoinedErrors(t *testing.T) {
+	t.Parallel()
+
+	resolver := &nvdSeverityResolver{
+		snapshot: map[string]severityAssessment{},
+		cache: map[string]severityAssessment{
+			"CVE-2026-1000": {Severity: severityMedium, Score: 6.0, Source: "CVE-2026-1000"},
+			"CVE-2026-1001": {Severity: severityUnknown, Source: "CVE-2026-1001"},
+			"CVE-2026-1002": {Severity: severityHigh, Score: 8.1, Source: "CVE-2026-1002"},
+		},
+		errorMap: map[string]error{
+			"CVE-2026-1001": errors.New("lookup failed"),
+		},
+	}
+
+	vuln := vulnAssessment{
+		ID:      "GO-TEST-1",
+		Aliases: []string{"CVE-2026-1001", "cve-2026-1000", "CVE-2026-1002"},
+	}
+
+	assessment, err := resolver.Resolve(context.Background(), vuln)
+	if err == nil {
+		t.Fatal("expected joined resolver error")
+	}
+	if assessment.Severity != severityHigh || assessment.Score != 8.1 || assessment.Source != "CVE-2026-1002" {
+		t.Fatalf("unexpected best assessment: %#v", assessment)
+	}
+	if !strings.Contains(err.Error(), "lookup failed") {
+		t.Fatalf("unexpected resolver error: %v", err)
+	}
+}
+
+func TestResolveWithNoCVECandidates(t *testing.T) {
+	t.Parallel()
+
+	resolver := &nvdSeverityResolver{
+		snapshot: map[string]severityAssessment{},
+		cache:    map[string]severityAssessment{},
+		errorMap: map[string]error{},
+	}
+
+	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
+		ID:      "GO-ONLY",
+		Aliases: []string{"GHSA-123"},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error when no CVEs are available: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("expected UNKNOWN severity, got %#v", assessment)
+	}
+}
+
+func newTestResolver(client *http.Client, baseURL, apiKey string) *nvdSeverityResolver {
+	return &nvdSeverityResolver{
+		client:   client,
+		baseURL:  baseURL,
+		apiKey:   apiKey,
+		snapshot: map[string]severityAssessment{},
+		cache:    map[string]severityAssessment{},
+		errorMap: map[string]error{},
+	}
+}
+
+func TestResolveCVEInvalidBaseURL(t *testing.T) {
+	t.Parallel()
+
+	resolver := newTestResolver(&http.Client{Timeout: time.Second}, "://bad-url", "")
+	assessment, err := resolver.resolveCVE(context.Background(), "cve-2026-2000")
+	if err == nil {
+		t.Fatal("expected URL parse error")
+	}
+	if assessment.Severity != severityUnknown || assessment.Source != "CVE-2026-2000" {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+}
+
+func TestResolveCVENon200Status(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusTeapot)
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	if err == nil {
+		t.Fatal("expected HTTP status error")
+	}
+	if !strings.Contains(err.Error(), "HTTP 418") {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+}
+
+func TestResolveCVEDecodeError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, writeErr := writer.Write([]byte("{not-json"))
+		if writeErr != nil {
+			return
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2002")
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+}
+
+func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		response := nvdResponse{
+			Vulnerabilities: []struct {
+				CVE struct {
+					Metrics struct {
+						CVSSMetricV31 []nvdMetric `json:"cvssMetricV31"`
+						CVSSMetricV30 []nvdMetric `json:"cvssMetricV30"`
+						CVSSMetricV2  []nvdMetric `json:"cvssMetricV2"`
+					} `json:"metrics"`
+				} `json:"cve"`
+			}{
+				{},
+			},
+		}
+
+		metric := nvdMetric{}
+		metric.CVSSData.BaseSeverity = "HIGH"
+		metric.CVSSData.BaseScore = 7.4
+		response.Vulnerabilities[0].CVE.Metrics.CVSSMetricV31 = []nvdMetric{metric}
+
+		writer.Header().Set("Content-Type", "application/json")
+		encodeErr := json.NewEncoder(writer).Encode(response)
+		if encodeErr != nil {
+			http.Error(writer, encodeErr.Error(), http.StatusInternalServerError)
+			return
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	first, firstErr := resolver.resolveCVE(context.Background(), "CVE-2026-2003")
+	if firstErr != nil {
+		t.Fatalf("unexpected first lookup error: %v", firstErr)
+	}
+	if first.Severity != severityHigh || first.Score != 7.4 {
+		t.Fatalf("unexpected first assessment: %#v", first)
+	}
+
+	second, secondErr := resolver.resolveCVE(context.Background(), "CVE-2026-2003")
+	if secondErr != nil {
+		t.Fatalf("unexpected cached lookup error: %v", secondErr)
+	}
+	if !reflect.DeepEqual(second, first) {
+		t.Fatalf("expected cached assessment to match first lookup: got %#v want %#v", second, first)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one upstream call, got %d", calls.Load())
+	}
+}
+
+func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "configured")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2004")
+	if err == nil {
+		t.Fatal("expected error after retries")
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Fatalf("unexpected retry error: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("expected three attempts, got %d", calls.Load())
+	}
+}
+
+func TestResolveCVERetryableStatusReturnsContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusTooManyRequests)
+		cancel()
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "configured")
+	assessment, err := resolver.resolveCVE(ctx, "CVE-2026-2005")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one request before cancellation, got %d", calls.Load())
+	}
+}
+
+func TestResolveCVETransportErrorWithCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	resolver := newTestResolver(
+		&http.Client{
+			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				return nil, errors.New("transport down")
+			}),
+		},
+		"https://example.test",
+		"configured",
+	)
+
+	assessment, err := resolver.resolveCVE(ctx, "CVE-2026-2006")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+}
+
+func TestBestNVDSeverityNoMetrics(t *testing.T) {
+	t.Parallel()
+
+	severityValue, score := bestNVDSeverity(nvdResponse{})
+	if severityValue != severityUnknown || score != 0 {
+		t.Fatalf("unexpected empty payload severity: %s %.1f", severityValue, score)
+	}
+}
+
+func TestBestNVDSeverityPrefersHigherScoreOnTies(t *testing.T) {
+	t.Parallel()
+
+	payload := nvdResponse{
+		Vulnerabilities: []struct {
+			CVE struct {
+				Metrics struct {
+					CVSSMetricV31 []nvdMetric `json:"cvssMetricV31"`
+					CVSSMetricV30 []nvdMetric `json:"cvssMetricV30"`
+					CVSSMetricV2  []nvdMetric `json:"cvssMetricV2"`
+				} `json:"metrics"`
+			} `json:"cve"`
+		}{
+			{},
+		},
+	}
+
+	first := nvdMetric{}
+	first.CVSSData.BaseScore = 7.1
+	first.CVSSData.BaseSeverity = "HIGH"
+
+	second := nvdMetric{}
+	second.CVSSData.BaseScore = 8.3
+	second.CVSSData.BaseSeverity = "HIGH"
+
+	payload.Vulnerabilities[0].CVE.Metrics.CVSSMetricV30 = []nvdMetric{first, second}
+
+	severityValue, score := bestNVDSeverity(payload)
+	if severityValue != severityHigh || score != 8.3 {
+		t.Fatalf("unexpected tie-break severity: %s %.1f", severityValue, score)
+	}
+}
+
+func TestBetterSeverity(t *testing.T) {
+	t.Parallel()
+
+	if !betterSeverity(
+		severityAssessment{Severity: severityHigh, Score: 7.0},
+		severityAssessment{Severity: severityMedium, Score: 9.5},
+	) {
+		t.Fatal("expected higher rank severity to win")
+	}
+
+	if !betterSeverity(
+		severityAssessment{Severity: severityHigh, Score: 8.1},
+		severityAssessment{Severity: severityHigh, Score: 7.1},
+	) {
+		t.Fatal("expected higher score on equal rank to win")
+	}
+
+	if betterSeverity(
+		severityAssessment{Severity: severityLow, Score: 1.0},
+		severityAssessment{Severity: severityLow, Score: 2.0},
+	) {
+		t.Fatal("expected lower score to lose on equal rank")
+	}
+}
+
+func TestSeverityRankMatrix(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		value severity
+		want  int
+	}{
+		{value: severityCritical, want: 4},
+		{value: severityHigh, want: 3},
+		{value: severityMedium, want: 2},
+		{value: severityLow, want: 1},
+		{value: severity("other"), want: 0},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(string(testCase.value), func(t *testing.T) {
+			t.Parallel()
+			if got := severityRank(testCase.value); got != testCase.want {
+				t.Fatalf("severityRank(%s) = %d, want %d", testCase.value, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestAddQueryParam(t *testing.T) {
+	t.Parallel()
+
+	updated, err := addQueryParam("https://example.test/path?existing=1", "cveId", "CVE-2026-9999")
+	if err != nil {
+		t.Fatalf("addQueryParam returned error: %v", err)
+	}
+	if !strings.Contains(updated, "existing=1") || !strings.Contains(updated, "cveId=CVE-2026-9999") {
+		t.Fatalf("unexpected query update: %s", updated)
+	}
+
+	if _, queryErr := addQueryParam("://bad-url", "k", "v"); queryErr == nil {
+		t.Fatal("expected invalid URL error")
+	}
+}
+
+func TestPrintResult(t *testing.T) {
+	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
+	result := evaluationResult{
+		Fail: []evaluatedVuln{
+			{
+				Vuln: vulnAssessment{
+					ID:            "GO-FAIL",
+					Summary:       "fails policy",
+					URL:           "https://example.test/fail",
+					FixedVersions: []string{"v1.2.3"},
+				},
+				Severity:      severityAssessment{Severity: severityHigh, Score: 8.1, Source: "CVE-2026-3000"},
+				ResolverError: errors.New("nvd fallback used"),
+			},
+		},
+		Warn: []evaluatedVuln{
+			{
+				Vuln:     vulnAssessment{ID: "GO-WARN", Summary: "warn only"},
+				Severity: severityAssessment{Severity: severityLow, Score: 1.1, Source: "CVE-2026-3001"},
+			},
+		},
+		Accepted: []evaluatedVuln{
+			{
+				Vuln:        vulnAssessment{ID: "GO-ACCEPT"},
+				MatchedByID: "GO-ACCEPT",
+				Override: &riskOverride{
+					ID:        "GO-ACCEPT",
+					Reason:    "temporary",
+					ExpiresOn: now.Add(24 * time.Hour),
+				},
+			},
+		},
+		Expired: []evaluatedVuln{
+			{
+				Vuln:        vulnAssessment{ID: "GO-EXPIRED"},
+				MatchedByID: "GO-EXPIRED",
+				Override: &riskOverride{
+					ID:        "GO-EXPIRED",
+					Reason:    "needs renewal",
+					ExpiresOn: now.Add(-24 * time.Hour),
+				},
+			},
+		},
+	}
+
+	for index := 0; index < 12; index++ {
+		result.Info = append(result.Info, evaluatedVuln{
+			Vuln: vulnAssessment{
+				ID:      fmt.Sprintf("GO-INFO-%02d", index),
+				Summary: "not reachable",
+			},
+		})
+	}
+
+	output := captureStdout(t, func() {
+		printResult(result)
+	})
+
+	expectedSnippets := []string{
+		"govulncheck policy results",
+		"Expired overrides",
+		"Failing vulnerabilities",
+		"Warning vulnerabilities",
+		"Accepted risk overrides",
+		"Not reachable vulnerabilities",
+		"severity source: CVE-2026-3000",
+		"resolver warning: nvd fallback used",
+		"... and 2 more not reachable vulnerabilities",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("expected output to contain %q, got:\n%s", snippet, output)
+		}
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	originalStdout := os.Stdout
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+
+	type copyResult struct {
+		value string
+		err   error
+	}
+
+	output := make(chan copyResult, 1)
+	go func() {
+		var buffer bytes.Buffer
+		_, copyErr := io.Copy(&buffer, readPipe)
+		output <- copyResult{value: buffer.String(), err: copyErr}
+	}()
+
+	os.Stdout = writePipe
+	defer func() {
+		os.Stdout = originalStdout
+		_ = writePipe.Close()
+		_ = readPipe.Close()
+	}()
+
+	fn()
+
+	if closeErr := writePipe.Close(); closeErr != nil {
+		t.Fatalf("closing stdout writer failed: %v", closeErr)
+	}
+	result := <-output
+	if result.err != nil {
+		t.Fatalf("capturing stdout failed: %v", result.err)
+	}
+	return result.value
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
 }

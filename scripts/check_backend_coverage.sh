@@ -14,7 +14,7 @@ BACKEND_DIR="$ROOT_DIR/backend"
 COVERAGE_FILE="$BACKEND_DIR/coverage.out"
 
 cd "$BACKEND_DIR"
-go test -count=1 ./... -coverprofile="$COVERAGE_FILE"
+go test -count=1 -tags tools ./... -coverprofile="$COVERAGE_FILE"
 
 TOTAL_LINE="$(go tool cover -func="$COVERAGE_FILE" | tail -n 1)"
 if [ -z "$TOTAL_LINE" ]; then
