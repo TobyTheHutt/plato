@@ -797,6 +797,58 @@ func TestResolveCVENon200Status(t *testing.T) {
 	}
 }
 
+func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	if err == nil {
+		t.Fatal("expected HTTP 401 error")
+	}
+	if err.Error() != nvd401ErrorMessage {
+		t.Fatalf("unexpected 401 error: got %q want %q", err.Error(), nvd401ErrorMessage)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one attempt for HTTP 401, got %d", calls.Load())
+	}
+}
+
+func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	if err == nil {
+		t.Fatal("expected HTTP 403 error")
+	}
+	if err.Error() != nvd403ErrorMessage {
+		t.Fatalf("unexpected 403 error: got %q want %q", err.Error(), nvd403ErrorMessage)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one attempt for HTTP 403, got %d", calls.Load())
+	}
+}
+
 func TestResolveCVEDecodeError(t *testing.T) {
 	t.Parallel()
 
@@ -897,6 +949,44 @@ func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("expected three attempts, got %d", calls.Load())
+	}
+}
+
+func TestResolveCVERateLimitStatusEventuallyFails(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		writer.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(server.Close)
+
+	resolver := newTestResolver(server.Client(), server.URL, "")
+	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2005")
+	if err == nil {
+		t.Fatal("expected HTTP 429 error after retries")
+	}
+	expectedSnippets := []string{
+		"HTTP 429",
+		"rate limiting",
+		"Retry later",
+		"NVD_API_KEY_FILE",
+		"NVD_API_KEY",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(err.Error(), snippet) {
+			t.Fatalf("expected 429 error to contain %q, got: %v", snippet, err)
+		}
+	}
+	if strings.Contains(err.Error(), nvd401ErrorMessage) || strings.Contains(err.Error(), nvd403ErrorMessage) {
+		t.Fatalf("unexpected auth/authz text in 429 error: %v", err)
+	}
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("expected three attempts for HTTP 429, got %d", calls.Load())
 	}
 }
 

@@ -23,6 +23,8 @@ const (
 	defaultNVDAPIBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 	scanModeSource       = "source"
 	scanModeBinary       = "binary"
+	nvd401ErrorMessage   = "Missing or invalid NVD API key. Please configure a valid API key."
+	nvd403ErrorMessage   = "NVD API key valid but lacks required permissions. Please check your API key configuration."
 )
 
 type severity string
@@ -685,7 +687,23 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 			return assessment, responseErr
 		}
 
-		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusForbidden || response.StatusCode >= http.StatusInternalServerError {
+		if response.StatusCode == http.StatusUnauthorized {
+			response.Body.Close()
+			assessment := unknownSeverityAssessment(normalizedCVE)
+			finalErr := errors.New(nvd401ErrorMessage)
+			resolver.writeCache(normalizedCVE, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		if response.StatusCode == http.StatusForbidden {
+			response.Body.Close()
+			assessment := unknownSeverityAssessment(normalizedCVE)
+			finalErr := errors.New(nvd403ErrorMessage)
+			resolver.writeCache(normalizedCVE, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
 			response.Body.Close()
 			if attempt < maxAttempts {
 				sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured)
@@ -696,7 +714,7 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 			}
 
 			assessment := unknownSeverityAssessment(normalizedCVE)
-			finalErr := fmt.Errorf("NVD API returned HTTP %d for %s", response.StatusCode, normalizedCVE)
+			finalErr := retryableNVDStatusError(response.StatusCode, normalizedCVE)
 			resolver.writeCache(normalizedCVE, assessment, finalErr)
 			return assessment, finalErr
 		}
@@ -732,6 +750,17 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 	finalErr := fmt.Errorf("exhausted NVD resolution attempts for %s", normalizedCVE)
 	resolver.writeCache(normalizedCVE, assessment, finalErr)
 	return assessment, finalErr
+}
+
+func retryableNVDStatusError(statusCode int, cveID string) error {
+	if statusCode == http.StatusTooManyRequests {
+		return fmt.Errorf(
+			"NVD API returned HTTP 429 for %s. This indicates rate limiting. "+
+				"Retry later, or configure NVD_API_KEY_FILE or NVD_API_KEY for higher request limits",
+			cveID,
+		)
+	}
+	return fmt.Errorf("NVD API returned HTTP %d for %s", statusCode, cveID)
 }
 
 func unknownSeverityAssessment(source string) severityAssessment {

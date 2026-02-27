@@ -356,6 +356,18 @@ Optional NVD API key path:
 - `NVD_API_KEY` is still supported as an environment variable fallback
 - Use `PLATO_VULN_NVD_API_BASE_URL` only when you need a non-default NVD API endpoint
 
+NVD API key setup:
+1. Request an API key from NVD: https://nvd.nist.gov/developers/request-an-api-key
+2. Save the key to a file and lock it down, for example `chmod 600 /path/to/nvd_api_key`
+3. Export `NVD_API_KEY_FILE=/path/to/nvd_api_key` before running `make scan-vulnerabilities`
+4. If needed, use `NVD_API_KEY` as a fallback
+
+NVD HTTP response troubleshooting:
+- `HTTP 401` means missing or invalid credentials. Configure a valid NVD API key.
+- `HTTP 403` means credentials were accepted but access is forbidden for this request. Check API key permissions and account access.
+- `HTTP 429` means rate limiting. Retry can succeed later.
+- If `HTTP 401` or `HTTP 403` happens with `NVD_API_KEY_FILE` configured, verify the key is active and confirm the file contains only the key value.
+
 Optional pinned snapshot mode for offline reproducibility:
 - Set `PLATO_VULN_SCAN_MODE=snapshot`
 - Provide `PLATO_VULN_GOVULNCHECK_INPUT` pointing to pinned source-mode `govulncheck -json` output
