@@ -79,6 +79,35 @@ func TestParseGovulncheckOutput(t *testing.T) {
 	}
 }
 
+func TestParseGovulncheckOutputWithModeBinaryFindingsAreReachable(t *testing.T) {
+	t.Parallel()
+
+	input := `{"osv":{"id":"GO-1","summary":"binary finding"}}` + "\n" +
+		`{"finding":{"osv":"GO-1","trace":[{}]}}`
+
+	fromSource, sourceErr := parseGovulncheckOutputWithMode(strings.NewReader(input), scanModeSource)
+	if sourceErr != nil {
+		t.Fatalf("parseGovulncheckOutputWithMode source returned error: %v", sourceErr)
+	}
+	if len(fromSource) != 1 {
+		t.Fatalf("expected one vulnerability in source mode, got %d", len(fromSource))
+	}
+	if fromSource[0].Reachable {
+		t.Fatal("expected source mode finding with empty trace details to remain not reachable")
+	}
+
+	fromBinary, binaryErr := parseGovulncheckOutputWithMode(strings.NewReader(input), scanModeBinary)
+	if binaryErr != nil {
+		t.Fatalf("parseGovulncheckOutputWithMode binary returned error: %v", binaryErr)
+	}
+	if len(fromBinary) != 1 {
+		t.Fatalf("expected one vulnerability in binary mode, got %d", len(fromBinary))
+	}
+	if !fromBinary[0].Reachable {
+		t.Fatal("expected binary mode finding to be treated as reachable")
+	}
+}
+
 func TestLoadOverrides(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
@@ -152,6 +181,42 @@ func TestLoadOverrides(t *testing.T) {
 	})
 }
 
+func TestNormalizeScanMode(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "source", input: "source", want: scanModeSource},
+		{name: "binary uppercase", input: "BINARY", want: scanModeBinary},
+		{name: "trim", input: " source ", want: scanModeSource},
+		{name: "invalid", input: "extract", wantErr: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := normalizeScanMode(testCase.input)
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for input %q", testCase.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeScanMode returned error for %q: %v", testCase.input, err)
+			}
+			if got != testCase.want {
+				t.Fatalf("normalizeScanMode(%q) = %q, want %q", testCase.input, got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestEvaluateVulnerabilities(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
@@ -220,6 +285,53 @@ func TestCollectCVEIDs(t *testing.T) {
 	expected := []string{"CVE-2026-1000", "CVE-2026-1001"}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("unexpected CVE IDs: got %#v want %#v", actual, expected)
+	}
+}
+
+func TestCollectExcludedIDsAndFilterExcludedVulnerabilities(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	exclusionsPath := filepath.Join(tempDir, "source.json")
+	exclusionsContent := strings.Join([]string{
+		`{"osv":{"id":"GO-100","aliases":["CVE-2026-9000"]}}`,
+		`{"finding":{"osv":"GO-100","trace":[{"package":"pkg","function":"f"}]}}`,
+		`{"osv":{"id":"GO-UNREACHABLE","aliases":["CVE-2026-9999"]}}`,
+	}, "\n")
+	if err := os.WriteFile(exclusionsPath, []byte(exclusionsContent), 0o600); err != nil {
+		t.Fatalf("write exclusions file: %v", err)
+	}
+
+	excludedIDs, err := collectExcludedIDs(exclusionsPath)
+	if err != nil {
+		t.Fatalf("collectExcludedIDs returned error: %v", err)
+	}
+	if _, exists := excludedIDs.all["GO-100"]; !exists {
+		t.Fatal("expected GO-100 in exclusion set")
+	}
+	if _, exists := excludedIDs.all["CVE-2026-9000"]; !exists {
+		t.Fatal("expected CVE alias in exclusion set")
+	}
+	if _, exists := excludedIDs.reachable["GO-100"]; !exists {
+		t.Fatal("expected GO-100 in reachable exclusion set")
+	}
+	if _, exists := excludedIDs.all["GO-UNREACHABLE"]; !exists {
+		t.Fatal("expected unreachable source vulnerability in all exclusion set")
+	}
+	if _, exists := excludedIDs.reachable["GO-UNREACHABLE"]; exists {
+		t.Fatal("did not expect unreachable source vulnerability in reachable exclusion set")
+	}
+
+	vulns := []vulnAssessment{
+		{ID: "GO-100", Reachable: true},
+		{ID: "GO-UNREACHABLE"},
+		{ID: "GO-UNREACHABLE", Reachable: true},
+		{ID: "GO-200", Aliases: []string{"CVE-2026-9000"}, Reachable: true},
+		{ID: "GO-300", Aliases: []string{"CVE-2026-9001"}},
+	}
+	filtered := filterExcludedVulnerabilities(vulns, excludedIDs)
+	if len(filtered) != 2 || filtered[0].ID != "GO-UNREACHABLE" || !filtered[0].Reachable || filtered[1].ID != "GO-300" {
+		t.Fatalf("unexpected filtered vulnerabilities: %#v", filtered)
 	}
 }
 
@@ -1001,11 +1113,11 @@ func TestPrintResult(t *testing.T) {
 	}
 
 	output := captureStdout(t, func() {
-		printResult(result)
+		printResult(scanModeSource, result)
 	})
 
 	expectedSnippets := []string{
-		"govulncheck policy results",
+		"govulncheck policy results (source)",
 		"Expired overrides",
 		"Failing vulnerabilities",
 		"Warning vulnerabilities",
@@ -1019,6 +1131,25 @@ func TestPrintResult(t *testing.T) {
 		if !strings.Contains(output, snippet) {
 			t.Fatalf("expected output to contain %q, got:\n%s", snippet, output)
 		}
+	}
+}
+
+func TestPrintResultBinaryInfoHeading(t *testing.T) {
+	t.Parallel()
+
+	output := captureStdout(t, func() {
+		printResult(scanModeBinary, evaluationResult{
+			Info: []evaluatedVuln{
+				{Vuln: vulnAssessment{ID: "GO-1", Summary: "binary info"}},
+			},
+		})
+	})
+
+	if !strings.Contains(output, "govulncheck policy results (binary)") {
+		t.Fatalf("expected binary scan header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Informational vulnerabilities") {
+		t.Fatalf("expected binary info heading, got:\n%s", output)
 	}
 }
 

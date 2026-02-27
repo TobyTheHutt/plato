@@ -12,30 +12,31 @@ CACHE_DIR="${PLATO_VULN_CACHE_DIR:-$ROOT_DIR/.cache/vuln}"
 MAX_CACHE_FILES=10
 SCAN_MODE="${PLATO_VULN_SCAN_MODE:-live}"
 GOVULN_INPUT="${PLATO_VULN_GOVULNCHECK_INPUT:-}"
+BINARY_GOVULN_INPUT="${PLATO_VULN_GOVULNCHECK_BINARY_INPUT:-}"
 NVD_SNAPSHOT="${PLATO_VULN_NVD_SNAPSHOT:-}"
 NVD_API_BASE_URL="${PLATO_VULN_NVD_API_BASE_URL:-}"
+BINARY_ARTIFACT_DIR="${PLATO_VULN_BINARY_ARTIFACT_DIR:-$CACHE_DIR/artifacts}"
+BINARY_ARTIFACT="$BINARY_ARTIFACT_DIR/plato-backend"
 
 mkdir -p "$CACHE_DIR"
 
 if [ -f "$ROOT_DIR/backend/go.sum" ]; then
-  SCAN_FINGERPRINT="$(
+  SOURCE_SCAN_FINGERPRINT="$(
     { cat "$ROOT_DIR/backend/go.mod"; cat "$ROOT_DIR/backend/go.sum"; cat "$ROOT_DIR/docs/security-vulnerability-overrides.json"; govulncheck -version 2>/dev/null || true; } \
       | sha256sum
   )"
 else
-  SCAN_FINGERPRINT="$(
+  SOURCE_SCAN_FINGERPRINT="$(
     { cat "$ROOT_DIR/backend/go.mod"; cat "$ROOT_DIR/docs/security-vulnerability-overrides.json"; govulncheck -version 2>/dev/null || true; } \
       | sha256sum
   )"
 fi
-SCAN_FINGERPRINT="${SCAN_FINGERPRINT%% *}"
-CACHED_GOVULN_FILE="$CACHE_DIR/govulncheck-$SCAN_FINGERPRINT.json"
-TMP_FILE="$(mktemp)"
+SOURCE_SCAN_FINGERPRINT="${SOURCE_SCAN_FINGERPRINT%% *}"
+CACHED_SOURCE_GOVULN_FILE="$CACHE_DIR/govulncheck-source-$SOURCE_SCAN_FINGERPRINT.json"
+TMP_SOURCE_FILE="$(mktemp)"
+TMP_BINARY_FILE="$(mktemp)"
 
-cleanup() {
-  rm -f "$TMP_FILE"
-}
-trap cleanup EXIT
+trap 'rm -f "$TMP_SOURCE_FILE" "$TMP_BINARY_FILE"' EXIT
 
 if [ "$SCAN_MODE" != "live" ] && [ "$SCAN_MODE" != "prefer-cache" ] && [ "$SCAN_MODE" != "snapshot" ]; then
   echo "error: unsupported PLATO_VULN_SCAN_MODE '$SCAN_MODE'"
@@ -43,16 +44,35 @@ if [ "$SCAN_MODE" != "live" ] && [ "$SCAN_MODE" != "prefer-cache" ] && [ "$SCAN_
   exit 1
 fi
 
-run_govulncheck() {
+run_source_govulncheck() {
   pushd "$ROOT_DIR/backend" >/dev/null
   set +e
-  govulncheck -json ./... >"$TMP_FILE"
+  govulncheck -json ./... >"$TMP_SOURCE_FILE"
   SCAN_EXIT=$?
   set -e
   popd >/dev/null
 
   if [ "$SCAN_EXIT" -ne 0 ] && [ "$SCAN_EXIT" -ne 3 ]; then
     echo "error: govulncheck failed with exit code $SCAN_EXIT"
+    exit "$SCAN_EXIT"
+  fi
+}
+
+build_binary_artifact() {
+  mkdir -p "$BINARY_ARTIFACT_DIR"
+  pushd "$ROOT_DIR/backend" >/dev/null
+  go build -o "$BINARY_ARTIFACT" ./cmd/plato
+  popd >/dev/null
+}
+
+run_binary_govulncheck() {
+  set +e
+  govulncheck -mode=binary -json "$BINARY_ARTIFACT" >"$TMP_BINARY_FILE"
+  SCAN_EXIT=$?
+  set -e
+
+  if [ "$SCAN_EXIT" -ne 0 ] && [ "$SCAN_EXIT" -ne 3 ]; then
+    echo "error: govulncheck binary scan failed with exit code $SCAN_EXIT"
     exit "$SCAN_EXIT"
   fi
 }
@@ -69,6 +89,42 @@ prune_cache_files() {
   done
 }
 
+run_policy() {
+  local scan_mode="$1"
+  local input_file="$2"
+  shift 2
+
+  local -a vulnpolicy_args=(
+    -input "$input_file"
+    -overrides "$ROOT_DIR/docs/security-vulnerability-overrides.json"
+    -scan-mode "$scan_mode"
+  )
+
+  if [ $# -gt 0 ]; then
+    vulnpolicy_args+=( "$@" )
+  fi
+
+  if [ -n "${NVD_API_KEY_FILE:-}" ]; then
+    vulnpolicy_args+=( -nvd-api-key-file "$NVD_API_KEY_FILE" )
+  fi
+
+  if [ -n "$NVD_API_BASE_URL" ]; then
+    vulnpolicy_args+=( -nvd-api-base-url "$NVD_API_BASE_URL" )
+  fi
+
+  if [ -n "$NVD_SNAPSHOT" ]; then
+    vulnpolicy_args+=( -severity-snapshot "$NVD_SNAPSHOT" )
+  fi
+
+  if [ "$SCAN_MODE" = "snapshot" ] || [ "${PLATO_VULN_OFFLINE:-0}" = "1" ]; then
+    vulnpolicy_args+=( -offline )
+  fi
+
+  pushd "$ROOT_DIR/backend" >/dev/null
+  go run -tags tools ./cmd/vulnpolicy "${vulnpolicy_args[@]}"
+  popd >/dev/null
+}
+
 if [ "$SCAN_MODE" = "snapshot" ]; then
   if [ -z "$GOVULN_INPUT" ]; then
     echo "error: snapshot mode requires PLATO_VULN_GOVULNCHECK_INPUT"
@@ -76,6 +132,14 @@ if [ "$SCAN_MODE" = "snapshot" ]; then
   fi
   if [ ! -f "$GOVULN_INPUT" ]; then
     echo "error: snapshot govulncheck input not found at '$GOVULN_INPUT'"
+    exit 1
+  fi
+  if [ -z "$BINARY_GOVULN_INPUT" ]; then
+    echo "error: snapshot mode requires PLATO_VULN_GOVULNCHECK_BINARY_INPUT"
+    exit 1
+  fi
+  if [ ! -f "$BINARY_GOVULN_INPUT" ]; then
+    echo "error: snapshot binary govulncheck input not found at '$BINARY_GOVULN_INPUT'"
     exit 1
   fi
   if [ -z "$NVD_SNAPSHOT" ]; then
@@ -87,36 +151,32 @@ if [ "$SCAN_MODE" = "snapshot" ]; then
     exit 1
   fi
 
-  cp "$GOVULN_INPUT" "$TMP_FILE"
-elif [ "$SCAN_MODE" = "prefer-cache" ] && [ -f "$CACHED_GOVULN_FILE" ]; then
-  cp "$CACHED_GOVULN_FILE" "$TMP_FILE"
+  cp "$GOVULN_INPUT" "$TMP_SOURCE_FILE"
+  cp "$BINARY_GOVULN_INPUT" "$TMP_BINARY_FILE"
+elif [ "$SCAN_MODE" = "prefer-cache" ] && [ -f "$CACHED_SOURCE_GOVULN_FILE" ]; then
+  cp "$CACHED_SOURCE_GOVULN_FILE" "$TMP_SOURCE_FILE"
+  build_binary_artifact
+  run_binary_govulncheck
 else
-  run_govulncheck
-  cp "$TMP_FILE" "$CACHED_GOVULN_FILE"
+  run_source_govulncheck
+  cp "$TMP_SOURCE_FILE" "$CACHED_SOURCE_GOVULN_FILE"
+  build_binary_artifact
+  run_binary_govulncheck
 fi
 
 prune_cache_files
 
-VULNPOLICY_ARGS=(
-  -input "$TMP_FILE"
-  -overrides "$ROOT_DIR/docs/security-vulnerability-overrides.json"
-)
+overall_status=0
 
-if [ -n "${NVD_API_KEY_FILE:-}" ]; then
-  VULNPOLICY_ARGS+=( -nvd-api-key-file "$NVD_API_KEY_FILE" )
+echo "== Vulnerability scan: source mode =="
+if ! run_policy source "$TMP_SOURCE_FILE"; then
+  overall_status=1
 fi
 
-if [ -n "$NVD_API_BASE_URL" ]; then
-  VULNPOLICY_ARGS+=( -nvd-api-base-url "$NVD_API_BASE_URL" )
+echo ""
+echo "== Vulnerability scan: binary mode (deduplicated against source reachable findings) =="
+if ! run_policy binary "$TMP_BINARY_FILE" -exclude-input "$TMP_SOURCE_FILE"; then
+  overall_status=1
 fi
 
-if [ -n "$NVD_SNAPSHOT" ]; then
-  VULNPOLICY_ARGS+=( -severity-snapshot "$NVD_SNAPSHOT" )
-fi
-
-if [ "$SCAN_MODE" = "snapshot" ] || [ "${PLATO_VULN_OFFLINE:-0}" = "1" ]; then
-  VULNPOLICY_ARGS+=( -offline )
-fi
-
-cd "$ROOT_DIR/backend"
-go run -tags tools ./cmd/vulnpolicy "${VULNPOLICY_ARGS[@]}"
+exit "$overall_status"

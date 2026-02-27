@@ -289,7 +289,7 @@ Available targets:
 - `make lint-scripts` runs `shellcheck` on scripts in `scripts/`
 - `make lint-backend` runs `golangci-lint` on the Go backend with `.golangci.yml`
 - `make lint-frontend` runs ESLint for the React and TypeScript frontend
-- `make scan-vulnerabilities` runs `govulncheck` with severity policy and accepted-risk overrides
+- `make scan-vulnerabilities` runs `govulncheck` in source and binary modes with severity policy and accepted-risk overrides
 - `make typecheck` runs TypeScript type checking with `npm run typecheck`
 - `make test-frontend` runs Vitest with coverage
 - `make test-backend` runs Go tests with coverage threshold enforcement
@@ -321,11 +321,18 @@ npm run test:coverage
 ### Dependency vulnerability scanning
 
 `govulncheck` runs in CI for every pull request and every push to `main` through `make check`.
+`make scan-vulnerabilities` runs two passes:
+- Source mode on `backend` packages (`govulncheck -json ./...`)
+- Binary mode on a freshly built backend executable (`govulncheck -mode=binary`)
 
 Policy:
-- Reachable `HIGH` and `CRITICAL` vulnerabilities fail the build
-- Reachable `MEDIUM` and `LOW` vulnerabilities emit warnings
-- Reachability is taken from `govulncheck` trace data to reduce false positives
+- Source scan: reachable `HIGH` and `CRITICAL` vulnerabilities fail the build
+- Source scan: reachable `MEDIUM` and `LOW` vulnerabilities emit warnings
+- Source scan: reachability is taken from `govulncheck` trace data to reduce false positives
+- Binary scan: `HIGH` and `CRITICAL` vulnerabilities in built artifacts fail the build
+- Binary scan: `MEDIUM` and `LOW` vulnerabilities in built artifacts emit warnings
+- Binary output is deduplicated against source reachable findings to avoid repeated actionable IDs in CI logs
+- CI output labels each pass as `source mode` or `binary mode`
 
 Local usage:
 
@@ -336,7 +343,8 @@ make scan-vulnerabilities
 
 Deterministic scan modes:
 - `PLATO_VULN_SCAN_MODE=live` runs live `govulncheck` and live NVD severity lookups
-- `PLATO_VULN_SCAN_MODE=prefer-cache` reuses cached `govulncheck` JSON from `.cache/vuln` when available, then falls back to a live run
+- `PLATO_VULN_SCAN_MODE=prefer-cache` reuses cached source-mode `govulncheck` JSON from `.cache/vuln` when available, then falls back to a live source run
+- Binary mode still scans a freshly built executable in `live` and `prefer-cache` so artifact checks are always current
 - `PLATO_VULN_SCAN_MODE=snapshot` performs a fully offline check using pinned inputs, typically with pinned files tracked under `.cache/vuln` or `docs/`
 
 Canonical cache path:
@@ -350,7 +358,8 @@ Optional NVD API key path:
 
 Optional pinned snapshot mode for offline reproducibility:
 - Set `PLATO_VULN_SCAN_MODE=snapshot`
-- Provide `PLATO_VULN_GOVULNCHECK_INPUT` pointing to pinned `govulncheck -json` output
+- Provide `PLATO_VULN_GOVULNCHECK_INPUT` pointing to pinned source-mode `govulncheck -json` output
+- Provide `PLATO_VULN_GOVULNCHECK_BINARY_INPUT` pointing to pinned binary-mode `govulncheck -json` output
 - Provide `PLATO_VULN_NVD_SNAPSHOT` pointing to a pinned severity file
 - The severity snapshot format is:
 
@@ -367,6 +376,7 @@ Offline example:
 ```bash
 PLATO_VULN_SCAN_MODE=snapshot \
 PLATO_VULN_GOVULNCHECK_INPUT=./docs/govulncheck-snapshot.json \
+PLATO_VULN_GOVULNCHECK_BINARY_INPUT=./docs/govulncheck-binary-snapshot.json \
 PLATO_VULN_NVD_SNAPSHOT=./docs/nvd-severity-snapshot.json \
 make scan-vulnerabilities
 ```
@@ -375,6 +385,7 @@ CI behavior:
 - CI caches `.cache/vuln` for Plato-managed scan results and `~/.cache/govulncheck` for the scanner's vulnerability database
 - CI writes an optional NVD API key file from `NVD_API_KEY` secret and passes the file path via `NVD_API_KEY_FILE`
 - CI runs vulnerability checks in `prefer-cache` mode
+- CI always builds and scans backend executable artifacts in binary mode
 
 Accepted risk override process:
 - Add temporary exceptions to `docs/security-vulnerability-overrides.json`

@@ -93,7 +93,7 @@ lint-tools:
 lint-frontend:
 	cd frontend && npm --silent run lint
 
-# Go dependency vulnerability scan with reachability-aware policy
+# Go dependency vulnerability scans in source and binary modes
 scan-vulnerabilities:
 	bash ./scripts/check_vuln.sh
 

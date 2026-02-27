@@ -21,6 +21,8 @@ import (
 
 const (
 	defaultNVDAPIBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+	scanModeSource       = "source"
+	scanModeBinary       = "binary"
 )
 
 type severity string
@@ -62,6 +64,11 @@ type evaluationResult struct {
 	Info     []evaluatedVuln
 	Accepted []evaluatedVuln
 	Expired  []evaluatedVuln
+}
+
+type excludedVulnerabilityIDs struct {
+	all       map[string]struct{}
+	reachable map[string]struct{}
 }
 
 type severityResolver interface {
@@ -151,6 +158,8 @@ type severitySnapshotEntry struct {
 func main() {
 	inputPath := flag.String("input", "", "path to govulncheck JSON output")
 	overridesPath := flag.String("overrides", "", "path to vulnerability override config")
+	scanMode := flag.String("scan-mode", scanModeSource, "govulncheck scan mode used by the input: source or binary")
+	excludeInput := flag.String("exclude-input", "", "optional path to govulncheck JSON output whose vulnerabilities should be excluded")
 	nvdAPIBaseURL := flag.String("nvd-api-base-url", defaultNVDAPIBaseURL, "NVD CVE API base URL")
 	nvdAPIKeyFile := flag.String("nvd-api-key-file", "", "path to file containing NVD API key")
 	severitySnapshot := flag.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON")
@@ -164,19 +173,31 @@ func main() {
 	if strings.TrimSpace(*overridesPath) == "" {
 		exitf("error: -overrides is required")
 	}
+	normalizedScanMode, err := normalizeScanMode(*scanMode)
+	if err != nil {
+		exitf("error: %v", err)
+	}
 
 	inputFile, err := os.Open(*inputPath)
 	if err != nil {
 		exitf("error: open govulncheck output: %v", err)
 	}
 
-	vulns, err := parseGovulncheckOutput(inputFile)
+	vulns, err := parseGovulncheckOutputWithMode(inputFile, normalizedScanMode)
 	closeErr := inputFile.Close()
 	if err != nil {
 		exitf("error: parse govulncheck output: %v", err)
 	}
 	if closeErr != nil {
 		exitf("error: close govulncheck output: %v", closeErr)
+	}
+
+	if strings.TrimSpace(*excludeInput) != "" {
+		excludedIDs, excludeErr := collectExcludedIDs(*excludeInput)
+		if excludeErr != nil {
+			exitf("error: load exclude-input: %v", excludeErr)
+		}
+		vulns = filterExcludedVulnerabilities(vulns, excludedIDs)
 	}
 
 	overrides, err := loadOverrides(*overridesPath)
@@ -211,7 +232,7 @@ func main() {
 	}
 
 	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, time.Now().UTC())
-	printResult(result)
+	printResult(normalizedScanMode, result)
 
 	if len(result.Fail) > 0 || len(result.Expired) > 0 {
 		os.Exit(1)
@@ -224,6 +245,10 @@ func exitf(format string, args ...any) {
 }
 
 func parseGovulncheckOutput(reader io.Reader) ([]vulnAssessment, error) {
+	return parseGovulncheckOutputWithMode(reader, scanModeSource)
+}
+
+func parseGovulncheckOutputWithMode(reader io.Reader, scanMode string) ([]vulnAssessment, error) {
 	decoder := json.NewDecoder(reader)
 	vulnByID := make(map[string]*vulnAssessment)
 
@@ -253,7 +278,7 @@ func parseGovulncheckOutput(reader io.Reader) ([]vulnAssessment, error) {
 			if fixed != "" {
 				entry.FixedVersions = uniqueStrings(append(entry.FixedVersions, fixed))
 			}
-			if findingIsReachable(event.Finding) {
+			if scanMode == scanModeBinary || findingIsReachable(event.Finding) {
 				entry.Reachable = true
 			}
 		}
@@ -271,6 +296,87 @@ func parseGovulncheckOutput(reader io.Reader) ([]vulnAssessment, error) {
 	})
 
 	return result, nil
+}
+
+func normalizeScanMode(value string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case scanModeSource, scanModeBinary:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported -scan-mode %q (valid values: %s, %s)", value, scanModeSource, scanModeBinary)
+	}
+}
+
+func collectExcludedIDs(path string) (excludedVulnerabilityIDs, error) {
+	file, err := os.Open(strings.TrimSpace(path))
+	if err != nil {
+		return excludedVulnerabilityIDs{}, err
+	}
+	vulns, parseErr := parseGovulncheckOutput(file)
+	closeErr := file.Close()
+	if parseErr != nil {
+		return excludedVulnerabilityIDs{}, parseErr
+	}
+	if closeErr != nil {
+		return excludedVulnerabilityIDs{}, closeErr
+	}
+
+	excludedIDs := excludedVulnerabilityIDs{
+		all:       make(map[string]struct{}, len(vulns)),
+		reachable: make(map[string]struct{}, len(vulns)),
+	}
+	for _, vuln := range vulns {
+		candidateIDs := append([]string{vuln.ID}, vuln.Aliases...)
+		for _, candidateID := range candidateIDs {
+			normalizedID := normalizeID(candidateID)
+			if normalizedID == "" {
+				continue
+			}
+			excludedIDs.all[normalizedID] = struct{}{}
+			if vuln.Reachable {
+				excludedIDs.reachable[normalizedID] = struct{}{}
+			}
+		}
+	}
+	return excludedIDs, nil
+}
+
+func filterExcludedVulnerabilities(vulns []vulnAssessment, excludedIDs excludedVulnerabilityIDs) []vulnAssessment {
+	if len(excludedIDs.all) == 0 {
+		return vulns
+	}
+
+	result := make([]vulnAssessment, 0, len(vulns))
+	for _, vuln := range vulns {
+		matchedAll, matchedReachable := matchesExcludedIDs(vuln, excludedIDs)
+		if matchedReachable || (matchedAll && !vuln.Reachable) {
+			continue
+		}
+		result = append(result, vuln)
+	}
+	return result
+}
+
+func matchesExcludedIDs(vuln vulnAssessment, excludedIDs excludedVulnerabilityIDs) (bool, bool) {
+	matchedAll := false
+	matchedReachable := false
+
+	candidateIDs := append([]string{vuln.ID}, vuln.Aliases...)
+	for _, candidateID := range candidateIDs {
+		normalizedID := normalizeID(candidateID)
+		if normalizedID == "" {
+			continue
+		}
+		if _, exists := excludedIDs.all[normalizedID]; exists {
+			matchedAll = true
+		}
+		if _, exists := excludedIDs.reachable[normalizedID]; exists {
+			matchedReachable = true
+		}
+	}
+
+	return matchedAll, matchedReachable
 }
 
 func ensureVuln(vulnByID map[string]*vulnAssessment, id string) *vulnAssessment {
@@ -785,12 +891,12 @@ func severityRank(value severity) int {
 	}
 }
 
-func printResult(result evaluationResult) {
-	fmt.Println("govulncheck policy results")
+func printResult(scanMode string, result evaluationResult) {
+	fmt.Printf("govulncheck policy results (%s)\n", scanMode)
 	fmt.Printf("  fail: %d\n", len(result.Fail)+len(result.Expired))
 	fmt.Printf("  warn: %d\n", len(result.Warn))
 	fmt.Printf("  accepted: %d\n", len(result.Accepted))
-	fmt.Printf("  not reachable: %d\n", len(result.Info))
+	fmt.Printf("  info: %d\n", len(result.Info))
 
 	if len(result.Expired) > 0 {
 		fmt.Println("")
@@ -828,7 +934,8 @@ func printResult(result evaluationResult) {
 
 	if len(result.Info) > 0 {
 		fmt.Println("")
-		fmt.Println("Not reachable vulnerabilities")
+		infoLabel := infoHeading(scanMode)
+		fmt.Println(infoLabel)
 		limit := len(result.Info)
 		if limit > 10 {
 			limit = 10
@@ -841,9 +948,16 @@ func printResult(result evaluationResult) {
 			}
 		}
 		if len(result.Info) > limit {
-			fmt.Printf("  ... and %d more not reachable vulnerabilities\n", len(result.Info)-limit)
+			fmt.Printf("  ... and %d more %s\n", len(result.Info)-limit, strings.ToLower(infoLabel))
 		}
 	}
+}
+
+func infoHeading(scanMode string) string {
+	if scanMode == scanModeBinary {
+		return "Informational vulnerabilities"
+	}
+	return "Not reachable vulnerabilities"
 }
 
 func printEvaluated(item evaluatedVuln) {
