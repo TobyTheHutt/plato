@@ -1929,6 +1929,206 @@ func TestPrintResultBinaryInfoHeading(t *testing.T) {
 	}
 }
 
+func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.February, 28, 15, 0, 0, 0, time.UTC)
+	result := evaluationResult{
+		Fail: []evaluatedVuln{
+			{
+				Vuln: vulnAssessment{
+					ID:      "GO-FAIL",
+					Summary: "unknown severity fallback",
+					Aliases: []string{"GHSA-ABCD-1234-WXYZ"},
+				},
+				Severity: severityAssessment{
+					Severity: severityUnknown,
+					Source:   "GHSA-ABCD-1234-WXYZ",
+					Method:   severityMethodUnknown,
+					Reason:   "OSV severity unavailable in govulncheck input, GHSA lookup failed, no CVE aliases found",
+				},
+			},
+		},
+		Warn: []evaluatedVuln{
+			{
+				Vuln: vulnAssessment{
+					ID:            "GO-WARN",
+					Summary:       "warn finding",
+					FixedVersions: []string{"v1.2.3"},
+				},
+				Severity: severityAssessment{
+					Severity: severityLow,
+					Score:    1.1,
+					Source:   "CVE-2026-1000",
+					Method:   severityMethodNVD,
+				},
+			},
+		},
+		Accepted: []evaluatedVuln{
+			{
+				Vuln:        vulnAssessment{ID: "GO-ACCEPT"},
+				MatchedByID: "GO-ACCEPT",
+				Override: &riskOverride{
+					ID:        "GO-ACCEPT",
+					Reason:    "accepted for patch window",
+					ExpiresOn: time.Date(2026, time.March, 15, 0, 0, 0, 0, time.UTC),
+				},
+			},
+		},
+	}
+
+	for index := 0; index < 12; index++ {
+		result.Info = append(result.Info, evaluatedVuln{
+			Vuln: vulnAssessment{
+				ID:      fmt.Sprintf("GO-INFO-%02d", index),
+				Summary: "info finding",
+			},
+		})
+	}
+
+	report := buildScanReport(scanModeSource, now, result, reportConfiguration{
+		InputPath:           "input.json",
+		OverridesPath:       "overrides.json",
+		NVDAPIBaseURL:       defaultNVDAPIBaseURL,
+		GHSAAPIBaseURL:      defaultGHSAAPIBaseURL,
+		NVDTimeout:          "15s",
+		Offline:             false,
+		NVDAPIKeyConfigured: true,
+	})
+
+	if report.ReportVersion != reportFormatVersion {
+		t.Fatalf("unexpected report format version: %s", report.ReportVersion)
+	}
+	if report.Metadata.Mode != scanModeSource {
+		t.Fatalf("unexpected report mode: %s", report.Metadata.Mode)
+	}
+	if !report.Metadata.GeneratedAt.Equal(now) {
+		t.Fatalf("unexpected report timestamp: %s", report.Metadata.GeneratedAt)
+	}
+	if report.Metadata.Tool.Name != reportToolName {
+		t.Fatalf("unexpected tool name: %s", report.Metadata.Tool.Name)
+	}
+	if report.Summary.Info != 12 {
+		t.Fatalf("expected full info findings in summary, got %d", report.Summary.Info)
+	}
+	if len(report.Findings.Info) != 12 {
+		t.Fatalf("expected untruncated info findings in report, got %d", len(report.Findings.Info))
+	}
+	if len(report.Findings.Fail) != 1 {
+		t.Fatalf("expected fail findings, got %d", len(report.Findings.Fail))
+	}
+
+	failSeverity := report.Findings.Fail[0].Severity
+	if failSeverity == nil {
+		t.Fatal("expected fail severity in report finding")
+	}
+	if failSeverity.Source != "GHSA-ABCD-1234-WXYZ" {
+		t.Fatalf("unexpected fail severity source: %s", failSeverity.Source)
+	}
+	if !strings.Contains(failSeverity.Reason, "GHSA lookup failed") {
+		t.Fatalf("expected unknown severity reason, got: %s", failSeverity.Reason)
+	}
+
+	if len(report.Findings.Accepted) != 1 || report.Findings.Accepted[0].Override == nil {
+		t.Fatalf("expected accepted override in report, got %#v", report.Findings.Accepted)
+	}
+	truncation := report.Truncation.Categories[0]
+	if !report.Truncation.Applied {
+		t.Fatal("expected truncation metadata to be marked as applied")
+	}
+	if truncation.Omitted != 2 || truncation.Displayed != consoleInfoDisplayCap {
+		t.Fatalf("unexpected truncation counters: %#v", truncation)
+	}
+	if !reflect.DeepEqual(truncation.OmittedIDs, []string{"GO-INFO-10", "GO-INFO-11"}) {
+		t.Fatalf("unexpected omitted info IDs: %#v", truncation.OmittedIDs)
+	}
+}
+
+func TestWriteScanReportCreatesParentDirectory(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	reportPath := filepath.Join(tempDir, "reports", "policy.json")
+	report := scanReport{
+		ReportVersion: reportFormatVersion,
+		Metadata: reportMetadata{
+			Mode:        scanModeSource,
+			GeneratedAt: time.Date(2026, time.February, 28, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	if err := writeScanReport(reportPath, report); err != nil {
+		t.Fatalf("writeScanReport returned error: %v", err)
+	}
+
+	rawValue, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatalf("read report file: %v", err)
+	}
+
+	var decoded scanReport
+	if unmarshalErr := json.Unmarshal(rawValue, &decoded); unmarshalErr != nil {
+		t.Fatalf("unmarshal report file: %v", unmarshalErr)
+	}
+	if decoded.ReportVersion != reportFormatVersion {
+		t.Fatalf("unexpected decoded report version: %s", decoded.ReportVersion)
+	}
+	if decoded.Metadata.Mode != scanModeSource {
+		t.Fatalf("unexpected decoded report mode: %s", decoded.Metadata.Mode)
+	}
+}
+
+func TestWriteScanReportEmptyPathIsNoop(t *testing.T) {
+	t.Parallel()
+
+	if err := writeScanReport("   ", scanReport{}); err != nil {
+		t.Fatalf("writeScanReport should allow empty path: %v", err)
+	}
+}
+
+func TestHasReportSeverity(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		assessment severityAssessment
+		want       bool
+	}{
+		{name: "empty", assessment: severityAssessment{}, want: false},
+		{name: "level", assessment: severityAssessment{Severity: severityHigh}, want: true},
+		{name: "score", assessment: severityAssessment{Score: 0.1}, want: true},
+		{name: "source", assessment: severityAssessment{Source: "CVE-2026-1"}, want: true},
+		{name: "method", assessment: severityAssessment{Method: severityMethodNVD}, want: true},
+		{name: "reason", assessment: severityAssessment{Reason: "missing"}, want: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			if got := hasReportSeverity(testCase.assessment); got != testCase.want {
+				t.Fatalf("hasReportSeverity(%#v) = %t, want %t", testCase.assessment, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestTruncatedInfoIDs(t *testing.T) {
+	t.Parallel()
+
+	infoFindings := []evaluatedVuln{
+		{Vuln: vulnAssessment{ID: "GO-1"}},
+		{Vuln: vulnAssessment{ID: "GO-2"}},
+		{Vuln: vulnAssessment{ID: "GO-3"}},
+	}
+
+	if got := truncatedInfoIDs(infoFindings, 3); got != nil {
+		t.Fatalf("expected nil when nothing is omitted, got %#v", got)
+	}
+	if got := truncatedInfoIDs(infoFindings, 1); !reflect.DeepEqual(got, []string{"GO-2", "GO-3"}) {
+		t.Fatalf("unexpected omitted IDs: %#v", got)
+	}
+}
+
 func TestMainMissingInputFlag(t *testing.T) {
 	if os.Getenv("PLATO_TEST_MAIN_MISSING_INPUT") == "1" {
 		os.Args = []string{"vulnpolicy", "-overrides", "dummy.json"}
@@ -1953,6 +2153,7 @@ func TestMainOfflineSnapshotFlow(t *testing.T) {
 		inputPath := os.Getenv("PLATO_TEST_MAIN_INPUT_PATH")
 		overridesPath := os.Getenv("PLATO_TEST_MAIN_OVERRIDES_PATH")
 		snapshotPath := os.Getenv("PLATO_TEST_MAIN_SNAPSHOT_PATH")
+		reportPath := os.Getenv("PLATO_TEST_MAIN_REPORT_PATH")
 		os.Args = []string{
 			"vulnpolicy",
 			"-input", inputPath,
@@ -1960,6 +2161,9 @@ func TestMainOfflineSnapshotFlow(t *testing.T) {
 			"-scan-mode", "source",
 			"-severity-snapshot", snapshotPath,
 			"-offline",
+		}
+		if strings.TrimSpace(reportPath) != "" {
+			os.Args = append(os.Args, "-report-file", reportPath)
 		}
 		main()
 		return
@@ -1969,6 +2173,7 @@ func TestMainOfflineSnapshotFlow(t *testing.T) {
 	inputPath := filepath.Join(tempDir, "govuln.json")
 	overridesPath := filepath.Join(tempDir, "overrides.json")
 	snapshotPath := filepath.Join(tempDir, "snapshot.json")
+	reportPath := filepath.Join(tempDir, "reports", "offline-report.json")
 
 	inputContent := `{"osv":{"id":"GO-TEST-1","aliases":["CVE-2026-1234"],"summary":"snapshot test","database_specific":{"url":"https://example.test/GO-TEST-1"}}}` + "\n" +
 		`{"finding":{"osv":"GO-TEST-1","trace":[{"package":"pkg","function":"f"}]}}`
@@ -1991,6 +2196,7 @@ func TestMainOfflineSnapshotFlow(t *testing.T) {
 		"PLATO_TEST_MAIN_INPUT_PATH="+inputPath,
 		"PLATO_TEST_MAIN_OVERRIDES_PATH="+overridesPath,
 		"PLATO_TEST_MAIN_SNAPSHOT_PATH="+snapshotPath,
+		"PLATO_TEST_MAIN_REPORT_PATH="+reportPath,
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -2001,6 +2207,31 @@ func TestMainOfflineSnapshotFlow(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "severity method: nvd") {
 		t.Fatalf("expected severity method output, got:\n%s", string(output))
+	}
+
+	reportContent, readErr := os.ReadFile(reportPath)
+	if readErr != nil {
+		t.Fatalf("read report file: %v", readErr)
+	}
+	var report scanReport
+	if unmarshalErr := json.Unmarshal(reportContent, &report); unmarshalErr != nil {
+		t.Fatalf("unmarshal report file: %v", unmarshalErr)
+	}
+	if report.Metadata.Mode != scanModeSource {
+		t.Fatalf("unexpected report mode: %s", report.Metadata.Mode)
+	}
+	if report.Summary.Warn != 1 || report.Summary.Blocking != 0 {
+		t.Fatalf("unexpected report summary: %#v", report.Summary)
+	}
+	if len(report.Findings.Warn) != 1 {
+		t.Fatalf("expected one warn finding in report, got %d", len(report.Findings.Warn))
+	}
+	warnSeverity := report.Findings.Warn[0].Severity
+	if warnSeverity == nil || warnSeverity.Method != severityMethodNVD {
+		t.Fatalf("unexpected report warn severity: %#v", warnSeverity)
+	}
+	if report.Truncation.Categories[0].Omitted != 0 {
+		t.Fatalf("expected no omitted info findings in report truncation, got %#v", report.Truncation.Categories[0])
 	}
 }
 

@@ -345,6 +345,12 @@ go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 make scan-vulnerabilities
 ```
 
+Optional machine-readable policy report:
+- `backend/cmd/vulnpolicy` supports `-report-file /path/to/report.json`
+- The report stores full categorized findings without console truncation
+- Report metadata includes mode, timestamp, tool version, and scan configuration
+- Report metadata also includes console truncation details so omitted log items remain auditable
+
 Deterministic scan modes:
 - `PLATO_VULN_SCAN_MODE=live` runs live `govulncheck` with live GHSA and NVD severity lookups
 - `PLATO_VULN_SCAN_MODE=prefer-cache` reuses cached source-mode `govulncheck` JSON from `.cache/vuln` when available, then falls back to a live source run
@@ -354,6 +360,10 @@ Deterministic scan modes:
 Canonical cache path:
 - Plato-managed `govulncheck` result cache is `.cache/vuln`
 - `~/.cache/govulncheck` is a separate `govulncheck` database cache used by the scanner itself
+
+Optional scan report output path:
+- Set `PLATO_VULN_REPORT_DIR` to write per-mode JSON policy reports from `scripts/check_vuln.sh`
+- Output files are named `vulnpolicy-source-report.json` and `vulnpolicy-binary-report.json`
 
 Optional NVD API key path:
 - Use `NVD_API_KEY_FILE=/path/to/nvd_api_key` to load the NVD API key from a file

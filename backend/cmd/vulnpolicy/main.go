@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +27,9 @@ const (
 	defaultGHSAAPIBaseURL = "https://api.github.com/advisories"
 	scanModeSource        = "source"
 	scanModeBinary        = "binary"
+	consoleInfoDisplayCap = 10
+	reportFormatVersion   = "v1"
+	reportToolName        = "vulnpolicy"
 	nvd401ErrorMessage    = "Missing or invalid NVD API key. Please configure a valid API key."
 	nvd403ErrorMessage    = "NVD API key valid but lacks required permissions. Please check your API key configuration."
 	ghsa401ErrorMessage   = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
@@ -199,6 +204,98 @@ type severitySnapshotEntry struct {
 	Score    float64 `json:"score"`
 }
 
+type reportConfiguration struct {
+	InputPath            string `json:"input_path"`
+	OverridesPath        string `json:"overrides_path"`
+	ExcludeInputPath     string `json:"exclude_input_path,omitempty"`
+	SeveritySnapshotPath string `json:"severity_snapshot_path,omitempty"`
+	NVDAPIBaseURL        string `json:"nvd_api_base_url"`
+	GHSAAPIBaseURL       string `json:"ghsa_api_base_url"`
+	NVDTimeout           string `json:"nvd_timeout"`
+	Offline              bool   `json:"offline"`
+	NVDAPIKeyConfigured  bool   `json:"nvd_api_key_configured"`
+	GHSATokenConfigured  bool   `json:"ghsa_token_configured"`
+}
+
+type scanReport struct {
+	ReportVersion string              `json:"report_version"`
+	Metadata      reportMetadata      `json:"metadata"`
+	Summary       reportSummary       `json:"summary"`
+	Findings      reportFindingGroups `json:"findings"`
+	Truncation    reportTruncation    `json:"truncation"`
+}
+
+type reportMetadata struct {
+	Mode          string              `json:"mode"`
+	GeneratedAt   time.Time           `json:"generated_at"`
+	Tool          reportTool          `json:"tool"`
+	Configuration reportConfiguration `json:"configuration"`
+}
+
+type reportTool struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type reportSummary struct {
+	Fail     int `json:"fail"`
+	Warn     int `json:"warn"`
+	Info     int `json:"info"`
+	Accepted int `json:"accepted"`
+	Expired  int `json:"expired"`
+	Blocking int `json:"blocking"`
+}
+
+type reportFindingGroups struct {
+	Fail     []reportFinding `json:"fail"`
+	Warn     []reportFinding `json:"warn"`
+	Info     []reportFinding `json:"info"`
+	Accepted []reportFinding `json:"accepted"`
+	Expired  []reportFinding `json:"expired"`
+}
+
+type reportFinding struct {
+	ID            string          `json:"id"`
+	Aliases       []string        `json:"aliases,omitempty"`
+	Summary       string          `json:"summary,omitempty"`
+	URL           string          `json:"url,omitempty"`
+	FixedVersions []string        `json:"fixed_versions,omitempty"`
+	Reachable     bool            `json:"reachable"`
+	Severity      *reportSeverity `json:"severity,omitempty"`
+	Override      *reportOverride `json:"override,omitempty"`
+	MatchedByID   string          `json:"matched_by_id,omitempty"`
+	ResolverError string          `json:"resolver_error,omitempty"`
+}
+
+type reportSeverity struct {
+	Level  severity       `json:"level"`
+	Score  float64        `json:"score"`
+	Source string         `json:"source,omitempty"`
+	Method severityMethod `json:"method,omitempty"`
+	Reason string         `json:"reason,omitempty"`
+}
+
+type reportOverride struct {
+	ID        string    `json:"id"`
+	Reason    string    `json:"reason"`
+	ExpiresOn time.Time `json:"expires_on"`
+}
+
+type reportTruncation struct {
+	Applied    bool                     `json:"applied"`
+	Categories []reportTruncationBucket `json:"categories"`
+}
+
+type reportTruncationBucket struct {
+	Category     string   `json:"category"`
+	ConsoleLabel string   `json:"console_label"`
+	ConsoleLimit int      `json:"console_limit"`
+	Total        int      `json:"total"`
+	Displayed    int      `json:"displayed"`
+	Omitted      int      `json:"omitted"`
+	OmittedIDs   []string `json:"omitted_ids,omitempty"`
+}
+
 func main() {
 	inputPath := flag.String("input", "", "path to govulncheck JSON output")
 	overridesPath := flag.String("overrides", "", "path to vulnerability override config")
@@ -211,6 +308,7 @@ func main() {
 	severitySnapshot := flag.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON")
 	offlineMode := flag.Bool("offline", false, "disable live GHSA and NVD lookups and use pinned snapshot data only")
 	nvdTimeout := flag.Duration("nvd-timeout", 15*time.Second, "timeout per severity API request")
+	reportFile := flag.String("report-file", "", "optional path to write full vulnerability scan report JSON")
 	flag.Parse()
 
 	if strings.TrimSpace(*inputPath) == "" {
@@ -284,8 +382,26 @@ func main() {
 		errorMap:    make(map[string]error),
 	}
 
-	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, time.Now().UTC())
+	runTimestamp := time.Now().UTC()
+	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, runTimestamp)
 	printResult(normalizedScanMode, result)
+	if strings.TrimSpace(*reportFile) != "" {
+		report := buildScanReport(normalizedScanMode, runTimestamp, result, reportConfiguration{
+			InputPath:            strings.TrimSpace(*inputPath),
+			OverridesPath:        strings.TrimSpace(*overridesPath),
+			ExcludeInputPath:     strings.TrimSpace(*excludeInput),
+			SeveritySnapshotPath: strings.TrimSpace(*severitySnapshot),
+			NVDAPIBaseURL:        strings.TrimSpace(*nvdAPIBaseURL),
+			GHSAAPIBaseURL:       strings.TrimSpace(*ghsaAPIBaseURL),
+			NVDTimeout:           nvdTimeout.String(),
+			Offline:              *offlineMode,
+			NVDAPIKeyConfigured:  apiKey != "",
+			GHSATokenConfigured:  ghsaToken != "",
+		})
+		if reportErr := writeScanReport(*reportFile, report); reportErr != nil {
+			exitf("error: write report file: %v", reportErr)
+		}
+	}
 
 	if len(result.Fail) > 0 || len(result.Expired) > 0 {
 		os.Exit(1)
@@ -1418,6 +1534,157 @@ func severityRank(value severity) int {
 	}
 }
 
+func buildScanReport(scanMode string, generatedAt time.Time, result evaluationResult, configuration reportConfiguration) scanReport {
+	return scanReport{
+		ReportVersion: reportFormatVersion,
+		Metadata: reportMetadata{
+			Mode:        scanMode,
+			GeneratedAt: generatedAt,
+			Tool: reportTool{
+				Name:    reportToolName,
+				Version: currentToolVersion(),
+			},
+			Configuration: configuration,
+		},
+		Summary: reportSummary{
+			Fail:     len(result.Fail),
+			Warn:     len(result.Warn),
+			Info:     len(result.Info),
+			Accepted: len(result.Accepted),
+			Expired:  len(result.Expired),
+			Blocking: len(result.Fail) + len(result.Expired),
+		},
+		Findings: reportFindingGroups{
+			Fail:     reportFindingsFromEvaluated(result.Fail),
+			Warn:     reportFindingsFromEvaluated(result.Warn),
+			Info:     reportFindingsFromEvaluated(result.Info),
+			Accepted: reportFindingsFromEvaluated(result.Accepted),
+			Expired:  reportFindingsFromEvaluated(result.Expired),
+		},
+		Truncation: buildTruncationReport(scanMode, result),
+	}
+}
+
+func currentToolVersion() string {
+	buildInfo, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "devel"
+	}
+	version := strings.TrimSpace(buildInfo.Main.Version)
+	if version == "" {
+		return "devel"
+	}
+	return version
+}
+
+func buildTruncationReport(scanMode string, result evaluationResult) reportTruncation {
+	displayed := len(result.Info)
+	if displayed > consoleInfoDisplayCap {
+		displayed = consoleInfoDisplayCap
+	}
+	omitted := len(result.Info) - displayed
+	return reportTruncation{
+		Applied: omitted > 0,
+		Categories: []reportTruncationBucket{
+			{
+				Category:     "info",
+				ConsoleLabel: infoHeading(scanMode),
+				ConsoleLimit: consoleInfoDisplayCap,
+				Total:        len(result.Info),
+				Displayed:    displayed,
+				Omitted:      omitted,
+				OmittedIDs:   truncatedInfoIDs(result.Info, displayed),
+			},
+		},
+	}
+}
+
+func truncatedInfoIDs(infoFindings []evaluatedVuln, displayed int) []string {
+	if displayed >= len(infoFindings) {
+		return nil
+	}
+	omittedIDs := make([]string, 0, len(infoFindings)-displayed)
+	for index := displayed; index < len(infoFindings); index++ {
+		omittedIDs = append(omittedIDs, infoFindings[index].Vuln.ID)
+	}
+	return omittedIDs
+}
+
+func reportFindingsFromEvaluated(items []evaluatedVuln) []reportFinding {
+	findings := make([]reportFinding, 0, len(items))
+	for _, item := range items {
+		findings = append(findings, reportFindingFromEvaluated(item))
+	}
+	return findings
+}
+
+func reportFindingFromEvaluated(item evaluatedVuln) reportFinding {
+	reportItem := reportFinding{
+		ID:            item.Vuln.ID,
+		Aliases:       append([]string(nil), item.Vuln.Aliases...),
+		Summary:       item.Vuln.Summary,
+		URL:           item.Vuln.URL,
+		FixedVersions: append([]string(nil), item.Vuln.FixedVersions...),
+		Reachable:     item.Vuln.Reachable,
+		MatchedByID:   item.MatchedByID,
+	}
+	if item.ResolverError != nil {
+		reportItem.ResolverError = item.ResolverError.Error()
+	}
+	if hasReportSeverity(item.Severity) {
+		reportItem.Severity = &reportSeverity{
+			Level:  item.Severity.Severity,
+			Score:  item.Severity.Score,
+			Source: item.Severity.Source,
+			Method: item.Severity.Method,
+			Reason: item.Severity.Reason,
+		}
+	}
+	if item.Override != nil {
+		reportItem.Override = &reportOverride{
+			ID:        item.Override.ID,
+			Reason:    item.Override.Reason,
+			ExpiresOn: item.Override.ExpiresOn,
+		}
+	}
+	return reportItem
+}
+
+func hasReportSeverity(assessment severityAssessment) bool {
+	if assessment.Severity != "" {
+		return true
+	}
+	if assessment.Score > 0 {
+		return true
+	}
+	if assessment.Source != "" {
+		return true
+	}
+	if assessment.Method != "" {
+		return true
+	}
+	return assessment.Reason != ""
+}
+
+func writeScanReport(path string, report scanReport) error {
+	reportPath := strings.TrimSpace(path)
+	if reportPath == "" {
+		return nil
+	}
+	reportDir := filepath.Dir(reportPath)
+	if reportDir != "." {
+		if mkdirErr := os.MkdirAll(reportDir, 0o755); mkdirErr != nil {
+			return mkdirErr
+		}
+	}
+	reportData, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	reportData = append(reportData, '\n')
+	return os.WriteFile(reportPath, reportData, 0o600)
+}
+
 func printResult(scanMode string, result evaluationResult) {
 	fmt.Printf("govulncheck policy results (%s)\n", scanMode)
 	fmt.Printf("  fail: %d\n", len(result.Fail)+len(result.Expired))
@@ -1464,8 +1731,8 @@ func printResult(scanMode string, result evaluationResult) {
 		infoLabel := infoHeading(scanMode)
 		fmt.Println(infoLabel)
 		limit := len(result.Info)
-		if limit > 10 {
-			limit = 10
+		if limit > consoleInfoDisplayCap {
+			limit = consoleInfoDisplayCap
 		}
 		for index := 0; index < limit; index++ {
 			item := result.Info[index]

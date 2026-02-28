@@ -17,6 +17,7 @@ NVD_SNAPSHOT="${PLATO_VULN_NVD_SNAPSHOT:-}"
 NVD_API_BASE_URL="${PLATO_VULN_NVD_API_BASE_URL:-}"
 GHSA_API_BASE_URL="${PLATO_VULN_GHSA_API_BASE_URL:-}"
 GHSA_TOKEN_FILE="${PLATO_VULN_GHSA_TOKEN_FILE:-${GHSA_TOKEN_FILE:-}}"
+REPORT_DIR="${PLATO_VULN_REPORT_DIR:-}"
 BINARY_ARTIFACT_DIR="${PLATO_VULN_BINARY_ARTIFACT_DIR:-$CACHE_DIR/artifacts}"
 BINARY_ARTIFACT="$BINARY_ARTIFACT_DIR/plato-backend"
 
@@ -128,6 +129,11 @@ run_policy() {
 
   if [ "$SCAN_MODE" = "snapshot" ] || [ "${PLATO_VULN_OFFLINE:-0}" = "1" ]; then
     vulnpolicy_args+=( -offline )
+  fi
+
+  if [ -n "$REPORT_DIR" ]; then
+    mkdir -p "$REPORT_DIR"
+    vulnpolicy_args+=( -report-file "$REPORT_DIR/vulnpolicy-$scan_mode-report.json" )
   fi
 
   pushd "$ROOT_DIR/backend" >/dev/null
