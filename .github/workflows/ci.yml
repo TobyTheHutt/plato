@@ -8,6 +8,7 @@ on:
 
 env:
   GO_VERSION: 1.26.0
+  PLATO_VULN_REPORT_ROOT: .cache/vuln/reports
 
 jobs:
   quality:
@@ -66,13 +67,61 @@ jobs:
       # First pass verifies the quality suite itself.
       - name: Full quality checks
         env:
+          # Explicitly enable vulnpolicy -report-file output in CI.
+          # check_vuln.sh runs source and binary scans for the selected mode.
           PLATO_VULN_SCAN_MODE: prefer-cache
+          PLATO_VULN_REPORT_DIR: ${{ env.PLATO_VULN_REPORT_ROOT }}/prefer-cache
         run: make --warn-undefined-variables check
 
       # Second pass validates idempotency and detects tracked file side effects.
       - name: Idempotency check
         env:
+          # Keep report generation enabled during idempotency validation.
           PLATO_VULN_SCAN_MODE: prefer-cache
+          PLATO_VULN_REPORT_DIR: ${{ env.PLATO_VULN_REPORT_ROOT }}/prefer-cache
         run: |
           make --warn-undefined-variables check
           git diff --exit-code
+
+      - name: Vulnerability scan in live mode
+        if: always()
+        env:
+          # Exercise live mode with report generation enabled.
+          PLATO_VULN_SCAN_MODE: live
+          PLATO_VULN_REPORT_DIR: ${{ env.PLATO_VULN_REPORT_ROOT }}/live
+        run: make --warn-undefined-variables scan-vulnerabilities
+
+      - name: Prepare snapshot fixtures
+        if: always()
+        run: |
+          mkdir -p .cache/vuln/snapshot
+          printf '%s\n' '{"config":{"scan_mode":"source"}}' > .cache/vuln/snapshot/govulncheck-source-empty.json
+          printf '%s\n' '{"config":{"scan_mode":"binary"}}' > .cache/vuln/snapshot/govulncheck-binary-empty.json
+          printf '%s\n' '{' '  "cves": {}' '}' > .cache/vuln/snapshot/nvd-severity-empty.json
+
+      - name: Vulnerability scan in snapshot mode
+        if: always()
+        env:
+          # Exercise deterministic snapshot mode with explicit report output.
+          PLATO_VULN_SCAN_MODE: snapshot
+          PLATO_VULN_GOVULNCHECK_INPUT: .cache/vuln/snapshot/govulncheck-source-empty.json
+          PLATO_VULN_GOVULNCHECK_BINARY_INPUT: .cache/vuln/snapshot/govulncheck-binary-empty.json
+          PLATO_VULN_NVD_SNAPSHOT: .cache/vuln/snapshot/nvd-severity-empty.json
+          PLATO_VULN_REPORT_DIR: ${{ env.PLATO_VULN_REPORT_ROOT }}/snapshot
+        run: make --warn-undefined-variables scan-vulnerabilities
+
+      # Preserve source and binary vulnerability policy reports as CI artifacts.
+      # `if: always()` keeps reports available even when vulnerability policy fails.
+      - name: Upload vulnerability reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vulnpolicy-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .cache/vuln/reports/prefer-cache/vulnpolicy-source-report.json
+            .cache/vuln/reports/prefer-cache/vulnpolicy-binary-report.json
+            .cache/vuln/reports/live/vulnpolicy-source-report.json
+            .cache/vuln/reports/live/vulnpolicy-binary-report.json
+            .cache/vuln/reports/snapshot/vulnpolicy-source-report.json
+            .cache/vuln/reports/snapshot/vulnpolicy-binary-report.json
+          if-no-files-found: error

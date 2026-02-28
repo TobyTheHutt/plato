@@ -363,6 +363,7 @@ Canonical cache path:
 
 Optional scan report output path:
 - Set `PLATO_VULN_REPORT_DIR` to write per-mode JSON policy reports from `scripts/check_vuln.sh`
+- Relative `PLATO_VULN_REPORT_DIR` values are resolved from the repository root
 - Output files are named `vulnpolicy-source-report.json` and `vulnpolicy-binary-report.json`
 
 Optional NVD API key path:
@@ -418,8 +419,14 @@ make scan-vulnerabilities
 CI behavior:
 - CI caches `.cache/vuln` for Plato-managed scan results and `~/.cache/govulncheck` for the scanner's vulnerability database
 - CI writes an optional NVD API key file from `NVD_API_KEY` secret and passes the file path via `NVD_API_KEY_FILE`
-- CI runs vulnerability checks in `prefer-cache` mode
+- CI runs full quality checks and idempotency checks in `prefer-cache` mode
 - CI always builds and scans backend executable artifacts in binary mode
+- CI also runs dedicated vulnerability scans in `live` and `snapshot` modes to exercise all supported scan modes
+- CI sets `PLATO_VULN_REPORT_DIR` per mode under `.cache/vuln/reports` so both source and binary policy runs always write `vulnpolicy-*-report.json` files for artifact collection
+- CI uploads report artifacts from:
+  - `.cache/vuln/reports/prefer-cache/`
+  - `.cache/vuln/reports/live/`
+  - `.cache/vuln/reports/snapshot/`
 
 Accepted risk override process:
 - Add temporary exceptions to `docs/security-vulnerability-overrides.json`

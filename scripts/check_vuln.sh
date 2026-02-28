@@ -18,10 +18,28 @@ NVD_API_BASE_URL="${PLATO_VULN_NVD_API_BASE_URL:-}"
 GHSA_API_BASE_URL="${PLATO_VULN_GHSA_API_BASE_URL:-}"
 GHSA_TOKEN_FILE="${PLATO_VULN_GHSA_TOKEN_FILE:-${GHSA_TOKEN_FILE:-}}"
 REPORT_DIR="${PLATO_VULN_REPORT_DIR:-}"
+REPORT_DIR_ABS=""
 BINARY_ARTIFACT_DIR="${PLATO_VULN_BINARY_ARTIFACT_DIR:-$CACHE_DIR/artifacts}"
 BINARY_ARTIFACT="$BINARY_ARTIFACT_DIR/plato-backend"
 
 mkdir -p "$CACHE_DIR"
+
+# CI normally sets PLATO_VULN_REPORT_DIR explicitly.
+# Keep this fallback so reports still generate if that env wiring is removed.
+if [ -n "${CI:-}" ] && [ -z "${PLATO_VULN_REPORT_DIR:-}" ]; then
+  REPORT_DIR="$CACHE_DIR/reports"
+fi
+
+if [ -n "$REPORT_DIR" ]; then
+  case "$REPORT_DIR" in
+    /*)
+      REPORT_DIR_ABS="$REPORT_DIR"
+      ;;
+    *)
+      REPORT_DIR_ABS="$ROOT_DIR/$REPORT_DIR"
+      ;;
+  esac
+fi
 
 if [ -f "$ROOT_DIR/backend/go.sum" ]; then
   SOURCE_SCAN_FINGERPRINT="$(
@@ -131,14 +149,40 @@ run_policy() {
     vulnpolicy_args+=( -offline )
   fi
 
-  if [ -n "$REPORT_DIR" ]; then
-    mkdir -p "$REPORT_DIR"
-    vulnpolicy_args+=( -report-file "$REPORT_DIR/vulnpolicy-$scan_mode-report.json" )
+  if [ -n "$REPORT_DIR_ABS" ]; then
+    if ! mkdir -p "$REPORT_DIR_ABS"; then
+      echo "error: failed to create vulnerability report directory '$REPORT_DIR_ABS'"
+      return 1
+    fi
+
+    local report_file="$REPORT_DIR_ABS/vulnpolicy-$scan_mode-report.json"
+    rm -f "$report_file"
+    vulnpolicy_args+=( -report-file "$report_file" )
   fi
 
   pushd "$ROOT_DIR/backend" >/dev/null
   go run -tags tools ./cmd/vulnpolicy "${vulnpolicy_args[@]}"
   popd >/dev/null
+}
+
+verify_report_file() {
+  local scan_mode="$1"
+
+  if [ -z "$REPORT_DIR_ABS" ]; then
+    return 0
+  fi
+
+  local report_file="$REPORT_DIR_ABS/vulnpolicy-$scan_mode-report.json"
+
+  if [ ! -f "$report_file" ]; then
+    echo "error: expected vulnerability report file was not created: $report_file"
+    return 1
+  fi
+
+  if [ ! -s "$report_file" ]; then
+    echo "error: vulnerability report file is empty: $report_file"
+    return 1
+  fi
 }
 
 if [ "$SCAN_MODE" = "snapshot" ]; then
@@ -188,10 +232,16 @@ echo "== Vulnerability scan: source mode =="
 if ! run_policy source "$TMP_SOURCE_FILE"; then
   overall_status=1
 fi
+if ! verify_report_file source; then
+  overall_status=1
+fi
 
 echo ""
 echo "== Vulnerability scan: binary mode (deduplicated against source reachable findings) =="
 if ! run_policy binary "$TMP_BINARY_FILE" -exclude-input "$TMP_SOURCE_FILE"; then
+  overall_status=1
+fi
+if ! verify_report_file binary; then
   overall_status=1
 fi
 
