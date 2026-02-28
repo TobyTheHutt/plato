@@ -146,15 +146,27 @@ type overrideConfig struct {
 }
 
 type overrideInput struct {
-	ID        string `json:"id"`
-	Reason    string `json:"reason"`
-	ExpiresOn string `json:"expires_on"`
+	ID             string `json:"id"`
+	Reason         string `json:"reason"`
+	ExpiresOn      string `json:"expires_on"`
+	Owner          string `json:"owner"`
+	TrackingTicket string `json:"tracking_ticket"`
+	Scope          string `json:"scope"`
+	ApprovedBy     string `json:"approved_by"`
+	ApprovedDate   string `json:"approved_date"`
+	Severity       string `json:"severity"`
 }
 
 type riskOverride struct {
-	ID        string
-	Reason    string
-	ExpiresOn time.Time
+	ID             string
+	Reason         string
+	ExpiresOn      time.Time
+	Owner          string
+	TrackingTicket string
+	Scope          string
+	ApprovedBy     string
+	ApprovedDate   *time.Time
+	Severity       severity
 }
 
 type nvdResponse struct {
@@ -278,9 +290,15 @@ type reportSeverity struct {
 }
 
 type reportOverride struct {
-	ID        string    `json:"id"`
-	Reason    string    `json:"reason"`
-	ExpiresOn time.Time `json:"expires_on"`
+	ID             string     `json:"id"`
+	Reason         string     `json:"reason"`
+	ExpiresOn      time.Time  `json:"expires_on"`
+	Owner          string     `json:"owner"`
+	TrackingTicket string     `json:"tracking_ticket"`
+	Scope          string     `json:"scope"`
+	ApprovedBy     string     `json:"approved_by,omitempty"`
+	ApprovedDate   *time.Time `json:"approved_date,omitempty"`
+	Severity       severity   `json:"severity,omitempty"`
 }
 
 type reportTruncation struct {
@@ -619,6 +637,18 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 		if reason == "" {
 			return nil, fmt.Errorf("override %s must include a reason", id)
 		}
+		owner := strings.TrimSpace(item.Owner)
+		if owner == "" {
+			return nil, fmt.Errorf("override %s must include owner", id)
+		}
+		trackingTicket := strings.TrimSpace(item.TrackingTicket)
+		if trackingTicket == "" {
+			return nil, fmt.Errorf("override %s must include tracking_ticket", id)
+		}
+		scope := strings.TrimSpace(item.Scope)
+		if scope == "" {
+			return nil, fmt.Errorf("override %s must include scope", id)
+		}
 		expiresOn := strings.TrimSpace(item.ExpiresOn)
 		if expiresOn == "" {
 			return nil, fmt.Errorf("override %s must include expires_on", id)
@@ -627,14 +657,57 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 		if parseErr != nil {
 			return nil, fmt.Errorf("override %s has invalid expires_on %q: %w", id, expiresOn, parseErr)
 		}
+		approvedBy := strings.TrimSpace(item.ApprovedBy)
+		approvedDateRaw := strings.TrimSpace(item.ApprovedDate)
+		var approvedDate *time.Time
+		if approvedDateRaw != "" {
+			parsedApprovedDate, approvedDateErr := time.Parse("2006-01-02", approvedDateRaw)
+			if approvedDateErr != nil {
+				return nil, fmt.Errorf("override %s has invalid approved_date %q: %w", id, approvedDateRaw, approvedDateErr)
+			}
+			parsedApprovedDateUTC := parsedApprovedDate.UTC()
+			approvedDate = &parsedApprovedDateUTC
+		}
+		overrideSeverityRaw := strings.TrimSpace(item.Severity)
+		var overrideSeverity severity
+		if overrideSeverityRaw != "" {
+			parsedSeverity, severityErr := parseOverrideSeverity(overrideSeverityRaw)
+			if severityErr != nil {
+				return nil, fmt.Errorf("override %s has invalid severity %q: %w", id, overrideSeverityRaw, severityErr)
+			}
+			overrideSeverity = parsedSeverity
+		}
 		overrides[id] = riskOverride{
-			ID:        id,
-			Reason:    reason,
-			ExpiresOn: expiryDate.UTC(),
+			ID:             id,
+			Reason:         reason,
+			ExpiresOn:      expiryDate.UTC(),
+			Owner:          owner,
+			TrackingTicket: trackingTicket,
+			Scope:          scope,
+			ApprovedBy:     approvedBy,
+			ApprovedDate:   approvedDate,
+			Severity:       overrideSeverity,
 		}
 	}
 
 	return overrides, nil
+}
+
+func parseOverrideSeverity(raw string) (severity, error) {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case string(severityUnknown):
+		return severityUnknown, nil
+	case string(severityLow):
+		return severityLow, nil
+	case string(severityMedium):
+		return severityMedium, nil
+	case string(severityHigh):
+		return severityHigh, nil
+	case string(severityCritical):
+		return severityCritical, nil
+	default:
+		return "", fmt.Errorf("must be one of LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN")
+	}
 }
 
 func normalizeID(value string) string {
@@ -1667,9 +1740,15 @@ func reportFindingFromEvaluated(item evaluatedVuln) reportFinding {
 	}
 	if item.Override != nil {
 		reportItem.Override = &reportOverride{
-			ID:        item.Override.ID,
-			Reason:    item.Override.Reason,
-			ExpiresOn: item.Override.ExpiresOn,
+			ID:             item.Override.ID,
+			Reason:         item.Override.Reason,
+			ExpiresOn:      item.Override.ExpiresOn,
+			Owner:          item.Override.Owner,
+			TrackingTicket: item.Override.TrackingTicket,
+			Scope:          item.Override.Scope,
+			ApprovedBy:     item.Override.ApprovedBy,
+			ApprovedDate:   item.Override.ApprovedDate,
+			Severity:       item.Override.Severity,
 		}
 	}
 	return reportItem

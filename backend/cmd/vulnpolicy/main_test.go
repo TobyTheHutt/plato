@@ -120,7 +120,10 @@ func TestLoadOverrides(t *testing.T) {
     {
       "id": "go-2026-4340",
       "reason": "accepted short term until toolchain update",
-      "expires_on": "2026-03-15"
+			"expires_on": "2026-03-15",
+			"owner": "@plato-security",
+			"tracking_ticket": "SEC-123",
+			"scope": "backend/cmd/plato: v1.2.x"
     }
   ]
 }`
@@ -143,10 +146,60 @@ func TestLoadOverrides(t *testing.T) {
 	if override.ExpiresOn.Format("2006-01-02") != "2026-03-15" {
 		t.Fatalf("unexpected expiry date: %s", override.ExpiresOn.Format("2006-01-02"))
 	}
+	if override.Owner != "@plato-security" {
+		t.Fatalf("unexpected owner: %s", override.Owner)
+	}
+	if override.TrackingTicket != "SEC-123" {
+		t.Fatalf("unexpected tracking ticket: %s", override.TrackingTicket)
+	}
+	if override.Scope != "backend/cmd/plato: v1.2.x" {
+		t.Fatalf("unexpected scope: %s", override.Scope)
+	}
+
+	t.Run("happy path with optional metadata", func(t *testing.T) {
+		validPath := filepath.Join(tempDir, "valid-optional-fields.json")
+		content := `{
+  "overrides": [
+    {
+      "id": "CVE-2026-9999",
+      "reason": "accepted short term until upstream patch release",
+      "expires_on": "2026-04-01",
+      "owner": "@plato-platform",
+      "tracking_ticket": "GH-456",
+      "scope": "frontend/package-lock.json",
+      "approved_by": "@plato-security",
+      "approved_date": "2026-02-20",
+      "severity": "critical"
+    }
+  ]
+}`
+		if err := os.WriteFile(validPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write override file: %v", err)
+		}
+
+		overridesWithOptional, err := loadOverrides(validPath)
+		if err != nil {
+			t.Fatalf("loadOverrides returned error: %v", err)
+		}
+
+		overrideWithOptional, exists := overridesWithOptional["CVE-2026-9999"]
+		if !exists {
+			t.Fatal("expected CVE-2026-9999 override")
+		}
+		if overrideWithOptional.ApprovedBy != "@plato-security" {
+			t.Fatalf("unexpected approved_by: %s", overrideWithOptional.ApprovedBy)
+		}
+		if overrideWithOptional.ApprovedDate == nil || overrideWithOptional.ApprovedDate.Format("2006-01-02") != "2026-02-20" {
+			t.Fatalf("unexpected approved_date: %#v", overrideWithOptional.ApprovedDate)
+		}
+		if overrideWithOptional.Severity != severityCritical {
+			t.Fatalf("unexpected severity: %s", overrideWithOptional.Severity)
+		}
+	})
 
 	t.Run("missing expires_on", func(t *testing.T) {
 		invalidPath := filepath.Join(tempDir, "invalid-missing-expires.json")
-		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x"}]}`
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
 			t.Fatalf("write invalid override file: %v", err)
 		}
@@ -155,12 +208,45 @@ func TestLoadOverrides(t *testing.T) {
 		}
 	})
 
+	t.Run("missing owner", func(t *testing.T) {
+		invalidPath := filepath.Join(tempDir, "invalid-missing-owner.json")
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"2026-03-01","tracking_ticket":"SEC-1","scope":"backend"}]}`
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("write invalid override file: %v", err)
+		}
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
+			t.Fatal("expected error for missing owner")
+		}
+	})
+
+	t.Run("missing tracking_ticket", func(t *testing.T) {
+		invalidPath := filepath.Join(tempDir, "invalid-missing-tracking-ticket.json")
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"2026-03-01","owner":"@a","scope":"backend"}]}`
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("write invalid override file: %v", err)
+		}
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
+			t.Fatal("expected error for missing tracking_ticket")
+		}
+	})
+
+	t.Run("missing scope", func(t *testing.T) {
+		invalidPath := filepath.Join(tempDir, "invalid-missing-scope.json")
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1"}]}`
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("write invalid override file: %v", err)
+		}
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
+			t.Fatal("expected error for missing scope")
+		}
+	})
+
 	t.Run("duplicate override IDs", func(t *testing.T) {
 		invalidPath := filepath.Join(tempDir, "invalid-duplicate.json")
 		invalidContent := `{
   "overrides": [
-    {"id": "GO-1", "reason": "a", "expires_on": "2026-03-01"},
-    {"id": "go-1", "reason": "b", "expires_on": "2026-03-10"}
+    {"id": "GO-1", "reason": "a", "expires_on": "2026-03-01", "owner": "@a", "tracking_ticket": "SEC-1", "scope": "backend"},
+    {"id": "go-1", "reason": "b", "expires_on": "2026-03-10", "owner": "@b", "tracking_ticket": "SEC-2", "scope": "backend"}
   ]
 }`
 		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
@@ -173,12 +259,34 @@ func TestLoadOverrides(t *testing.T) {
 
 	t.Run("missing reason", func(t *testing.T) {
 		invalidPath := filepath.Join(tempDir, "invalid-missing-reason.json")
-		invalidContent := `{"overrides":[{"id":"GO-1","expires_on":"2026-03-01"}]}`
+		invalidContent := `{"overrides":[{"id":"GO-1","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
 			t.Fatalf("write invalid override file: %v", err)
 		}
 		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
 			t.Fatal("expected error for missing reason")
+		}
+	})
+
+	t.Run("invalid approved_date format", func(t *testing.T) {
+		invalidPath := filepath.Join(tempDir, "invalid-approved-date.json")
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1","scope":"backend","approved_date":"03/01/2026"}]}`
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("write invalid override file: %v", err)
+		}
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
+			t.Fatal("expected error for invalid approved_date")
+		}
+	})
+
+	t.Run("invalid severity", func(t *testing.T) {
+		invalidPath := filepath.Join(tempDir, "invalid-severity.json")
+		invalidContent := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1","scope":"backend","severity":"P1"}]}`
+		if err := os.WriteFile(invalidPath, []byte(invalidContent), 0o600); err != nil {
+			t.Fatalf("write invalid override file: %v", err)
+		}
+		if _, loadErr := loadOverrides(invalidPath); loadErr == nil {
+			t.Fatal("expected error for invalid severity")
 		}
 	})
 }
@@ -651,6 +759,44 @@ func TestNormalizeSeverityMatrix(t *testing.T) {
 	}
 }
 
+func TestParseOverrideSeverity(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		input   string
+		want    severity
+		wantErr bool
+	}{
+		{name: "low", input: "low", want: severityLow},
+		{name: "medium", input: " MEDIUM ", want: severityMedium},
+		{name: "high", input: "HIGH", want: severityHigh},
+		{name: "critical", input: "critical", want: severityCritical},
+		{name: "unknown", input: "UNKNOWN", want: severityUnknown},
+		{name: "invalid", input: "P1", wantErr: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := parseOverrideSeverity(testCase.input)
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for input %q", testCase.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseOverrideSeverity returned error: %v", err)
+			}
+			if got != testCase.want {
+				t.Fatalf("parseOverrideSeverity(%q) = %s, want %s", testCase.input, got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestLoadOverridesErrorPaths(t *testing.T) {
 	t.Parallel()
 
@@ -677,7 +823,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 	t.Run("missing id", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(tempDir, "missing-id.json")
-		content := `{"overrides":[{"reason":"x","expires_on":"2026-03-01"}]}`
+		content := `{"overrides":[{"reason":"x","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write invalid file: %v", err)
 		}
@@ -689,7 +835,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 	t.Run("invalid expires_on format", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(tempDir, "invalid-date.json")
-		content := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"03/01/2026"}]}`
+		content := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"03/01/2026","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatalf("write invalid file: %v", err)
 		}
