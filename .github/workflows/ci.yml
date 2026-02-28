@@ -113,6 +113,7 @@ jobs:
       # Preserve source and binary vulnerability policy reports as CI artifacts.
       # `if: always()` keeps reports available even when vulnerability policy fails.
       - name: Upload vulnerability reports
+        id: upload_vulnerability_reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -125,3 +126,14 @@ jobs:
             .cache/vuln/reports/snapshot/vulnpolicy-source-report.json
             .cache/vuln/reports/snapshot/vulnpolicy-binary-report.json
           if-no-files-found: error
+
+      - name: Print vulnerability report artifact URL
+        if: always()
+        env:
+          ARTIFACT_URL: ${{ steps.upload_vulnerability_reports.outputs.artifact-url }}
+        run: |
+          if [ -n "$ARTIFACT_URL" ]; then
+            echo "Vulnerability reports artifact URL: $ARTIFACT_URL"
+          else
+            echo "Vulnerability reports artifact URL is unavailable"
+          fi

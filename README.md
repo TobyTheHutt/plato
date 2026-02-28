@@ -430,17 +430,42 @@ CI behavior:
 
 Accepted risk override process:
 - Add temporary exceptions to `docs/security-vulnerability-overrides.json`
-- Each override must include `id`, `reason`, and `expires_on`
+- Each override must include `id`, `reason`, `expires_on`, `owner`, `tracking_ticket`, and `scope`
+- Optional approval fields are `approved_by`, `approved_date`, and `severity`
+- `approved_date` and `expires_on` must use `YYYY-MM-DD`
+- `severity`, when set, must be one of `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, or `UNKNOWN` (case-insensitive input)
 - Overrides may use either a `GO-...` ID or a `CVE-...` alias
 - Expired overrides fail the scan
 - Remove overrides once fixes are released and deployed
 
+Complete override schema example:
+
+```json
+{
+  "overrides": [
+    {
+      "id": "GO-2026-4340",
+      "reason": "Temporary exception while dependency upgrade is validated",
+      "expires_on": "2026-04-15",
+      "owner": "@plato-security",
+      "tracking_ticket": "SEC-2481",
+      "scope": "backend/go.mod and backend/go.sum",
+      "approved_by": "@security-reviewers",
+      "approved_date": "2026-02-28",
+      "severity": "HIGH"
+    }
+  ]
+}
+```
+
 Handling vulnerability reports:
 1. Run `make scan-vulnerabilities` and capture the failing IDs
 2. Upgrade to a fixed version shown by `govulncheck` output when available
-3. If immediate upgrade is not possible, add a temporary override with owner, reason, and expiry
-4. Open a follow-up task to remove the override before expiry
-5. Follow the Go security policy for disclosure and response expectations: https://go.dev/doc/security/policy
+3. If immediate upgrade is not possible, add a temporary override with required governance metadata (`owner`, `tracking_ticket`, `scope`)
+4. Record approval details when applicable using `approved_by` and `approved_date`
+5. Add `severity` when known so audit records align with report triage
+6. Open a follow-up task to remove the override before expiry
+7. Follow the Go security policy for disclosure and response expectations: https://go.dev/doc/security/policy
 
 ### Makefile and shell boundaries
 
