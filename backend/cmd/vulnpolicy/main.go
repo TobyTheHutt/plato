@@ -30,6 +30,8 @@ const (
 	consoleInfoDisplayCap = 10
 	reportFormatVersion   = "v1"
 	reportToolName        = "vulnpolicy"
+	unknownUnreachableReason = "Finding is not reachable so severity resolution is skipped by policy"
+	unknownOverrideReason    = "Severity resolution is skipped because a risk override matched this finding"
 	nvd401ErrorMessage    = "Missing or invalid NVD API key. Please configure a valid API key."
 	nvd403ErrorMessage    = "NVD API key valid but lacks required permissions. Please check your API key configuration."
 	ghsa401ErrorMessage   = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
@@ -364,7 +366,7 @@ func main() {
 		exitf("error: load severity snapshot: %v", err)
 	}
 
-	if *offlineMode && len(snapshot) == 0 {
+	if *offlineMode && strings.TrimSpace(*severitySnapshot) == "" {
 		exitf("error: -offline requires -severity-snapshot")
 	}
 
@@ -659,6 +661,7 @@ func evaluateVulnerabilities(
 		if override != nil {
 			evaluated := evaluatedVuln{
 				Vuln:        vuln,
+				Severity:    overrideBypassSeverity(vuln, matchedByID),
 				Override:    override,
 				MatchedByID: matchedByID,
 			}
@@ -671,7 +674,10 @@ func evaluateVulnerabilities(
 		}
 
 		if !vuln.Reachable {
-			result.Info = append(result.Info, evaluatedVuln{Vuln: vuln})
+			result.Info = append(result.Info, evaluatedVuln{
+				Vuln:     vuln,
+				Severity: unreachableSeverity(vuln),
+			})
 			continue
 		}
 
@@ -698,6 +704,26 @@ func evaluateVulnerabilities(
 	sortEvaluated(result.Expired)
 
 	return result
+}
+
+func unreachableSeverity(vuln vulnAssessment) severityAssessment {
+	return unknownSeverityAssessmentWithReason(
+		normalizeID(vuln.ID),
+		unknownUnreachableReason,
+		severityMethodUnknown,
+	)
+}
+
+func overrideBypassSeverity(vuln vulnAssessment, matchedByID string) severityAssessment {
+	source := normalizeID(matchedByID)
+	if source == "" {
+		source = normalizeID(vuln.ID)
+	}
+	return unknownSeverityAssessmentWithReason(
+		source,
+		unknownOverrideReason,
+		severityMethodUnknown,
+	)
 }
 
 func matchOverride(vuln vulnAssessment, overrides map[string]riskOverride) (*riskOverride, string) {
@@ -1619,6 +1645,7 @@ func reportFindingsFromEvaluated(items []evaluatedVuln) []reportFinding {
 }
 
 func reportFindingFromEvaluated(item evaluatedVuln) reportFinding {
+	resolvedSeverity := reportSeverityFromEvaluated(item)
 	reportItem := reportFinding{
 		ID:            item.Vuln.ID,
 		Aliases:       append([]string(nil), item.Vuln.Aliases...),
@@ -1631,14 +1658,12 @@ func reportFindingFromEvaluated(item evaluatedVuln) reportFinding {
 	if item.ResolverError != nil {
 		reportItem.ResolverError = item.ResolverError.Error()
 	}
-	if hasReportSeverity(item.Severity) {
-		reportItem.Severity = &reportSeverity{
-			Level:  item.Severity.Severity,
-			Score:  item.Severity.Score,
-			Source: item.Severity.Source,
-			Method: item.Severity.Method,
-			Reason: item.Severity.Reason,
-		}
+	reportItem.Severity = &reportSeverity{
+		Level:  resolvedSeverity.Severity,
+		Score:  resolvedSeverity.Score,
+		Source: resolvedSeverity.Source,
+		Method: resolvedSeverity.Method,
+		Reason: resolvedSeverity.Reason,
 	}
 	if item.Override != nil {
 		reportItem.Override = &reportOverride{
@@ -1648,6 +1673,39 @@ func reportFindingFromEvaluated(item evaluatedVuln) reportFinding {
 		}
 	}
 	return reportItem
+}
+
+func reportSeverityFromEvaluated(item evaluatedVuln) severityAssessment {
+	assessment := item.Severity
+
+	if assessment.Severity == "" {
+		assessment.Severity = severityUnknown
+	}
+
+	if strings.TrimSpace(assessment.Source) == "" {
+		assessment.Source = normalizeID(item.Vuln.ID)
+	}
+
+	if assessment.Severity == severityUnknown {
+		if assessment.Method == "" {
+			assessment.Method = severityMethodUnknown
+		}
+		if strings.TrimSpace(assessment.Reason) == "" {
+			assessment.Reason = unknownSeverityReasonForReport(item)
+		}
+	}
+
+	return assessment
+}
+
+func unknownSeverityReasonForReport(item evaluatedVuln) string {
+	if item.Override != nil {
+		return unknownOverrideReason
+	}
+	if !item.Vuln.Reachable {
+		return unknownUnreachableReason
+	}
+	return "Severity resolution produced UNKNOWN without an explicit reason"
 }
 
 func hasReportSeverity(assessment severityAssessment) bool {

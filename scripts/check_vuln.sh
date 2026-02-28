@@ -17,10 +17,43 @@ NVD_SNAPSHOT="${PLATO_VULN_NVD_SNAPSHOT:-}"
 NVD_API_BASE_URL="${PLATO_VULN_NVD_API_BASE_URL:-}"
 GHSA_API_BASE_URL="${PLATO_VULN_GHSA_API_BASE_URL:-}"
 GHSA_TOKEN_FILE="${PLATO_VULN_GHSA_TOKEN_FILE:-${GHSA_TOKEN_FILE:-}}"
+NVD_API_KEY_FILE="${PLATO_VULN_NVD_API_KEY_FILE:-${NVD_API_KEY_FILE:-}}"
 REPORT_DIR="${PLATO_VULN_REPORT_DIR:-}"
 REPORT_DIR_ABS=""
 BINARY_ARTIFACT_DIR="${PLATO_VULN_BINARY_ARTIFACT_DIR:-$CACHE_DIR/artifacts}"
 BINARY_ARTIFACT="$BINARY_ARTIFACT_DIR/plato-backend"
+
+to_abs_path() {
+  local candidate="$1"
+  case "$candidate" in
+    /*)
+      printf '%s' "$candidate"
+      ;;
+    *)
+      printf '%s' "$ROOT_DIR/$candidate"
+      ;;
+  esac
+}
+
+if [ -n "$GOVULN_INPUT" ]; then
+  GOVULN_INPUT="$(to_abs_path "$GOVULN_INPUT")"
+fi
+
+if [ -n "$BINARY_GOVULN_INPUT" ]; then
+  BINARY_GOVULN_INPUT="$(to_abs_path "$BINARY_GOVULN_INPUT")"
+fi
+
+if [ -n "$NVD_SNAPSHOT" ]; then
+  NVD_SNAPSHOT="$(to_abs_path "$NVD_SNAPSHOT")"
+fi
+
+if [ -n "$GHSA_TOKEN_FILE" ]; then
+  GHSA_TOKEN_FILE="$(to_abs_path "$GHSA_TOKEN_FILE")"
+fi
+
+if [ -n "$NVD_API_KEY_FILE" ]; then
+  NVD_API_KEY_FILE="$(to_abs_path "$NVD_API_KEY_FILE")"
+fi
 
 mkdir -p "$CACHE_DIR"
 
@@ -125,7 +158,7 @@ run_policy() {
     vulnpolicy_args+=( "$@" )
   fi
 
-  if [ -n "${NVD_API_KEY_FILE:-}" ]; then
+  if [ -n "$NVD_API_KEY_FILE" ]; then
     vulnpolicy_args+=( -nvd-api-key-file "$NVD_API_KEY_FILE" )
   fi
 

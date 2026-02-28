@@ -2112,6 +2112,92 @@ func TestHasReportSeverity(t *testing.T) {
 	}
 }
 
+func TestReportSeverityFromEvaluated(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fills defaults for unreachable finding", func(t *testing.T) {
+		t.Parallel()
+
+		assessment := reportSeverityFromEvaluated(evaluatedVuln{
+			Vuln: vulnAssessment{ID: "go-unreach", Reachable: false},
+		})
+
+		if assessment.Severity != severityUnknown {
+			t.Fatalf("expected UNKNOWN severity, got %#v", assessment)
+		}
+		if assessment.Source != "GO-UNREACH" {
+			t.Fatalf("expected normalized source fallback, got %#v", assessment)
+		}
+		if assessment.Method != severityMethodUnknown {
+			t.Fatalf("expected unknown method fallback, got %#v", assessment)
+		}
+		if assessment.Reason != unknownUnreachableReason {
+			t.Fatalf("expected unreachable reason fallback, got %#v", assessment)
+		}
+	})
+
+	t.Run("keeps explicit severity details", func(t *testing.T) {
+		t.Parallel()
+
+		assessment := reportSeverityFromEvaluated(evaluatedVuln{
+			Vuln: vulnAssessment{ID: "GO-1", Reachable: true},
+			Severity: severityAssessment{
+				Severity: severityHigh,
+				Score:    8.4,
+				Source:   "CVE-2026-1000",
+				Method:   severityMethodNVD,
+			},
+		})
+
+		if assessment.Severity != severityHigh || assessment.Score != 8.4 {
+			t.Fatalf("expected explicit severity to be preserved, got %#v", assessment)
+		}
+		if assessment.Source != "CVE-2026-1000" || assessment.Method != severityMethodNVD {
+			t.Fatalf("expected explicit source and method to be preserved, got %#v", assessment)
+		}
+		if assessment.Reason != "" {
+			t.Fatalf("expected no reason for explicit known severity, got %#v", assessment)
+		}
+	})
+
+	t.Run("sets override reason for unknown accepted finding", func(t *testing.T) {
+		t.Parallel()
+
+		assessment := reportSeverityFromEvaluated(evaluatedVuln{
+			Vuln:     vulnAssessment{ID: "GO-2", Reachable: true},
+			Override: &riskOverride{ID: "GO-2", Reason: "accepted", ExpiresOn: time.Now().UTC()},
+		})
+
+		if assessment.Reason != unknownOverrideReason {
+			t.Fatalf("expected override unknown reason, got %#v", assessment)
+		}
+		if assessment.Source != "GO-2" {
+			t.Fatalf("expected source fallback to vuln ID, got %#v", assessment)
+		}
+	})
+}
+
+func TestReportFindingFromEvaluatedAlwaysIncludesSeverity(t *testing.T) {
+	t.Parallel()
+
+	finding := reportFindingFromEvaluated(evaluatedVuln{
+		Vuln: vulnAssessment{ID: "GO-MISSING", Summary: "missing assessment"},
+	})
+
+	if finding.Severity == nil {
+		t.Fatal("expected report finding to always include severity")
+	}
+	if finding.Severity.Level != severityUnknown {
+		t.Fatalf("expected UNKNOWN fallback severity, got %#v", finding.Severity)
+	}
+	if finding.Severity.Source != "GO-MISSING" {
+		t.Fatalf("expected source fallback, got %#v", finding.Severity)
+	}
+	if finding.Severity.Reason == "" {
+		t.Fatalf("expected unknown reason fallback, got %#v", finding.Severity)
+	}
+}
+
 func TestTruncatedInfoIDs(t *testing.T) {
 	t.Parallel()
 
