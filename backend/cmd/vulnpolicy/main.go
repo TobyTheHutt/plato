@@ -14,17 +14,21 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	defaultNVDAPIBaseURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-	scanModeSource       = "source"
-	scanModeBinary       = "binary"
-	nvd401ErrorMessage   = "Missing or invalid NVD API key. Please configure a valid API key."
-	nvd403ErrorMessage   = "NVD API key valid but lacks required permissions. Please check your API key configuration."
+	defaultNVDAPIBaseURL  = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+	defaultGHSAAPIBaseURL = "https://api.github.com/advisories"
+	scanModeSource        = "source"
+	scanModeBinary        = "binary"
+	nvd401ErrorMessage    = "Missing or invalid NVD API key. Please configure a valid API key."
+	nvd403ErrorMessage    = "NVD API key valid but lacks required permissions. Please check your API key configuration."
+	ghsa401ErrorMessage   = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
+	ghsa403ErrorMessage   = "GHSA token is valid but access is forbidden. Check token scope and account permissions."
 )
 
 type severity string
@@ -37,6 +41,15 @@ const (
 	severityCritical severity = "CRITICAL"
 )
 
+type severityMethod string
+
+const (
+	severityMethodUnknown severityMethod = "unknown"
+	severityMethodOSV     severityMethod = "osv"
+	severityMethodGHSA    severityMethod = "ghsa"
+	severityMethodNVD     severityMethod = "nvd"
+)
+
 type vulnAssessment struct {
 	ID            string
 	Aliases       []string
@@ -44,12 +57,15 @@ type vulnAssessment struct {
 	URL           string
 	FixedVersions []string
 	Reachable     bool
+	OSVSeverity   severityAssessment
 }
 
 type severityAssessment struct {
 	Severity severity
 	Score    float64
 	Source   string
+	Method   severityMethod
+	Reason   string
 }
 
 type evaluatedVuln struct {
@@ -78,14 +94,16 @@ type severityResolver interface {
 }
 
 type nvdSeverityResolver struct {
-	client   *http.Client
-	baseURL  string
-	apiKey   string
-	offline  bool
-	snapshot map[string]severityAssessment
-	mu       sync.RWMutex
-	cache    map[string]severityAssessment
-	errorMap map[string]error
+	client      *http.Client
+	baseURL     string
+	apiKey      string
+	ghsaBaseURL string
+	ghsaToken   string
+	offline     bool
+	snapshot    map[string]severityAssessment
+	mu          sync.RWMutex
+	cache       map[string]severityAssessment
+	errorMap    map[string]error
 }
 
 type govulnEvent struct {
@@ -94,11 +112,14 @@ type govulnEvent struct {
 }
 
 type govulnOSV struct {
-	ID               string   `json:"id"`
-	Aliases          []string `json:"aliases"`
-	Summary          string   `json:"summary"`
+	ID               string      `json:"id"`
+	Aliases          []string    `json:"aliases"`
+	Summary          string      `json:"summary"`
+	Severity         interface{} `json:"severity"`
 	DatabaseSpecific struct {
-		URL string `json:"url"`
+		URL      string  `json:"url"`
+		Severity string  `json:"severity"`
+		Score    float64 `json:"score"`
 	} `json:"database_specific"`
 }
 
@@ -148,6 +169,27 @@ type nvdMetric struct {
 	} `json:"cvssData"`
 }
 
+type ghsaResponse struct {
+	GHSAID         string      `json:"ghsa_id"`
+	Severity       string      `json:"severity"`
+	CVSS           ghsaCVSS    `json:"cvss"`
+	CVSSSeverities ghsaSevData `json:"cvss_severities"`
+}
+
+type ghsaCVSS struct {
+	Score interface{} `json:"score"`
+}
+
+type ghsaSevData struct {
+	CVSSV3 ghsaCVSSData `json:"cvss_v3"`
+	CVSSV4 ghsaCVSSData `json:"cvss_v4"`
+}
+
+type ghsaCVSSData struct {
+	Score    interface{} `json:"score"`
+	Severity string      `json:"severity"`
+}
+
 type severitySnapshotFile struct {
 	CVEs map[string]severitySnapshotEntry `json:"cves"`
 }
@@ -164,9 +206,11 @@ func main() {
 	excludeInput := flag.String("exclude-input", "", "optional path to govulncheck JSON output whose vulnerabilities should be excluded")
 	nvdAPIBaseURL := flag.String("nvd-api-base-url", defaultNVDAPIBaseURL, "NVD CVE API base URL")
 	nvdAPIKeyFile := flag.String("nvd-api-key-file", "", "path to file containing NVD API key")
+	ghsaAPIBaseURL := flag.String("ghsa-api-base-url", defaultGHSAAPIBaseURL, "GHSA advisory API base URL")
+	ghsaTokenFile := flag.String("ghsa-token-file", "", "path to file containing optional GHSA API token")
 	severitySnapshot := flag.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON")
-	offlineMode := flag.Bool("offline", false, "disable live NVD lookups and use pinned snapshot data only")
-	nvdTimeout := flag.Duration("nvd-timeout", 15*time.Second, "timeout per NVD API request")
+	offlineMode := flag.Bool("offline", false, "disable live GHSA and NVD lookups and use pinned snapshot data only")
+	nvdTimeout := flag.Duration("nvd-timeout", 15*time.Second, "timeout per severity API request")
 	flag.Parse()
 
 	if strings.TrimSpace(*inputPath) == "" {
@@ -212,6 +256,11 @@ func main() {
 		exitf("error: resolve NVD API key: %v", err)
 	}
 
+	ghsaToken, err := resolveGHSAToken(*ghsaTokenFile)
+	if err != nil {
+		exitf("error: resolve GHSA token: %v", err)
+	}
+
 	snapshot, err := loadSeveritySnapshot(*severitySnapshot)
 	if err != nil {
 		exitf("error: load severity snapshot: %v", err)
@@ -225,12 +274,14 @@ func main() {
 		client: &http.Client{
 			Timeout: *nvdTimeout,
 		},
-		baseURL:  *nvdAPIBaseURL,
-		apiKey:   apiKey,
-		offline:  *offlineMode,
-		snapshot: snapshot,
-		cache:    make(map[string]severityAssessment),
-		errorMap: make(map[string]error),
+		baseURL:     *nvdAPIBaseURL,
+		apiKey:      apiKey,
+		ghsaBaseURL: *ghsaAPIBaseURL,
+		ghsaToken:   ghsaToken,
+		offline:     *offlineMode,
+		snapshot:    snapshot,
+		cache:       make(map[string]severityAssessment),
+		errorMap:    make(map[string]error),
 	}
 
 	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, time.Now().UTC())
@@ -271,6 +322,9 @@ func parseGovulncheckOutputWithMode(reader io.Reader, scanMode string) ([]vulnAs
 			}
 			if strings.TrimSpace(event.OSV.DatabaseSpecific.URL) != "" {
 				entry.URL = strings.TrimSpace(event.OSV.DatabaseSpecific.URL)
+			}
+			if severityValue, ok := resolveOSVSeverity(*event.OSV); ok && betterSeverity(severityValue, entry.OSVSeverity) {
+				entry.OSVSeverity = severityValue
 			}
 		}
 
@@ -575,6 +629,27 @@ func resolveNVDAPIKey(apiKeyFile string) (string, error) {
 	return apiKey, nil
 }
 
+func resolveGHSAToken(tokenFile string) (string, error) {
+	trimmedPath := strings.TrimSpace(tokenFile)
+	if trimmedPath == "" {
+		token := strings.TrimSpace(os.Getenv("GHSA_TOKEN"))
+		if token != "" {
+			return token, nil
+		}
+		return strings.TrimSpace(os.Getenv("GITHUB_TOKEN")), nil
+	}
+
+	rawValue, err := os.ReadFile(trimmedPath)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(rawValue))
+	if token == "" {
+		return "", fmt.Errorf("GHSA token file %q is empty", trimmedPath)
+	}
+	return token, nil
+}
+
 func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
 	trimmedPath := strings.TrimSpace(path)
 	if trimmedPath == "" {
@@ -603,6 +678,7 @@ func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
 			Severity: severityValue,
 			Score:    entry.Score,
 			Source:   normalizedID,
+			Method:   severityMethodNVD,
 		}
 	}
 
@@ -610,24 +686,111 @@ func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
 }
 
 func (resolver *nvdSeverityResolver) Resolve(ctx context.Context, vuln vulnAssessment) (severityAssessment, error) {
-	candidateCVEs := collectCVEIDs(vuln)
-	if len(candidateCVEs) == 0 {
-		return severityAssessment{Severity: severityUnknown}, nil
+	if osvSeverity, ok := resolvedOSVSeverity(vuln); ok {
+		return osvSeverity, nil
 	}
 
-	best := severityAssessment{Severity: severityUnknown}
-	var joinedErr error
-	for _, cveID := range candidateCVEs {
-		assessment, err := resolver.resolveCVE(ctx, cveID)
+	ghsaCandidates := collectGHSAIDs(vuln)
+	ghsaResult := resolver.resolveBestFromCandidates(ctx, ghsaCandidates, resolver.resolveGHSA)
+	if ghsaResult.Resolved {
+		return ghsaResult.Best, ghsaResult.LookupErr
+	}
+
+	cveCandidates := collectCVEIDs(vuln)
+	nvdResult := resolver.resolveBestFromCandidates(ctx, cveCandidates, resolver.resolveCVE)
+	joinedErr := errors.Join(ghsaResult.LookupErr, nvdResult.LookupErr)
+	if nvdResult.Resolved {
+		return nvdResult.Best, joinedErr
+	}
+
+	reason := buildUnknownSeverityReason(ghsaResult, nvdResult)
+	source := unknownSeveritySource(vuln, ghsaCandidates, cveCandidates)
+	assessment := unknownSeverityAssessmentWithReason(source, reason, severityMethodUnknown)
+	return assessment, joinedErr
+}
+
+type sourceResolutionResult struct {
+	Best            severityAssessment
+	LookupErr       error
+	HasCandidates   bool
+	Resolved        bool
+	ReturnedUnknown bool
+}
+
+func (resolver *nvdSeverityResolver) resolveBestFromCandidates(
+	ctx context.Context,
+	candidates []string,
+	lookup func(context.Context, string) (severityAssessment, error),
+) sourceResolutionResult {
+	result := sourceResolutionResult{
+		Best:          severityAssessment{Severity: severityUnknown},
+		HasCandidates: len(candidates) > 0,
+	}
+	for _, candidateID := range candidates {
+		assessment, err := lookup(ctx, candidateID)
 		if err != nil {
-			joinedErr = errors.Join(joinedErr, err)
+			result.LookupErr = errors.Join(result.LookupErr, err)
 			continue
 		}
-		if betterSeverity(assessment, best) {
-			best = assessment
+		if assessment.Severity == severityUnknown {
+			result.ReturnedUnknown = true
+			continue
 		}
+		if !result.Resolved || betterSeverity(assessment, result.Best) {
+			result.Best = assessment
+		}
+		result.Resolved = true
 	}
-	return best, joinedErr
+	return result
+}
+
+func buildUnknownSeverityReason(ghsaResult, nvdResult sourceResolutionResult) string {
+	if !ghsaResult.HasCandidates && !nvdResult.HasCandidates {
+		return "OSV severity unavailable in govulncheck input, no CVE/GHSA aliases found"
+	}
+
+	reasons := []string{"OSV severity unavailable in govulncheck input"}
+	ghsaReason := sourceUnknownReason("GHSA", ghsaResult, "no GHSA aliases found")
+	if ghsaReason != "" {
+		reasons = append(reasons, ghsaReason)
+	}
+	nvdReason := sourceUnknownReason("NVD", nvdResult, "no CVE aliases found")
+	if nvdReason != "" {
+		reasons = append(reasons, nvdReason)
+	}
+	return strings.Join(reasons, ", ")
+}
+
+func sourceUnknownReason(sourceName string, result sourceResolutionResult, noAliasMessage string) string {
+	if !result.HasCandidates {
+		return noAliasMessage
+	}
+	if result.ReturnedUnknown {
+		return fmt.Sprintf("%s lookup returned no severity data", sourceName)
+	}
+	return fmt.Sprintf("%s lookup failed", sourceName)
+}
+
+func unknownSeveritySource(vuln vulnAssessment, ghsaCandidates, cveCandidates []string) string {
+	if len(ghsaCandidates) > 0 {
+		return ghsaCandidates[0]
+	}
+	if len(cveCandidates) > 0 {
+		return cveCandidates[0]
+	}
+	return normalizeID(vuln.ID)
+}
+
+func resolvedOSVSeverity(vuln vulnAssessment) (severityAssessment, bool) {
+	if vuln.OSVSeverity.Severity == "" || vuln.OSVSeverity.Severity == severityUnknown {
+		return severityAssessment{}, false
+	}
+	assessment := vuln.OSVSeverity
+	if assessment.Source == "" {
+		assessment.Source = normalizeID(vuln.ID)
+	}
+	assessment.Method = severityMethodOSV
+	return assessment, true
 }
 
 func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID string) (severityAssessment, error) {
@@ -741,6 +904,12 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 			Severity: severityValue,
 			Score:    score,
 			Source:   normalizedCVE,
+			Method:   severityMethodNVD,
+		}
+		if severityValue == severityUnknown {
+			finalErr := fmt.Errorf("NVD API returned no severity data for %s", normalizedCVE)
+			resolver.writeCache(normalizedCVE, assessment, finalErr)
+			return assessment, finalErr
 		}
 		resolver.writeCache(normalizedCVE, assessment, nil)
 		return assessment, nil
@@ -749,6 +918,124 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 	assessment := unknownSeverityAssessment(normalizedCVE)
 	finalErr := fmt.Errorf("exhausted NVD resolution attempts for %s", normalizedCVE)
 	resolver.writeCache(normalizedCVE, assessment, finalErr)
+	return assessment, finalErr
+}
+
+func (resolver *nvdSeverityResolver) resolveGHSA(ctx context.Context, ghsaID string) (severityAssessment, error) {
+	normalizedGHSA := normalizeID(ghsaID)
+	if cached, cachedErr, ok := resolver.readCache(normalizedGHSA); ok {
+		return cached, cachedErr
+	}
+
+	if resolver.offline {
+		assessment := unknownSeverityAssessment(normalizedGHSA)
+		err := fmt.Errorf("offline mode enabled and %s requires live GHSA lookup", normalizedGHSA)
+		resolver.writeCache(normalizedGHSA, assessment, err)
+		return assessment, err
+	}
+
+	requestURL, err := advisoryLookupURL(resolver.ghsaBaseURL, normalizedGHSA)
+	if err != nil {
+		assessment := unknownSeverityAssessment(normalizedGHSA)
+		resolver.writeCache(normalizedGHSA, assessment, err)
+		return assessment, err
+	}
+
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+		if requestErr != nil {
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, requestErr)
+			return assessment, requestErr
+		}
+		request.Header.Set("Accept", "application/vnd.github+json")
+		request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
+
+		tokenConfigured := false
+		if resolver.ghsaToken != "" {
+			request.Header.Set("Authorization", "Bearer "+resolver.ghsaToken)
+			tokenConfigured = true
+		}
+
+		response, responseErr := resolver.client.Do(request)
+		if responseErr != nil {
+			if attempt < maxAttempts {
+				sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured)
+				if sleepErr != nil {
+					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				}
+				continue
+			}
+
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, responseErr)
+			return assessment, responseErr
+		}
+
+		if response.StatusCode == http.StatusUnauthorized {
+			response.Body.Close()
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			finalErr := errors.New(ghsa401ErrorMessage)
+			resolver.writeCache(normalizedGHSA, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		if response.StatusCode == http.StatusForbidden {
+			response.Body.Close()
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			finalErr := errors.New(ghsa403ErrorMessage)
+			resolver.writeCache(normalizedGHSA, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
+			response.Body.Close()
+			if attempt < maxAttempts {
+				sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured)
+				if sleepErr != nil {
+					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				}
+				continue
+			}
+
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			finalErr := retryableGHSAStatusError(response.StatusCode, normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		if response.StatusCode != http.StatusOK {
+			response.Body.Close()
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			finalErr := fmt.Errorf("GHSA API returned HTTP %d for %s", response.StatusCode, normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, finalErr)
+			return assessment, finalErr
+		}
+
+		var payload ghsaResponse
+		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+		response.Body.Close()
+		if decodeErr != nil {
+			assessment := unknownSeverityAssessment(normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, decodeErr)
+			return assessment, decodeErr
+		}
+
+		assessment := bestGHSASeverity(payload, normalizedGHSA)
+		if assessment.Severity == severityUnknown {
+			finalErr := fmt.Errorf("GHSA API returned no severity data for %s", normalizedGHSA)
+			resolver.writeCache(normalizedGHSA, assessment, finalErr)
+			return assessment, finalErr
+		}
+		resolver.writeCache(normalizedGHSA, assessment, nil)
+		return assessment, nil
+	}
+
+	assessment := unknownSeverityAssessment(normalizedGHSA)
+	finalErr := fmt.Errorf("exhausted GHSA resolution attempts for %s", normalizedGHSA)
+	resolver.writeCache(normalizedGHSA, assessment, finalErr)
 	return assessment, finalErr
 }
 
@@ -763,11 +1050,214 @@ func retryableNVDStatusError(statusCode int, cveID string) error {
 	return fmt.Errorf("NVD API returned HTTP %d for %s", statusCode, cveID)
 }
 
+func retryableGHSAStatusError(statusCode int, ghsaID string) error {
+	if statusCode == http.StatusTooManyRequests {
+		return fmt.Errorf(
+			"GHSA API returned HTTP 429 for %s. This indicates rate limiting. "+
+				"Retry later, use unauthenticated fallback, or configure GHSA_TOKEN_FILE for higher request limits",
+			ghsaID,
+		)
+	}
+	return fmt.Errorf("GHSA API returned HTTP %d for %s", statusCode, ghsaID)
+}
+
 func unknownSeverityAssessment(source string) severityAssessment {
+	return unknownSeverityAssessmentWithReason(source, "", severityMethodUnknown)
+}
+
+func unknownSeverityAssessmentWithReason(source, reason string, method severityMethod) severityAssessment {
 	return severityAssessment{
 		Severity: severityUnknown,
 		Source:   source,
+		Method:   method,
+		Reason:   reason,
 	}
+}
+
+func advisoryLookupURL(baseURL, advisoryID string) (string, error) {
+	trimmedBase := strings.TrimSpace(baseURL)
+	if trimmedBase == "" {
+		return "", fmt.Errorf("advisory base URL is required")
+	}
+
+	parsedURL, err := url.Parse(trimmedBase)
+	if err != nil {
+		return "", err
+	}
+
+	basePath := strings.TrimRight(parsedURL.Path, "/")
+	parsedURL.Path = basePath + "/" + url.PathEscape(advisoryID)
+	return parsedURL.String(), nil
+}
+
+func bestGHSASeverity(payload ghsaResponse, fallbackSource string) severityAssessment {
+	source := normalizeID(payload.GHSAID)
+	if source == "" {
+		source = normalizeID(fallbackSource)
+	}
+
+	best := severityAssessment{
+		Severity: severityUnknown,
+		Source:   source,
+		Method:   severityMethodGHSA,
+	}
+
+	topLevelScore, hasTopLevelScore := parseScore(payload.CVSS.Score)
+	if hasTopLevelScore {
+		candidate := severityAssessment{
+			Severity: normalizeSeverity(payload.Severity, topLevelScore),
+			Score:    topLevelScore,
+			Source:   source,
+			Method:   severityMethodGHSA,
+		}
+		if betterSeverity(candidate, best) {
+			best = candidate
+		}
+	} else {
+		candidate := severityAssessment{
+			Severity: normalizeSeverity(payload.Severity, 0),
+			Source:   source,
+			Method:   severityMethodGHSA,
+		}
+		if betterSeverity(candidate, best) {
+			best = candidate
+		}
+	}
+
+	for _, candidate := range []ghsaCVSSData{payload.CVSSSeverities.CVSSV4, payload.CVSSSeverities.CVSSV3} {
+		score, _ := parseScore(candidate.Score)
+		next := severityAssessment{
+			Severity: normalizeSeverity(candidate.Severity, score),
+			Score:    score,
+			Source:   source,
+			Method:   severityMethodGHSA,
+		}
+		if betterSeverity(next, best) {
+			best = next
+		}
+	}
+
+	return best
+}
+
+func parseScore(value interface{}) (float64, bool) {
+	switch typedValue := value.(type) {
+	case float64:
+		return typedValue, true
+	case float32:
+		return float64(typedValue), true
+	case int:
+		return float64(typedValue), true
+	case int32:
+		return float64(typedValue), true
+	case int64:
+		return float64(typedValue), true
+	case json.Number:
+		parsedValue, err := typedValue.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return parsedValue, true
+	case string:
+		parsedValue, err := strconv.ParseFloat(strings.TrimSpace(typedValue), 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsedValue, true
+	default:
+		return 0, false
+	}
+}
+
+func resolveOSVSeverity(osv govulnOSV) (severityAssessment, bool) {
+	source := normalizeID(osv.ID)
+	best := severityAssessment{
+		Severity: severityUnknown,
+		Source:   source,
+		Method:   severityMethodOSV,
+	}
+
+	pushCandidate := func(rawSeverity string, score float64) {
+		candidate := severityAssessment{
+			Severity: normalizeSeverity(rawSeverity, score),
+			Score:    score,
+			Source:   source,
+			Method:   severityMethodOSV,
+		}
+		if betterSeverity(candidate, best) {
+			best = candidate
+		}
+	}
+
+	pushCandidate(osv.DatabaseSpecific.Severity, osv.DatabaseSpecific.Score)
+	for _, severityValue := range extractOSVSeverityCandidates(osv.Severity) {
+		pushCandidate(severityValue.Severity, severityValue.Score)
+	}
+
+	if best.Severity == severityUnknown {
+		return severityAssessment{}, false
+	}
+	return best, true
+}
+
+type severityCandidate struct {
+	Severity string
+	Score    float64
+}
+
+func extractOSVSeverityCandidates(value interface{}) []severityCandidate {
+	switch typedValue := value.(type) {
+	case string:
+		return []severityCandidate{{Severity: typedValue}}
+	case map[string]interface{}:
+		return []severityCandidate{candidateFromMap(typedValue)}
+	case []interface{}:
+		candidates := make([]severityCandidate, 0, len(typedValue))
+		for _, item := range typedValue {
+			switch nested := item.(type) {
+			case string:
+				candidates = append(candidates, severityCandidate{Severity: nested})
+			case map[string]interface{}:
+				candidates = append(candidates, candidateFromMap(nested))
+			}
+		}
+		return candidates
+	default:
+		return nil
+	}
+}
+
+func candidateFromMap(value map[string]interface{}) severityCandidate {
+	rawSeverity := ""
+	rawSeverityValue, hasRawSeverity := value["severity"].(string)
+	if hasRawSeverity {
+		rawSeverity = rawSeverityValue
+	}
+	score, hasScore := parseScore(value["score"])
+	if hasScore {
+		return severityCandidate{Severity: rawSeverity, Score: score}
+	}
+	scoreText, hasScoreText := value["score"].(string)
+	if !hasScoreText {
+		return severityCandidate{Severity: rawSeverity}
+	}
+	return severityCandidate{Severity: rawSeverity, Score: scoreFromCVSSText(scoreText)}
+}
+
+func scoreFromCVSSText(rawValue string) float64 {
+	parts := strings.Split(rawValue, "/")
+	for _, part := range parts {
+		trimmedPart := strings.TrimSpace(part)
+		if !strings.HasPrefix(trimmedPart, "SCORE:") {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(strings.TrimPrefix(trimmedPart, "SCORE:"), 64)
+		if err != nil {
+			continue
+		}
+		return parsed
+	}
+	return 0
 }
 
 func sleepWithBackoff(ctx context.Context, attempt int, apiKeyConfigured bool) error {
@@ -819,6 +1309,14 @@ func addQueryParam(rawURL, key, value string) (string, error) {
 }
 
 func collectCVEIDs(vuln vulnAssessment) []string {
+	return collectIDsWithPrefix(vuln, "CVE-")
+}
+
+func collectGHSAIDs(vuln vulnAssessment) []string {
+	return collectIDsWithPrefix(vuln, "GHSA-")
+}
+
+func collectIDsWithPrefix(vuln vulnAssessment, prefix string) []string {
 	candidates := make([]string, 0, len(vuln.Aliases)+1)
 	candidates = append(candidates, vuln.ID)
 	candidates = append(candidates, vuln.Aliases...)
@@ -827,7 +1325,7 @@ func collectCVEIDs(vuln vulnAssessment) []string {
 	seen := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		normalized := normalizeID(candidate)
-		if !strings.HasPrefix(normalized, "CVE-") {
+		if !strings.HasPrefix(normalized, prefix) {
 			continue
 		}
 		if _, exists := seen[normalized]; exists {
@@ -996,6 +1494,12 @@ func printEvaluated(item evaluatedVuln) {
 	}
 	if item.Severity.Source != "" {
 		fmt.Printf("    severity source: %s\n", item.Severity.Source)
+	}
+	if item.Severity.Method != "" {
+		fmt.Printf("    severity method: %s\n", item.Severity.Method)
+	}
+	if item.Severity.Reason != "" {
+		fmt.Printf("    severity reason: %s\n", item.Severity.Reason)
 	}
 	if len(item.Vuln.FixedVersions) > 0 {
 		fmt.Printf("    fixed versions: %s\n", strings.Join(item.Vuln.FixedVersions, ", "))

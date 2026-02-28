@@ -333,6 +333,10 @@ Policy:
 - Binary scan: `MEDIUM` and `LOW` vulnerabilities in built artifacts emit warnings
 - Binary output is deduplicated against source reachable findings to avoid repeated actionable IDs in CI logs
 - CI output labels each pass as `source mode` or `binary mode`
+- Theoretical severity resolution order is `OSV -> GHSA -> NVD -> UNKNOWN`
+- Runtime behavior currently starts at GHSA and then falls back to NVD because `govulncheck` OSV input does not include usable severity fields
+- Output includes both `severity source` (for example `GHSA-...` or `CVE-...`) and `severity method` (`osv`, `ghsa`, `nvd`, or `unknown`)
+- `UNKNOWN` severity is explicit policy, and each unknown result includes `severity reason` describing attempted sources and failure causes
 
 Local usage:
 
@@ -342,7 +346,7 @@ make scan-vulnerabilities
 ```
 
 Deterministic scan modes:
-- `PLATO_VULN_SCAN_MODE=live` runs live `govulncheck` and live NVD severity lookups
+- `PLATO_VULN_SCAN_MODE=live` runs live `govulncheck` with live GHSA and NVD severity lookups
 - `PLATO_VULN_SCAN_MODE=prefer-cache` reuses cached source-mode `govulncheck` JSON from `.cache/vuln` when available, then falls back to a live source run
 - Binary mode still scans a freshly built executable in `live` and `prefer-cache` so artifact checks are always current
 - `PLATO_VULN_SCAN_MODE=snapshot` performs a fully offline check using pinned inputs, typically with pinned files tracked under `.cache/vuln` or `docs/`
@@ -355,6 +359,13 @@ Optional NVD API key path:
 - Use `NVD_API_KEY_FILE=/path/to/nvd_api_key` to load the NVD API key from a file
 - `NVD_API_KEY` is still supported as an environment variable fallback
 - Use `PLATO_VULN_NVD_API_BASE_URL` only when you need a non-default NVD API endpoint
+
+Optional GHSA token path:
+- GHSA lookups work without authentication by default
+- Use `GHSA_TOKEN_FILE=/path/to/github_token` to load a GHSA token from a file
+- `GHSA_TOKEN` and `GITHUB_TOKEN` are supported as environment variable fallbacks
+- Use `PLATO_VULN_GHSA_API_BASE_URL` only when you need a non-default GHSA API endpoint
+- GHSA rate limits are lower without auth and higher with token auth
 
 NVD API key setup:
 1. Request an API key from NVD: https://nvd.nist.gov/developers/request-an-api-key
@@ -373,6 +384,7 @@ Optional pinned snapshot mode for offline reproducibility:
 - Provide `PLATO_VULN_GOVULNCHECK_INPUT` pointing to pinned source-mode `govulncheck -json` output
 - Provide `PLATO_VULN_GOVULNCHECK_BINARY_INPUT` pointing to pinned binary-mode `govulncheck -json` output
 - Provide `PLATO_VULN_NVD_SNAPSHOT` pointing to a pinned severity file
+- Snapshot mode disables live GHSA and NVD calls
 - The severity snapshot format is:
 
 ```json

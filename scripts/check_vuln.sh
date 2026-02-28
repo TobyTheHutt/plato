@@ -15,6 +15,8 @@ GOVULN_INPUT="${PLATO_VULN_GOVULNCHECK_INPUT:-}"
 BINARY_GOVULN_INPUT="${PLATO_VULN_GOVULNCHECK_BINARY_INPUT:-}"
 NVD_SNAPSHOT="${PLATO_VULN_NVD_SNAPSHOT:-}"
 NVD_API_BASE_URL="${PLATO_VULN_NVD_API_BASE_URL:-}"
+GHSA_API_BASE_URL="${PLATO_VULN_GHSA_API_BASE_URL:-}"
+GHSA_TOKEN_FILE="${PLATO_VULN_GHSA_TOKEN_FILE:-${GHSA_TOKEN_FILE:-}}"
 BINARY_ARTIFACT_DIR="${PLATO_VULN_BINARY_ARTIFACT_DIR:-$CACHE_DIR/artifacts}"
 BINARY_ARTIFACT="$BINARY_ARTIFACT_DIR/plato-backend"
 
@@ -108,8 +110,16 @@ run_policy() {
     vulnpolicy_args+=( -nvd-api-key-file "$NVD_API_KEY_FILE" )
   fi
 
+  if [ -n "$GHSA_TOKEN_FILE" ]; then
+    vulnpolicy_args+=( -ghsa-token-file "$GHSA_TOKEN_FILE" )
+  fi
+
   if [ -n "$NVD_API_BASE_URL" ]; then
     vulnpolicy_args+=( -nvd-api-base-url "$NVD_API_BASE_URL" )
+  fi
+
+  if [ -n "$GHSA_API_BASE_URL" ]; then
+    vulnpolicy_args+=( -ghsa-api-base-url "$GHSA_API_BASE_URL" )
   fi
 
   if [ -n "$NVD_SNAPSHOT" ]; then
