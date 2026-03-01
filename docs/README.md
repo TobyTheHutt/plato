@@ -3,6 +3,7 @@
 Project documentation lives here.
 
 - `security-vulnerability-overrides.json` stores temporary vulnerability risk acceptances for `govulncheck` policy gates
+- `complexity-baseline-issue-22.md` tracks baseline complexity violations for the refactoring effort
 
 `security-vulnerability-overrides.json` schema reference:
 
