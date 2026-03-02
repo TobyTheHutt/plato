@@ -472,6 +472,110 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 	}
 }
 
+func TestScopeSelectionHelperFunctions(t *testing.T) {
+	personsByID := map[string]Person{
+		"p1": {ID: "p1"},
+		"p2": {ID: "p2"},
+	}
+	groupsByID := map[string]Group{
+		"g1": {ID: "g1", MemberIDs: []string{"p1", "p2"}},
+		"g2": {ID: "g2", MemberIDs: []string{"p3"}},
+	}
+	allPersonIDs := []string{"p1", "p2"}
+	allGroupIDs := []string{"g1", "g2"}
+	allProjectIDs := []string{"pr1", "pr2"}
+	allocations := []Allocation{
+		{TargetType: AllocationTargetPerson, TargetID: "p1", ProjectID: "pr1"},
+		{TargetType: AllocationTargetGroup, TargetID: "g1", ProjectID: "pr1"},
+		{TargetType: AllocationTargetGroup, TargetID: "missing", ProjectID: "pr1"},
+		{TargetType: AllocationTargetPerson, TargetID: "p2", ProjectID: "pr2"},
+	}
+
+	selected, targetProjects, err := selectPeopleForOrganisationScope(allPersonIDs)
+	if err != nil {
+		t.Fatalf("unexpected organisation helper error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p1", "p2"})
+	if len(targetProjects) != 0 {
+		t.Fatalf("expected no target projects for organisation helper, got %v", targetProjects)
+	}
+
+	selected, _, err = selectPeopleForPersonScope(nil, allPersonIDs, personsByID)
+	if err != nil {
+		t.Fatalf("unexpected person helper all selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p1", "p2"})
+
+	selected, _, err = selectPeopleForPersonScope([]string{"p2", "p2"}, allPersonIDs, personsByID)
+	if err != nil {
+		t.Fatalf("unexpected person helper single selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p2"})
+
+	_, _, err = selectPeopleForPersonScope([]string{"missing"}, allPersonIDs, personsByID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected person helper to fail for missing person, got %v", err)
+	}
+
+	selected, _, err = selectPeopleForGroupScope(nil, allGroupIDs, groupsByID)
+	if err != nil {
+		t.Fatalf("unexpected group helper all selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p1", "p2", "p3"})
+
+	selected, _, err = selectPeopleForGroupScope([]string{"g2"}, allGroupIDs, groupsByID)
+	if err != nil {
+		t.Fatalf("unexpected group helper single selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p3"})
+
+	_, _, err = selectPeopleForGroupScope([]string{"missing"}, allGroupIDs, groupsByID)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected group helper to fail for missing group, got %v", err)
+	}
+
+	selected, targetProjects, err = selectPeopleForProjectScope(
+		[]string{"pr1"},
+		allProjectIDs,
+		personsByID,
+		groupsByID,
+		allocations,
+	)
+	if err != nil {
+		t.Fatalf("unexpected project helper scoped selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p1", "p2"})
+	if len(targetProjects) != 1 || !targetProjects["pr1"] {
+		t.Fatalf("expected only pr1 target project, got %v", targetProjects)
+	}
+
+	selected, targetProjects, err = selectPeopleForProjectScope(
+		nil,
+		allProjectIDs,
+		personsByID,
+		groupsByID,
+		allocations,
+	)
+	if err != nil {
+		t.Fatalf("unexpected project helper all selection error: %v", err)
+	}
+	assertStringSetEqual(t, selected, []string{"p1", "p2"})
+	if len(targetProjects) != 2 || !targetProjects["pr1"] || !targetProjects["pr2"] {
+		t.Fatalf("expected both project ids in target set, got %v", targetProjects)
+	}
+
+	_, _, err = selectPeopleForProjectScope(
+		[]string{"missing"},
+		allProjectIDs,
+		personsByID,
+		groupsByID,
+		allocations,
+	)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected project helper to fail for missing project, got %v", err)
+	}
+}
+
 func testProject(id string) Project {
 	return Project{
 		ID:                   id,
@@ -528,4 +632,28 @@ func assertBucket(t *testing.T, bucket ReportBucket, period string, availability
 
 func approxEqual(expected, actual, epsilon float64) bool {
 	return math.Abs(expected-actual) <= epsilon
+}
+
+func assertStringSetEqual(t *testing.T, actual []string, expected []string) {
+	t.Helper()
+
+	actualSet := make(map[string]bool, len(actual))
+	for _, value := range actual {
+		actualSet[value] = true
+	}
+
+	expectedSet := make(map[string]bool, len(expected))
+	for _, value := range expected {
+		expectedSet[value] = true
+	}
+
+	if len(actualSet) != len(expectedSet) {
+		t.Fatalf("expected %d unique values, got %d from %v", len(expectedSet), len(actualSet), actual)
+	}
+
+	for value := range expectedSet {
+		if !actualSet[value] {
+			t.Fatalf("expected value %q in %v", value, actual)
+		}
+	}
 }

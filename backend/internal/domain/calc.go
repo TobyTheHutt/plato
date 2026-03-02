@@ -3,6 +3,7 @@ package domain
 import (
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,26 @@ type allocationResolution struct {
 	endDate   time.Time
 }
 
+type calculationLookups struct {
+	personsByID            map[string]Person
+	groupsByID             map[string]Group
+	personGroupIDs         map[string][]string
+	allocationsByPerson    map[string][]personAllocation
+	orgHolidayHoursByDate  map[string]float64
+	groupUnavailableHours  map[string]float64
+	personUnavailableHours map[string]float64
+	allPersonIDs           []string
+	allGroupIDs            []string
+	allProjectIDs          []string
+}
+
+type personDayTotals struct {
+	availabilityHours float64
+	loadHours         float64
+	projectLoadHours  float64
+	freeHours         float64
+}
+
 func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 	if err := ValidateScope(input.Request.Scope); err != nil {
 		return nil, err
@@ -40,29 +61,104 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 		return nil, err
 	}
 
-	fromDate, err := time.Parse(DateLayout, input.Request.FromDate)
+	fromDate, toDate, err := parseReportDateRange(input.Request.FromDate, input.Request.ToDate)
 	if err != nil {
-		return nil, ErrValidation
-	}
-	toDate, err := time.Parse(DateLayout, input.Request.ToDate)
-	if err != nil {
-		return nil, ErrValidation
-	}
-	if toDate.Before(fromDate) {
-		return nil, ErrValidation
+		return nil, err
 	}
 
-	personsByID := make(map[string]Person, len(input.Persons))
-	allPersonIDs := make([]string, 0, len(input.Persons))
-	for _, person := range input.Persons {
+	lookups, err := buildCalculationLookups(input)
+	if err != nil {
+		return nil, err
+	}
+
+	selectedPersonIDs, targetProjectIDs, err := selectedPeopleForScope(
+		input.Request,
+		lookups.allPersonIDs,
+		lookups.allGroupIDs,
+		lookups.allProjectIDs,
+		lookups.personsByID,
+		lookups.groupsByID,
+		input.Allocations,
+	)
+	if err != nil {
+		return nil, err
+	}
+	projectEstimationHours := projectEstimationForScope(input.Request.Scope, input.Projects, targetProjectIDs)
+
+	buckets, err := calculateBuckets(
+		fromDate,
+		toDate,
+		input.Request,
+		input.Organisation.HoursPerDay,
+		projectEstimationHours,
+		selectedPersonIDs,
+		targetProjectIDs,
+		lookups,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return summarizeBuckets(buckets, input.Request.Scope), nil
+}
+
+func parseReportDateRange(fromDate, toDate string) (time.Time, time.Time, error) {
+	start, err := time.Parse(DateLayout, fromDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, ErrValidation
+	}
+
+	end, err := time.Parse(DateLayout, toDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, ErrValidation
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, ErrValidation
+	}
+
+	return start, end, nil
+}
+
+func buildCalculationLookups(input CalculationInput) (calculationLookups, error) {
+	personsByID, allPersonIDs := indexPersons(input.Persons)
+	groupsByID, allGroupIDs, personGroupIDs := indexGroups(input.Groups)
+	allProjectIDs := collectProjectIDs(input.Projects)
+
+	allocationsByPerson, err := aggregateAllocations(input.Allocations, personsByID, groupsByID)
+	if err != nil {
+		return calculationLookups{}, err
+	}
+
+	return calculationLookups{
+		personsByID:            personsByID,
+		groupsByID:             groupsByID,
+		personGroupIDs:         personGroupIDs,
+		allocationsByPerson:    allocationsByPerson,
+		orgHolidayHoursByDate:  aggregateOrgHolidayHours(input.OrgHolidays),
+		groupUnavailableHours:  aggregateGroupUnavailableHours(input.GroupUnavailability),
+		personUnavailableHours: aggregatePersonUnavailableHours(input.PersonUnavailability),
+		allPersonIDs:           allPersonIDs,
+		allGroupIDs:            allGroupIDs,
+		allProjectIDs:          allProjectIDs,
+	}, nil
+}
+
+func indexPersons(persons []Person) (map[string]Person, []string) {
+	personsByID := make(map[string]Person, len(persons))
+	allPersonIDs := make([]string, 0, len(persons))
+	for _, person := range persons {
 		personsByID[person.ID] = person
 		allPersonIDs = append(allPersonIDs, person.ID)
 	}
 
-	groupsByID := make(map[string]Group, len(input.Groups))
-	allGroupIDs := make([]string, 0, len(input.Groups))
+	return personsByID, allPersonIDs
+}
+
+func indexGroups(groups []Group) (map[string]Group, []string, map[string][]string) {
+	groupsByID := make(map[string]Group, len(groups))
+	allGroupIDs := make([]string, 0, len(groups))
 	personGroupIDs := make(map[string][]string)
-	for _, group := range input.Groups {
+	for _, group := range groups {
 		groupsByID[group.ID] = group
 		allGroupIDs = append(allGroupIDs, group.ID)
 		for _, memberID := range group.MemberIDs {
@@ -70,16 +166,28 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 		}
 	}
 
-	allProjectIDs := make([]string, 0, len(input.Projects))
-	for _, project := range input.Projects {
+	return groupsByID, allGroupIDs, personGroupIDs
+}
+
+func collectProjectIDs(projects []Project) []string {
+	allProjectIDs := make([]string, 0, len(projects))
+	for _, project := range projects {
 		allProjectIDs = append(allProjectIDs, project.ID)
 	}
 
+	return allProjectIDs
+}
+
+func aggregateAllocations(
+	allocations []Allocation,
+	personsByID map[string]Person,
+	groupsByID map[string]Group,
+) (map[string][]personAllocation, error) {
 	allocationsByPerson := make(map[string][]personAllocation)
-	for _, allocation := range input.Allocations {
-		resolved, ok, resolveErr := resolveAllocation(allocation, personsByID, groupsByID)
-		if resolveErr != nil {
-			return nil, resolveErr
+	for _, allocation := range allocations {
+		resolved, ok, err := resolveAllocation(allocation, personsByID, groupsByID)
+		if err != nil {
+			return nil, err
 		}
 		if !ok {
 			continue
@@ -95,97 +203,188 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 		}
 	}
 
+	return allocationsByPerson, nil
+}
+
+func aggregateOrgHolidayHours(holidays []OrgHoliday) map[string]float64 {
 	orgHolidayHoursByDate := make(map[string]float64)
-	for _, holiday := range input.OrgHolidays {
+	for _, holiday := range holidays {
 		orgHolidayHoursByDate[holiday.Date] += holiday.Hours
 	}
 
+	return orgHolidayHoursByDate
+}
+
+func aggregateGroupUnavailableHours(entries []GroupUnavailability) map[string]float64 {
 	groupUnavailableHours := make(map[string]float64)
-	for _, entry := range input.GroupUnavailability {
-		groupUnavailableHours[entry.GroupID+"|"+entry.Date] += entry.Hours
+	for _, entry := range entries {
+		groupUnavailableHours[compoundDateKey(entry.GroupID, entry.Date)] += entry.Hours
 	}
 
+	return groupUnavailableHours
+}
+
+func aggregatePersonUnavailableHours(entries []PersonUnavailability) map[string]float64 {
 	personUnavailableHours := make(map[string]float64)
-	for _, entry := range input.PersonUnavailability {
-		personUnavailableHours[entry.PersonID+"|"+entry.Date] += entry.Hours
+	for _, entry := range entries {
+		personUnavailableHours[compoundDateKey(entry.PersonID, entry.Date)] += entry.Hours
 	}
 
-	selectedPersonIDs, targetProjectIDs, err := selectedPeopleForScope(
-		input.Request,
-		allPersonIDs,
-		allGroupIDs,
-		allProjectIDs,
-		personsByID,
-		groupsByID,
-		input.Allocations,
-	)
-	if err != nil {
-		return nil, err
-	}
-	projectEstimationHours := projectEstimationForScope(input.Request.Scope, input.Projects, targetProjectIDs)
+	return personUnavailableHours
+}
 
+func calculateBuckets(
+	fromDate time.Time,
+	toDate time.Time,
+	request ReportRequest,
+	hoursPerDay float64,
+	projectEstimationHours float64,
+	selectedPersonIDs []string,
+	targetProjectIDs map[string]bool,
+	lookups calculationLookups,
+) (map[string]ReportBucket, error) {
 	buckets := map[string]ReportBucket{}
-
-	for current := fromDate; !current.After(toDate); current = current.AddDate(0, 0, 1) {
-		period := periodStart(current, input.Request.Granularity)
-		periodKey := period.Format(DateLayout)
+	err := iterateDateRange(fromDate, toDate, func(current time.Time) error {
+		periodKey := periodStart(current, request.Granularity).Format(DateLayout)
 		bucket := buckets[periodKey]
 		bucket.PeriodStart = periodKey
 		bucket.ProjectEstimation = projectEstimationHours
 
 		dayKey := current.Format(DateLayout)
 		for _, personID := range selectedPersonIDs {
-			person, ok := personsByID[personID]
+			person, ok := lookups.personsByID[personID]
 			if !ok {
 				continue
 			}
 
-			employmentPct, employmentErr := EmploymentPctOnDate(person, dayKey)
-			if employmentErr != nil {
-				return nil, ErrValidation
-			}
-			baseCapacity := input.Organisation.HoursPerDay * employmentPct / 100
-			if baseCapacity <= 0 {
-				continue
-			}
-
-			unavailableHours := orgHolidayHoursByDate[dayKey] + personUnavailableHours[personID+"|"+dayKey]
-			for _, groupID := range personGroupIDs[personID] {
-				unavailableHours += groupUnavailableHours[groupID+"|"+dayKey]
-			}
-			if unavailableHours < 0 {
-				unavailableHours = 0
-			}
-			if unavailableHours > baseCapacity {
-				unavailableHours = baseCapacity
+			totals, calcErr := calculatePersonAvailability(
+				personID,
+				person,
+				current,
+				dayKey,
+				request.Scope,
+				hoursPerDay,
+				lookups,
+				targetProjectIDs,
+			)
+			if calcErr != nil {
+				return calcErr
 			}
 
-			effectiveAvailability := baseCapacity - unavailableHours
-			allocationPct := 0.0
-			for _, allocation := range allocationsByPerson[personID] {
-				if input.Request.Scope == ScopeProject && !targetProjectIDs[allocation.ProjectID] {
-					continue
-				}
-				if !allocationAppliesToDate(allocation, current) {
-					continue
-				}
-				allocationPct += allocation.Percent
-			}
-
-			// Allocation percent is interpreted on full-time capacity.
-			// Capacity limits are enforced during allocation writes.
-			loadHours := input.Organisation.HoursPerDay * allocationPct / 100
-			bucket.AvailabilityHours += effectiveAvailability
-			bucket.LoadHours += loadHours
-			if input.Request.Scope == ScopeProject {
-				bucket.ProjectLoadHours += loadHours
-			}
-			bucket.FreeHours += effectiveAvailability - loadHours
+			bucket.AvailabilityHours += totals.availabilityHours
+			bucket.LoadHours += totals.loadHours
+			bucket.ProjectLoadHours += totals.projectLoadHours
+			bucket.FreeHours += totals.freeHours
 		}
 
 		buckets[periodKey] = bucket
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
+	return buckets, nil
+}
+
+func iterateDateRange(fromDate, toDate time.Time, visit func(time.Time) error) error {
+	for current := fromDate; !current.After(toDate); current = current.AddDate(0, 0, 1) {
+		if err := visit(current); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func calculatePersonAvailability(
+	personID string,
+	person Person,
+	currentDate time.Time,
+	dayKey string,
+	scope string,
+	hoursPerDay float64,
+	lookups calculationLookups,
+	targetProjectIDs map[string]bool,
+) (personDayTotals, error) {
+	employmentPct, err := EmploymentPctOnDate(person, dayKey)
+	if err != nil {
+		return personDayTotals{}, ErrValidation
+	}
+
+	baseCapacity := hoursPerDay * employmentPct / 100
+	if baseCapacity <= 0 {
+		return personDayTotals{}, nil
+	}
+
+	unavailableHours := unavailableHoursForPersonOnDate(personID, dayKey, baseCapacity, lookups)
+	effectiveAvailability := baseCapacity - unavailableHours
+	allocationPct := allocationPercentForPersonOnDate(
+		lookups.allocationsByPerson[personID],
+		currentDate,
+		scope,
+		targetProjectIDs,
+	)
+
+	// Allocation percent is interpreted on full-time capacity.
+	// Capacity limits are enforced during allocation writes.
+	loadHours := hoursPerDay * allocationPct / 100
+	totals := personDayTotals{
+		availabilityHours: effectiveAvailability,
+		loadHours:         loadHours,
+		freeHours:         effectiveAvailability - loadHours,
+	}
+	if scope == ScopeProject {
+		totals.projectLoadHours = loadHours
+	}
+
+	return totals, nil
+}
+
+func unavailableHoursForPersonOnDate(
+	personID string,
+	dayKey string,
+	baseCapacity float64,
+	lookups calculationLookups,
+) float64 {
+	unavailableHours := lookups.orgHolidayHoursByDate[dayKey]
+	unavailableHours += lookups.personUnavailableHours[compoundDateKey(personID, dayKey)]
+	for _, groupID := range lookups.personGroupIDs[personID] {
+		unavailableHours += lookups.groupUnavailableHours[compoundDateKey(groupID, dayKey)]
+	}
+
+	if unavailableHours < 0 {
+		return 0
+	}
+	if unavailableHours > baseCapacity {
+		return baseCapacity
+	}
+
+	return unavailableHours
+}
+
+func allocationPercentForPersonOnDate(
+	allocations []personAllocation,
+	date time.Time,
+	scope string,
+	targetProjectIDs map[string]bool,
+) float64 {
+	isProjectScope := scope == ScopeProject
+	total := 0.0
+	for _, allocation := range allocations {
+		if isProjectScope && !targetProjectIDs[allocation.ProjectID] {
+			continue
+		}
+		if !allocationAppliesToDate(allocation, date) {
+			continue
+		}
+		total += allocation.Percent
+	}
+
+	return total
+}
+
+func summarizeBuckets(buckets map[string]ReportBucket, scope string) []ReportBucket {
 	sortedKeys := make([]string, 0, len(buckets))
 	for key := range buckets {
 		sortedKeys = append(sortedKeys, key)
@@ -199,7 +398,7 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 		if bucket.AvailabilityHours > 0 {
 			bucket.UtilizationPct = bucket.LoadHours / bucket.AvailabilityHours * 100
 		}
-		if input.Request.Scope == ScopeProject {
+		if scope == ScopeProject {
 			cumulativeProjectLoad += bucket.ProjectLoadHours
 			bucket.ProjectLoadHours = cumulativeProjectLoad
 			if bucket.ProjectEstimation > 0 {
@@ -216,7 +415,11 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 		result = append(result, bucket)
 	}
 
-	return result, nil
+	return result
+}
+
+func compoundDateKey(id, date string) string {
+	return strconv.Itoa(len(id)) + ":" + id + ":" + strconv.Itoa(len(date)) + ":" + date
 }
 
 func selectedPeopleForScope(
@@ -230,71 +433,127 @@ func selectedPeopleForScope(
 ) ([]string, map[string]bool, error) {
 	switch request.Scope {
 	case ScopeOrganisation:
-		return append([]string{}, allPersonIDs...), map[string]bool{}, nil
+		return selectPeopleForOrganisationScope(allPersonIDs)
 	case ScopePerson:
-		ids := request.IDs
-		if len(ids) == 0 {
-			return append([]string{}, allPersonIDs...), map[string]bool{}, nil
-		}
-		selected := make([]string, 0, len(ids))
-		for _, id := range ids {
-			if _, ok := personsByID[id]; !ok {
-				return nil, nil, ErrNotFound
-			}
-			selected = append(selected, id)
-		}
-		return uniqueStrings(selected), map[string]bool{}, nil
+		return selectPeopleForPersonScope(request.IDs, allPersonIDs, personsByID)
 	case ScopeGroup:
-		ids := request.IDs
-		if len(ids) == 0 {
-			ids = allGroupIDs
-		}
-		selected := make([]string, 0)
-		for _, id := range ids {
-			group, ok := groupsByID[id]
-			if !ok {
-				return nil, nil, ErrNotFound
-			}
-			selected = append(selected, group.MemberIDs...)
-		}
-		return uniqueStrings(selected), map[string]bool{}, nil
+		return selectPeopleForGroupScope(request.IDs, allGroupIDs, groupsByID)
 	case ScopeProject:
-		ids := request.IDs
-		if len(ids) == 0 {
-			ids = allProjectIDs
-		}
-		targetProjectIDs := make(map[string]bool, len(ids))
-		allProjects := make(map[string]bool, len(allProjectIDs))
-		for _, projectID := range allProjectIDs {
-			allProjects[projectID] = true
-		}
-		for _, id := range ids {
-			if !allProjects[id] {
-				return nil, nil, ErrNotFound
-			}
-			targetProjectIDs[id] = true
-		}
-		selected := make([]string, 0)
-		for _, allocation := range allocations {
-			if targetProjectIDs[allocation.ProjectID] {
-				targetType, targetID := normalizedAllocationTarget(allocation)
-				switch targetType {
-				case AllocationTargetPerson:
-					if _, ok := personsByID[targetID]; ok {
-						selected = append(selected, targetID)
-					}
-				case AllocationTargetGroup:
-					group, ok := groupsByID[targetID]
-					if !ok {
-						continue
-					}
-					selected = append(selected, group.MemberIDs...)
-				}
-			}
-		}
-		return uniqueStrings(selected), targetProjectIDs, nil
+		return selectPeopleForProjectScope(request.IDs, allProjectIDs, personsByID, groupsByID, allocations)
 	default:
 		return nil, nil, ErrValidation
+	}
+}
+
+func selectPeopleForOrganisationScope(allPersonIDs []string) ([]string, map[string]bool, error) {
+	return append([]string{}, allPersonIDs...), map[string]bool{}, nil
+}
+
+func selectPeopleForPersonScope(
+	ids []string,
+	allPersonIDs []string,
+	personsByID map[string]Person,
+) ([]string, map[string]bool, error) {
+	if len(ids) == 0 {
+		return append([]string{}, allPersonIDs...), map[string]bool{}, nil
+	}
+
+	selected := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := personsByID[id]; !ok {
+			return nil, nil, ErrNotFound
+		}
+		selected = append(selected, id)
+	}
+
+	return uniqueStrings(selected), map[string]bool{}, nil
+}
+
+func selectPeopleForGroupScope(
+	ids []string,
+	allGroupIDs []string,
+	groupsByID map[string]Group,
+) ([]string, map[string]bool, error) {
+	if len(ids) == 0 {
+		ids = allGroupIDs
+	}
+
+	selected := make([]string, 0)
+	for _, id := range ids {
+		group, ok := groupsByID[id]
+		if !ok {
+			return nil, nil, ErrNotFound
+		}
+		selected = append(selected, group.MemberIDs...)
+	}
+
+	return uniqueStrings(selected), map[string]bool{}, nil
+}
+
+func selectPeopleForProjectScope(
+	ids []string,
+	allProjectIDs []string,
+	personsByID map[string]Person,
+	groupsByID map[string]Group,
+	allocations []Allocation,
+) ([]string, map[string]bool, error) {
+	if len(ids) == 0 {
+		ids = allProjectIDs
+	}
+
+	targetProjectIDs, err := targetProjectSet(ids, allProjectIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	selected := make([]string, 0)
+	for _, allocation := range allocations {
+		if !targetProjectIDs[allocation.ProjectID] {
+			continue
+		}
+		selected = append(selected, peopleForProjectAllocation(allocation, personsByID, groupsByID)...)
+	}
+
+	return uniqueStrings(selected), targetProjectIDs, nil
+}
+
+func targetProjectSet(ids []string, allProjectIDs []string) (map[string]bool, error) {
+	allProjects := make(map[string]bool, len(allProjectIDs))
+	for _, projectID := range allProjectIDs {
+		allProjects[projectID] = true
+	}
+
+	targetProjectIDs := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if !allProjects[id] {
+			return nil, ErrNotFound
+		}
+		targetProjectIDs[id] = true
+	}
+
+	return targetProjectIDs, nil
+}
+
+func peopleForProjectAllocation(
+	allocation Allocation,
+	personsByID map[string]Person,
+	groupsByID map[string]Group,
+) []string {
+	targetType, targetID := normalizedAllocationTarget(allocation)
+	switch targetType {
+	case AllocationTargetPerson:
+		if _, ok := personsByID[targetID]; !ok {
+			return nil
+		}
+		return []string{targetID}
+	case AllocationTargetGroup:
+		group, ok := groupsByID[targetID]
+		if !ok {
+			return nil
+		}
+		return group.MemberIDs
+	default:
+		return nil
 	}
 }
 
