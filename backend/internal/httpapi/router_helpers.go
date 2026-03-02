@@ -39,6 +39,52 @@ func splitPath(path string) []string {
 	return strings.Split(trimmed, "/")
 }
 
+func parseResourceID(segments []string) (string, bool) {
+	if len(segments) < 3 {
+		return "", false
+	}
+	return segments[2], true
+}
+
+func parseSubresource(segments []string) (string, bool) {
+	if len(segments) < 4 {
+		return "", false
+	}
+	return segments[3], true
+}
+
+func parseSubresourceID(segments []string) (string, bool) {
+	if len(segments) < 5 {
+		return "", false
+	}
+	return segments[4], true
+}
+
+func isCollectionRoute(segments []string, resource string) bool {
+	return len(segments) == 2 && segments[1] == resource
+}
+
+func isItemRoute(segments []string, resource string) bool {
+	return len(segments) >= 3 && segments[1] == resource
+}
+
+func isExactRoute(segments []string, parts ...string) bool {
+	if len(segments) != len(parts) {
+		return false
+	}
+	for idx, part := range parts {
+		if segments[idx] != part {
+			return false
+		}
+	}
+	return true
+}
+
+func isSubresourceRoute(segments []string, subresource string) bool {
+	value, ok := parseSubresource(segments)
+	return ok && value == subresource
+}
+
 func methodNotAllowed(w http.ResponseWriter) {
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }

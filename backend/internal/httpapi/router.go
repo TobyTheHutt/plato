@@ -26,6 +26,17 @@ type API struct {
 	closeErr     error
 }
 
+type apiRouteMatcher func(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool
+
+var apiRouteMatchers = []apiRouteMatcher{
+	matchOrganisationsRoute,
+	matchPersonsRoute,
+	matchProjectsRoute,
+	matchGroupsRoute,
+	matchAllocationsRoute,
+	matchReportsRoute,
+}
+
 func NewRouter(runtimeConfig RuntimeConfig) (http.Handler, error) {
 	dataFile := strings.TrimSpace(os.Getenv("PLATO_DATA_FILE"))
 	repo, err := persistence.NewFileRepository(dataFile)
@@ -129,30 +140,87 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	segments := splitPath(r.URL.Path)
-	switch {
-	case len(segments) == 2 && segments[1] == "organisations":
-		a.handleOrganisations(w, r, authCtx)
-	case len(segments) >= 3 && segments[1] == "organisations":
-		a.handleOrganisationByID(w, r, authCtx, segments)
-	case len(segments) == 2 && segments[1] == "persons":
-		a.handlePersons(w, r, authCtx)
-	case len(segments) >= 3 && segments[1] == "persons":
-		a.handlePersonByID(w, r, authCtx, segments)
-	case len(segments) == 2 && segments[1] == "projects":
-		a.handleProjects(w, r, authCtx)
-	case len(segments) >= 3 && segments[1] == "projects":
-		a.handleProjectByID(w, r, authCtx, segments)
-	case len(segments) == 2 && segments[1] == "groups":
-		a.handleGroups(w, r, authCtx)
-	case len(segments) >= 3 && segments[1] == "groups":
-		a.handleGroupByID(w, r, authCtx, segments)
-	case len(segments) == 2 && segments[1] == "allocations":
-		a.handleAllocations(w, r, authCtx)
-	case len(segments) >= 3 && segments[1] == "allocations":
-		a.handleAllocationByID(w, r, authCtx, segments)
-	case len(segments) == 3 && segments[1] == "reports" && segments[2] == "availability-load":
-		a.handleReportAvailabilityLoad(w, r, authCtx)
-	default:
-		notFound(w)
+	if a.dispatchRoute(w, r, authCtx, segments) {
+		return
 	}
+
+	notFound(w)
+}
+
+func (a *API) dispatchRoute(w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	for _, matcher := range apiRouteMatchers {
+		if matcher(a, w, r, authCtx, segments) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchOrganisationsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if isCollectionRoute(segments, "organisations") {
+		api.handleOrganisations(w, r, authCtx)
+		return true
+	}
+	if isItemRoute(segments, "organisations") {
+		api.handleOrganisationByID(w, r, authCtx, segments)
+		return true
+	}
+	return false
+}
+
+func matchPersonsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if isCollectionRoute(segments, "persons") {
+		api.handlePersons(w, r, authCtx)
+		return true
+	}
+	if isItemRoute(segments, "persons") {
+		api.handlePersonByID(w, r, authCtx, segments)
+		return true
+	}
+	return false
+}
+
+func matchProjectsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if isCollectionRoute(segments, "projects") {
+		api.handleProjects(w, r, authCtx)
+		return true
+	}
+	if isItemRoute(segments, "projects") {
+		api.handleProjectByID(w, r, authCtx, segments)
+		return true
+	}
+	return false
+}
+
+func matchGroupsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if isCollectionRoute(segments, "groups") {
+		api.handleGroups(w, r, authCtx)
+		return true
+	}
+	if isItemRoute(segments, "groups") {
+		api.handleGroupByID(w, r, authCtx, segments)
+		return true
+	}
+	return false
+}
+
+func matchAllocationsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if isCollectionRoute(segments, "allocations") {
+		api.handleAllocations(w, r, authCtx)
+		return true
+	}
+	if isItemRoute(segments, "allocations") {
+		api.handleAllocationByID(w, r, authCtx, segments)
+		return true
+	}
+	return false
+}
+
+func matchReportsRoute(api *API, w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, segments []string) bool {
+	if !isExactRoute(segments, "api", "reports", "availability-load") {
+		return false
+	}
+
+	api.handleReportAvailabilityLoad(w, r, authCtx)
+	return true
 }
