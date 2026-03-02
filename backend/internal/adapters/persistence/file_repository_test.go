@@ -51,6 +51,15 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 	t.Helper()
 	ctx := context.Background()
 
+	createRepositoryCascadeOrganisations(t, state, ctx)
+	createRepositoryCascadePersons(t, state, ctx)
+	createRepositoryCascadeProjects(t, state, ctx)
+	createRepositoryCascadeGroups(t, state, ctx)
+}
+
+func createRepositoryCascadeOrganisations(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
 	var err error
 	state.orgA, err = state.repo.CreateOrganisation(ctx, domain.Organisation{Name: "Org A", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
 	if err != nil {
@@ -77,7 +86,12 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 	if state.orgA.Name != "Org A Updated" {
 		t.Fatalf("unexpected organisation update: %#v", state.orgA)
 	}
+}
 
+func createRepositoryCascadePersons(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.personA1, err = state.repo.CreatePerson(ctx, domain.Person{OrganisationID: state.orgA.ID, Name: "Alice", EmploymentPct: 100})
 	if err != nil {
 		t.Fatalf("create person A1: %v", err)
@@ -115,7 +129,12 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found across tenant, got %v", err)
 	}
+}
 
+func createRepositoryCascadeProjects(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.projectA1, err = state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project A1"})
 	if err != nil {
 		t.Fatalf("create project A1: %v", err)
@@ -144,7 +163,12 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 	if len(projects) != 2 {
 		t.Fatalf("expected 2 projects in org A, got %d", len(projects))
 	}
+}
 
+func createRepositoryCascadeGroups(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.groupA, err = state.repo.CreateGroup(ctx, domain.Group{OrganisationID: state.orgA.ID, Name: "Team A", MemberIDs: []string{state.personA1.ID, state.personA1.ID}})
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -177,6 +201,14 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 	ctx := context.Background()
+
+	createRepositoryCascadeAllocations(t, state, ctx)
+	createRepositoryCascadeCalendarEntries(t, state, ctx)
+	verifyRepositoryCascadeAllocationAndCalendarLists(t, state, ctx)
+}
+
+func createRepositoryCascadeAllocations(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
 
 	var err error
 	state.allocationA1, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA1.ID, ProjectID: state.projectA1.ID, Percent: 40})
@@ -218,7 +250,12 @@ func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *reposito
 	if allocationRead.Percent != 45 {
 		t.Fatalf("unexpected allocation read: %+v", allocationRead)
 	}
+}
 
+func createRepositoryCascadeCalendarEntries(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.holiday, err = state.repo.CreateOrgHoliday(ctx, domain.OrgHoliday{OrganisationID: state.orgA.ID, Date: "2026-01-01", Hours: 8})
 	if err != nil {
 		t.Fatalf("create holiday: %v", err)
@@ -248,6 +285,10 @@ func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *reposito
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected scoped person unavailability daily cap validation failure, got %v", err)
 	}
+}
+
+func verifyRepositoryCascadeAllocationAndCalendarLists(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
 
 	allocations, err := state.repo.ListAllocations(ctx, state.orgA.ID)
 	if err != nil {

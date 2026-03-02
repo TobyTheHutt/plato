@@ -260,6 +260,25 @@ Frontend lint quality gates are also enforced for maintainability:
 Current transitional exception:
 - `frontend/src/App.tsx` has a temporary higher complexity cap of 45 and no `max-lines-per-function` cap until it is split into smaller components
 
+### Backend Complexity Exceptions
+
+There are currently no active backend complexity exceptions.
+The canonical tracking location for backend complexity exceptions is this section in `README.md`.
+Any backend `nolint` for `cyclop`, `gocyclo`, or `gocognit` must point to one entry here.
+Use this inline format directly above the affected function:
+- `//nolint:gocyclo // BCE-YYYY-NN: narrow reason`
+- Replace `gocyclo` with the exact linter names used
+- Keep the BCE ID at the start of the explanation so auditors can map code comments to this section
+
+Required entry template:
+- Exception ID: `BCE-YYYY-NN`
+- Component or Module: for example `internal/service`
+- File and Function: exact function names
+- Narrow justification: why refactoring now would reduce readability or maintainability
+- Follow-up refactor issue or PR: link or issue number
+- Owner: responsible maintainer
+- Expiration or Review date: `YYYY-MM-DD`
+
 `govet` shadow analysis is enabled for backend production and test code.
 
 Backend variable shadowing guidelines:

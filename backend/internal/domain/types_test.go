@@ -7,6 +7,20 @@ import (
 )
 
 func TestValidationHelpers(t *testing.T) {
+	t.Run("BasicValidationHelpers", func(t *testing.T) {
+		testBasicValidationHelpers(t)
+	})
+	t.Run("AllocationTargetTypeValidation", func(t *testing.T) {
+		testAllocationTargetTypeValidation(t)
+	})
+	t.Run("EmploymentPctOnDateValidation", func(t *testing.T) {
+		testEmploymentPctOnDateValidation(t)
+	})
+}
+
+func testBasicValidationHelpers(t *testing.T) {
+	t.Helper()
+
 	if _, err := ValidateDate("2026-01-01"); err != nil {
 		t.Fatalf("expected valid date: %v", err)
 	}
@@ -46,6 +60,11 @@ func TestValidationHelpers(t *testing.T) {
 	if err := ValidateGranularity("x"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected granularity validation error, got %v", err)
 	}
+}
+
+func testAllocationTargetTypeValidation(t *testing.T) {
+	t.Helper()
+
 	if err := ValidateAllocationTargetType(AllocationTargetPerson); err != nil {
 		t.Fatalf("expected valid person allocation target: %v", err)
 	}
@@ -55,6 +74,10 @@ func TestValidationHelpers(t *testing.T) {
 	if err := ValidateAllocationTargetType("x"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected target type validation error, got %v", err)
 	}
+}
+
+func testEmploymentPctOnDateValidation(t *testing.T) {
+	t.Helper()
 
 	person := Person{
 		EmploymentPct: 80,

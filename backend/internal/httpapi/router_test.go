@@ -277,6 +277,14 @@ func validateEndToEndCRUDOrganisationPersonsProjects(t *testing.T, router http.H
 func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
+	createAndVerifyEndToEndGroupRoutes(t, router, state)
+	createAndVerifyEndToEndAllocationRoutes(t, router, state)
+	createAndVerifyEndToEndCalendarRoutes(t, router, state)
+}
+
+func createAndVerifyEndToEndGroupRoutes(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
+
 	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Team One", "member_ids": []string{state.personA}}, state.adminHeaders)
 	if createGroup.Code != http.StatusCreated {
 		t.Fatalf("expected create group success, got %d body=%s", createGroup.Code, createGroup.Body.String())
@@ -301,6 +309,10 @@ func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Han
 	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID+"/members/"+state.personB, nil, state.adminHeaders).Code; code != http.StatusOK {
 		t.Fatalf("expected remove group member success, got %d", code)
 	}
+}
+
+func createAndVerifyEndToEndAllocationRoutes(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
 
 	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(state.personA, state.projectA, 50), state.adminHeaders)
 	if createAllocation.Code != http.StatusCreated {
@@ -321,6 +333,10 @@ func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Han
 	if code := doJSONRequest(t, router, http.MethodGet, "/api/allocations", nil, state.adminHeaders).Code; code != http.StatusOK {
 		t.Fatalf("expected list allocations success, got %d", code)
 	}
+}
+
+func createAndVerifyEndToEndCalendarRoutes(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
 
 	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+state.orgID+"/holidays", map[string]any{"date": "2026-01-01", "hours": 7.5}, state.adminHeaders)
 	if createHoliday.Code != http.StatusCreated {
@@ -368,6 +384,14 @@ func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Han
 func validateEndToEndCRUDReportsAndDeletion(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
+	verifyEndToEndReportResponse(t, router, state)
+	verifyEndToEndRouterMetaEndpoints(t, router, state)
+	executeEndToEndDeletionFlow(t, router, state)
+}
+
+func verifyEndToEndReportResponse(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
+
 	report := doJSONRequest(t, router, http.MethodPost, "/api/reports/availability-load", map[string]any{
 		"scope":       "project",
 		"ids":         []string{state.projectA},
@@ -397,6 +421,10 @@ func validateEndToEndCRUDReportsAndDeletion(t *testing.T, router http.Handler, s
 	if reportPayload.Buckets[0].CompletionPct <= 0 {
 		t.Fatalf("expected project completion percent in report, got %v", reportPayload.Buckets[0].CompletionPct)
 	}
+}
+
+func verifyEndToEndRouterMetaEndpoints(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
 
 	if code := doRawRequest(t, router, http.MethodOptions, "/api/persons", nil, nil).Code; code != http.StatusNoContent {
 		t.Fatalf("expected options status 204, got %d", code)
@@ -407,6 +435,10 @@ func validateEndToEndCRUDReportsAndDeletion(t *testing.T, router http.Handler, s
 	if code := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, state.adminHeaders).Code; code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected report wrong method 405, got %d", code)
 	}
+}
+
+func executeEndToEndDeletionFlow(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
+	t.Helper()
 
 	if code := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID+"/unavailability/"+state.groupUnavailabilityID, nil, state.adminHeaders).Code; code != http.StatusNoContent {
 		t.Fatalf("expected delete group unavailability success, got %d", code)

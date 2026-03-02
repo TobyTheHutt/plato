@@ -23,19 +23,19 @@ import (
 )
 
 const (
-	defaultNVDAPIBaseURL  = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-	defaultGHSAAPIBaseURL = "https://api.github.com/advisories"
-	scanModeSource        = "source"
-	scanModeBinary        = "binary"
-	consoleInfoDisplayCap = 10
-	reportFormatVersion   = "v1"
-	reportToolName        = "vulnpolicy"
+	defaultNVDAPIBaseURL     = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+	defaultGHSAAPIBaseURL    = "https://api.github.com/advisories"
+	scanModeSource           = "source"
+	scanModeBinary           = "binary"
+	consoleInfoDisplayCap    = 10
+	reportFormatVersion      = "v1"
+	reportToolName           = "vulnpolicy"
 	unknownUnreachableReason = "Finding is not reachable so severity resolution is skipped by policy"
 	unknownOverrideReason    = "Severity resolution is skipped because a risk override matched this finding"
-	nvd401ErrorMessage    = "Missing or invalid NVD API key. Please configure a valid API key."
-	nvd403ErrorMessage    = "NVD API key valid but lacks required permissions. Please check your API key configuration."
-	ghsa401ErrorMessage   = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
-	ghsa403ErrorMessage   = "GHSA token is valid but access is forbidden. Check token scope and account permissions."
+	nvd401ErrorMessage       = "Missing or invalid NVD API key. Please configure a valid API key."
+	nvd403ErrorMessage       = "NVD API key valid but lacks required permissions. Please check your API key configuration."
+	ghsa401ErrorMessage      = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
+	ghsa403ErrorMessage      = "GHSA token is valid but access is forbidden. Check token scope and account permissions."
 )
 
 type severity string
@@ -450,32 +450,46 @@ func parseGovulncheckOutputWithMode(reader io.Reader, scanMode string) ([]vulnAs
 			return nil, err
 		}
 
-		if event.OSV != nil {
-			entry := ensureVuln(vulnByID, event.OSV.ID)
-			entry.Aliases = uniqueStrings(append(entry.Aliases, event.OSV.Aliases...))
-			if strings.TrimSpace(event.OSV.Summary) != "" {
-				entry.Summary = strings.TrimSpace(event.OSV.Summary)
-			}
-			if strings.TrimSpace(event.OSV.DatabaseSpecific.URL) != "" {
-				entry.URL = strings.TrimSpace(event.OSV.DatabaseSpecific.URL)
-			}
-			if severityValue, ok := resolveOSVSeverity(*event.OSV); ok && betterSeverity(severityValue, entry.OSVSeverity) {
-				entry.OSVSeverity = severityValue
-			}
-		}
-
-		if event.Finding != nil {
-			entry := ensureVuln(vulnByID, event.Finding.OSV)
-			fixed := strings.TrimSpace(event.Finding.FixedVersion)
-			if fixed != "" {
-				entry.FixedVersions = uniqueStrings(append(entry.FixedVersions, fixed))
-			}
-			if scanMode == scanModeBinary || findingIsReachable(event.Finding) {
-				entry.Reachable = true
-			}
-		}
+		processGovulnEvent(event, scanMode, vulnByID)
 	}
 
+	return sortedVulnAssessments(vulnByID), nil
+}
+
+func processGovulnEvent(event govulnEvent, scanMode string, vulnByID map[string]*vulnAssessment) {
+	if event.OSV != nil {
+		updateVulnFromOSV(event.OSV, vulnByID)
+	}
+	if event.Finding != nil {
+		updateVulnFromFinding(event.Finding, scanMode, vulnByID)
+	}
+}
+
+func updateVulnFromOSV(osv *govulnOSV, vulnByID map[string]*vulnAssessment) {
+	entry := ensureVuln(vulnByID, osv.ID)
+	entry.Aliases = uniqueStrings(append(entry.Aliases, osv.Aliases...))
+	if summary := strings.TrimSpace(osv.Summary); summary != "" {
+		entry.Summary = summary
+	}
+	if url := strings.TrimSpace(osv.DatabaseSpecific.URL); url != "" {
+		entry.URL = url
+	}
+	if severityValue, ok := resolveOSVSeverity(*osv); ok && betterSeverity(severityValue, entry.OSVSeverity) {
+		entry.OSVSeverity = severityValue
+	}
+}
+
+func updateVulnFromFinding(finding *govulnFinding, scanMode string, vulnByID map[string]*vulnAssessment) {
+	entry := ensureVuln(vulnByID, finding.OSV)
+	if fixed := strings.TrimSpace(finding.FixedVersion); fixed != "" {
+		entry.FixedVersions = uniqueStrings(append(entry.FixedVersions, fixed))
+	}
+	if scanMode == scanModeBinary || findingIsReachable(finding) {
+		entry.Reachable = true
+	}
+}
+
+func sortedVulnAssessments(vulnByID map[string]*vulnAssessment) []vulnAssessment {
 	result := make([]vulnAssessment, 0, len(vulnByID))
 	for _, vuln := range vulnByID {
 		sort.Strings(vuln.Aliases)
@@ -487,7 +501,7 @@ func parseGovulncheckOutputWithMode(reader io.Reader, scanMode string) ([]vulnAs
 		return result[i].ID < result[j].ID
 	})
 
-	return result, nil
+	return result
 }
 
 func normalizeScanMode(value string) (string, error) {
@@ -626,71 +640,114 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 
 	overrides := make(map[string]riskOverride, len(config.Overrides))
 	for _, item := range config.Overrides {
-		id := normalizeID(item.ID)
-		if id == "" {
-			return nil, fmt.Errorf("override id is required")
-		}
-		if _, exists := overrides[id]; exists {
-			return nil, fmt.Errorf("duplicate override id: %s", id)
-		}
-		reason := strings.TrimSpace(item.Reason)
-		if reason == "" {
-			return nil, fmt.Errorf("override %s must include a reason", id)
-		}
-		owner := strings.TrimSpace(item.Owner)
-		if owner == "" {
-			return nil, fmt.Errorf("override %s must include owner", id)
-		}
-		trackingTicket := strings.TrimSpace(item.TrackingTicket)
-		if trackingTicket == "" {
-			return nil, fmt.Errorf("override %s must include tracking_ticket", id)
-		}
-		scope := strings.TrimSpace(item.Scope)
-		if scope == "" {
-			return nil, fmt.Errorf("override %s must include scope", id)
-		}
-		expiresOn := strings.TrimSpace(item.ExpiresOn)
-		if expiresOn == "" {
-			return nil, fmt.Errorf("override %s must include expires_on", id)
-		}
-		expiryDate, parseErr := time.Parse("2006-01-02", expiresOn)
+		override, parseErr := parseOverrideInput(item)
 		if parseErr != nil {
-			return nil, fmt.Errorf("override %s has invalid expires_on %q: %w", id, expiresOn, parseErr)
+			return nil, parseErr
 		}
-		approvedBy := strings.TrimSpace(item.ApprovedBy)
-		approvedDateRaw := strings.TrimSpace(item.ApprovedDate)
-		var approvedDate *time.Time
-		if approvedDateRaw != "" {
-			parsedApprovedDate, approvedDateErr := time.Parse("2006-01-02", approvedDateRaw)
-			if approvedDateErr != nil {
-				return nil, fmt.Errorf("override %s has invalid approved_date %q: %w", id, approvedDateRaw, approvedDateErr)
-			}
-			parsedApprovedDateUTC := parsedApprovedDate.UTC()
-			approvedDate = &parsedApprovedDateUTC
+		if _, exists := overrides[override.ID]; exists {
+			return nil, fmt.Errorf("duplicate override id: %s", override.ID)
 		}
-		overrideSeverityRaw := strings.TrimSpace(item.Severity)
-		var overrideSeverity severity
-		if overrideSeverityRaw != "" {
-			parsedSeverity, severityErr := parseOverrideSeverity(overrideSeverityRaw)
-			if severityErr != nil {
-				return nil, fmt.Errorf("override %s has invalid severity %q: %w", id, overrideSeverityRaw, severityErr)
-			}
-			overrideSeverity = parsedSeverity
-		}
-		overrides[id] = riskOverride{
-			ID:             id,
-			Reason:         reason,
-			ExpiresOn:      expiryDate.UTC(),
-			Owner:          owner,
-			TrackingTicket: trackingTicket,
-			Scope:          scope,
-			ApprovedBy:     approvedBy,
-			ApprovedDate:   approvedDate,
-			Severity:       overrideSeverity,
-		}
+		overrides[override.ID] = override
 	}
 
 	return overrides, nil
+}
+
+func parseOverrideInput(item overrideInput) (riskOverride, error) {
+	id := normalizeID(item.ID)
+	if id == "" {
+		return riskOverride{}, fmt.Errorf("override id is required")
+	}
+
+	reason, err := requiredOverrideField(id, "reason", item.Reason)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	owner, err := requiredOverrideField(id, "owner", item.Owner)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	trackingTicket, err := requiredOverrideField(id, "tracking_ticket", item.TrackingTicket)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	scope, err := requiredOverrideField(id, "scope", item.Scope)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	expiresOn, err := requiredOverrideField(id, "expires_on", item.ExpiresOn)
+	if err != nil {
+		return riskOverride{}, err
+	}
+
+	expiryDate, err := parseOverrideDate(id, "expires_on", expiresOn)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	approvedDate, hasApprovedDate, err := parseOptionalOverrideDate(id, "approved_date", item.ApprovedDate)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	overrideSeverity, err := parseOptionalOverrideSeverity(id, item.Severity)
+	if err != nil {
+		return riskOverride{}, err
+	}
+	var approvedDatePtr *time.Time
+	if hasApprovedDate {
+		approvedDatePtr = &approvedDate
+	}
+
+	return riskOverride{
+		ID:             id,
+		Reason:         reason,
+		ExpiresOn:      expiryDate.UTC(),
+		Owner:          owner,
+		TrackingTicket: trackingTicket,
+		Scope:          scope,
+		ApprovedBy:     strings.TrimSpace(item.ApprovedBy),
+		ApprovedDate:   approvedDatePtr,
+		Severity:       overrideSeverity,
+	}, nil
+}
+
+func requiredOverrideField(id, name, rawValue string) (string, error) {
+	value := strings.TrimSpace(rawValue)
+	if value == "" {
+		return "", fmt.Errorf("override %s must include %s", id, name)
+	}
+	return value, nil
+}
+
+func parseOverrideDate(id, name, rawValue string) (time.Time, error) {
+	date, err := time.Parse("2006-01-02", rawValue)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("override %s has invalid %s %q: %w", id, name, rawValue, err)
+	}
+	return date, nil
+}
+
+func parseOptionalOverrideDate(id, name, rawValue string) (time.Time, bool, error) {
+	trimmed := strings.TrimSpace(rawValue)
+	if trimmed == "" {
+		return time.Time{}, false, nil
+	}
+	date, err := parseOverrideDate(id, name, trimmed)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return date.UTC(), true, nil
+}
+
+func parseOptionalOverrideSeverity(id, rawValue string) (severity, error) {
+	trimmed := strings.TrimSpace(rawValue)
+	if trimmed == "" {
+		return "", nil
+	}
+	parsedSeverity, err := parseOverrideSeverity(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("override %s has invalid severity %q: %w", id, trimmed, err)
+	}
+	return parsedSeverity, nil
 }
 
 func parseOverrideSeverity(raw string) (severity, error) {
@@ -1020,120 +1077,15 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 	}
 
 	if resolver.offline {
-		assessment := unknownSeverityAssessment(normalizedCVE)
-		err := fmt.Errorf("offline mode enabled and %s is missing from severity snapshot", normalizedCVE)
-		resolver.writeCache(normalizedCVE, assessment, err)
-		return assessment, err
+		return resolver.cacheUnknownWithError(normalizedCVE, fmt.Errorf("offline mode enabled and %s is missing from severity snapshot", normalizedCVE))
 	}
 
 	requestURL, err := addQueryParam(resolver.baseURL, "cveId", normalizedCVE)
 	if err != nil {
-		assessment := unknownSeverityAssessment(normalizedCVE)
-		resolver.writeCache(normalizedCVE, assessment, err)
-		return assessment, err
+		return resolver.cacheUnknownWithError(normalizedCVE, err)
 	}
 
-	maxAttempts := 3
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-		if requestErr != nil {
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, requestErr)
-			return assessment, requestErr
-		}
-		request.Header.Set("Accept", "application/json")
-		request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
-
-		apiKeyConfigured := false
-		if resolver.apiKey != "" {
-			request.Header.Set("apiKey", resolver.apiKey)
-			apiKeyConfigured = true
-		}
-
-		response, responseErr := resolver.client.Do(request)
-		if responseErr != nil {
-			if attempt < maxAttempts {
-				sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured)
-				if sleepErr != nil {
-					return unknownSeverityAssessment(normalizedCVE), sleepErr
-				}
-				continue
-			}
-
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, responseErr)
-			return assessment, responseErr
-		}
-
-		if response.StatusCode == http.StatusUnauthorized {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			finalErr := errors.New(nvd401ErrorMessage)
-			resolver.writeCache(normalizedCVE, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		if response.StatusCode == http.StatusForbidden {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			finalErr := errors.New(nvd403ErrorMessage)
-			resolver.writeCache(normalizedCVE, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
-			response.Body.Close()
-			if attempt < maxAttempts {
-				sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured)
-				if sleepErr != nil {
-					return unknownSeverityAssessment(normalizedCVE), sleepErr
-				}
-				continue
-			}
-
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			finalErr := retryableNVDStatusError(response.StatusCode, normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		if response.StatusCode != http.StatusOK {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			finalErr := fmt.Errorf("NVD API returned HTTP %d for %s", response.StatusCode, normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		var payload nvdResponse
-		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
-		response.Body.Close()
-		if decodeErr != nil {
-			assessment := unknownSeverityAssessment(normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, decodeErr)
-			return assessment, decodeErr
-		}
-
-		severityValue, score := bestNVDSeverity(payload)
-		assessment := severityAssessment{
-			Severity: severityValue,
-			Score:    score,
-			Source:   normalizedCVE,
-			Method:   severityMethodNVD,
-		}
-		if severityValue == severityUnknown {
-			finalErr := fmt.Errorf("NVD API returned no severity data for %s", normalizedCVE)
-			resolver.writeCache(normalizedCVE, assessment, finalErr)
-			return assessment, finalErr
-		}
-		resolver.writeCache(normalizedCVE, assessment, nil)
-		return assessment, nil
-	}
-
-	assessment := unknownSeverityAssessment(normalizedCVE)
-	finalErr := fmt.Errorf("exhausted NVD resolution attempts for %s", normalizedCVE)
-	resolver.writeCache(normalizedCVE, assessment, finalErr)
-	return assessment, finalErr
+	return resolver.resolveCVEWithRetry(ctx, normalizedCVE, requestURL)
 }
 
 func (resolver *nvdSeverityResolver) resolveGHSA(ctx context.Context, ghsaID string) (severityAssessment, error) {
@@ -1143,115 +1095,194 @@ func (resolver *nvdSeverityResolver) resolveGHSA(ctx context.Context, ghsaID str
 	}
 
 	if resolver.offline {
-		assessment := unknownSeverityAssessment(normalizedGHSA)
-		err := fmt.Errorf("offline mode enabled and %s requires live GHSA lookup", normalizedGHSA)
-		resolver.writeCache(normalizedGHSA, assessment, err)
-		return assessment, err
+		return resolver.cacheUnknownWithError(normalizedGHSA, fmt.Errorf("offline mode enabled and %s requires live GHSA lookup", normalizedGHSA))
 	}
 
 	requestURL, err := advisoryLookupURL(resolver.ghsaBaseURL, normalizedGHSA)
 	if err != nil {
-		assessment := unknownSeverityAssessment(normalizedGHSA)
-		resolver.writeCache(normalizedGHSA, assessment, err)
-		return assessment, err
+		return resolver.cacheUnknownWithError(normalizedGHSA, err)
 	}
 
-	maxAttempts := 3
+	return resolver.resolveGHSAWithRetry(ctx, normalizedGHSA, requestURL)
+}
+
+func (resolver *nvdSeverityResolver) cacheUnknownWithError(id string, err error) (severityAssessment, error) {
+	assessment := unknownSeverityAssessment(id)
+	resolver.writeCache(id, assessment, err)
+	return assessment, err
+}
+
+func (resolver *nvdSeverityResolver) resolveCVEWithRetry(ctx context.Context, normalizedCVE, requestURL string) (severityAssessment, error) {
+	const maxAttempts = 3
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
-		if requestErr != nil {
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, requestErr)
-			return assessment, requestErr
+		request, apiKeyConfigured, err := resolver.newNVDRequest(ctx, requestURL)
+		if err != nil {
+			return resolver.cacheUnknownWithError(normalizedCVE, err)
 		}
-		request.Header.Set("Accept", "application/vnd.github+json")
-		request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-		request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
-
-		tokenConfigured := false
-		if resolver.ghsaToken != "" {
-			request.Header.Set("Authorization", "Bearer "+resolver.ghsaToken)
-			tokenConfigured = true
-		}
-
-		response, responseErr := resolver.client.Do(request)
-		if responseErr != nil {
+		response, err := resolver.client.Do(request)
+		if err != nil {
 			if attempt < maxAttempts {
-				sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured)
-				if sleepErr != nil {
-					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				if sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured); sleepErr != nil {
+					return unknownSeverityAssessment(normalizedCVE), sleepErr
 				}
 				continue
 			}
-
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, responseErr)
-			return assessment, responseErr
+			return resolver.cacheUnknownWithError(normalizedCVE, err)
 		}
 
-		if response.StatusCode == http.StatusUnauthorized {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			finalErr := errors.New(ghsa401ErrorMessage)
-			resolver.writeCache(normalizedGHSA, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		if response.StatusCode == http.StatusForbidden {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			finalErr := errors.New(ghsa403ErrorMessage)
-			resolver.writeCache(normalizedGHSA, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError {
-			response.Body.Close()
+		assessment, shouldRetry, responseErr := resolver.handleNVDResponse(response, normalizedCVE)
+		if shouldRetry {
 			if attempt < maxAttempts {
-				sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured)
-				if sleepErr != nil {
-					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				if sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured); sleepErr != nil {
+					return unknownSeverityAssessment(normalizedCVE), sleepErr
 				}
 				continue
 			}
-
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			finalErr := retryableGHSAStatusError(response.StatusCode, normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, finalErr)
-			return assessment, finalErr
+			return resolver.cacheUnknownWithError(normalizedCVE, responseErr)
 		}
 
-		if response.StatusCode != http.StatusOK {
-			response.Body.Close()
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			finalErr := fmt.Errorf("GHSA API returned HTTP %d for %s", response.StatusCode, normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, finalErr)
-			return assessment, finalErr
-		}
-
-		var payload ghsaResponse
-		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
-		response.Body.Close()
-		if decodeErr != nil {
-			assessment := unknownSeverityAssessment(normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, decodeErr)
-			return assessment, decodeErr
-		}
-
-		assessment := bestGHSASeverity(payload, normalizedGHSA)
-		if assessment.Severity == severityUnknown {
-			finalErr := fmt.Errorf("GHSA API returned no severity data for %s", normalizedGHSA)
-			resolver.writeCache(normalizedGHSA, assessment, finalErr)
-			return assessment, finalErr
-		}
-		resolver.writeCache(normalizedGHSA, assessment, nil)
-		return assessment, nil
+		resolver.writeCache(normalizedCVE, assessment, responseErr)
+		return assessment, responseErr
 	}
 
-	assessment := unknownSeverityAssessment(normalizedGHSA)
-	finalErr := fmt.Errorf("exhausted GHSA resolution attempts for %s", normalizedGHSA)
-	resolver.writeCache(normalizedGHSA, assessment, finalErr)
-	return assessment, finalErr
+	return resolver.cacheUnknownWithError(normalizedCVE, fmt.Errorf("exhausted NVD resolution attempts for %s", normalizedCVE))
+}
+
+func (resolver *nvdSeverityResolver) newNVDRequest(ctx context.Context, requestURL string) (*http.Request, bool, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
+	if resolver.apiKey == "" {
+		return request, false, nil
+	}
+	request.Header.Set("apiKey", resolver.apiKey)
+	return request, true, nil
+}
+
+func (resolver *nvdSeverityResolver) handleNVDResponse(response *http.Response, normalizedCVE string) (severityAssessment, bool, error) {
+	defer response.Body.Close()
+
+	unknown := unknownSeverityAssessment(normalizedCVE)
+	switch response.StatusCode {
+	case http.StatusUnauthorized:
+		return unknown, false, errors.New(nvd401ErrorMessage)
+	case http.StatusForbidden:
+		return unknown, false, errors.New(nvd403ErrorMessage)
+	}
+
+	if shouldRetrySeverityStatus(response.StatusCode) {
+		return severityAssessment{}, true, retryableNVDStatusError(response.StatusCode, normalizedCVE)
+	}
+	if response.StatusCode != http.StatusOK {
+		return unknown, false, fmt.Errorf("NVD API returned HTTP %d for %s", response.StatusCode, normalizedCVE)
+	}
+
+	var payload nvdResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return unknown, false, err
+	}
+
+	severityValue, score := bestNVDSeverity(payload)
+	assessment := severityAssessment{
+		Severity: severityValue,
+		Score:    score,
+		Source:   normalizedCVE,
+		Method:   severityMethodNVD,
+	}
+	if severityValue == severityUnknown {
+		return assessment, false, fmt.Errorf("NVD API returned no severity data for %s", normalizedCVE)
+	}
+	return assessment, false, nil
+}
+
+func (resolver *nvdSeverityResolver) resolveGHSAWithRetry(ctx context.Context, normalizedGHSA, requestURL string) (severityAssessment, error) {
+	const maxAttempts = 3
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		request, tokenConfigured, err := resolver.newGHSARequest(ctx, requestURL)
+		if err != nil {
+			return resolver.cacheUnknownWithError(normalizedGHSA, err)
+		}
+		response, err := resolver.client.Do(request)
+		if err != nil {
+			if attempt < maxAttempts {
+				if sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured); sleepErr != nil {
+					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				}
+				continue
+			}
+			return resolver.cacheUnknownWithError(normalizedGHSA, err)
+		}
+
+		assessment, shouldRetry, responseErr := resolver.handleGHSAResponse(response, normalizedGHSA)
+		if shouldRetry {
+			if attempt < maxAttempts {
+				if sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured); sleepErr != nil {
+					return unknownSeverityAssessment(normalizedGHSA), sleepErr
+				}
+				continue
+			}
+			return resolver.cacheUnknownWithError(normalizedGHSA, responseErr)
+		}
+
+		resolver.writeCache(normalizedGHSA, assessment, responseErr)
+		return assessment, responseErr
+	}
+
+	return resolver.cacheUnknownWithError(normalizedGHSA, fmt.Errorf("exhausted GHSA resolution attempts for %s", normalizedGHSA))
+}
+
+func (resolver *nvdSeverityResolver) newGHSARequest(ctx context.Context, requestURL string) (*http.Request, bool, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
+	if resolver.ghsaToken == "" {
+		return request, false, nil
+	}
+	request.Header.Set("Authorization", "Bearer "+resolver.ghsaToken)
+	return request, true, nil
+}
+
+func (resolver *nvdSeverityResolver) handleGHSAResponse(response *http.Response, normalizedGHSA string) (severityAssessment, bool, error) {
+	defer response.Body.Close()
+
+	unknown := unknownSeverityAssessment(normalizedGHSA)
+	switch response.StatusCode {
+	case http.StatusUnauthorized:
+		return unknown, false, errors.New(ghsa401ErrorMessage)
+	case http.StatusForbidden:
+		return unknown, false, errors.New(ghsa403ErrorMessage)
+	}
+
+	if shouldRetrySeverityStatus(response.StatusCode) {
+		return severityAssessment{}, true, retryableGHSAStatusError(response.StatusCode, normalizedGHSA)
+	}
+	if response.StatusCode != http.StatusOK {
+		return unknown, false, fmt.Errorf("GHSA API returned HTTP %d for %s", response.StatusCode, normalizedGHSA)
+	}
+
+	var payload ghsaResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return unknown, false, err
+	}
+
+	assessment := bestGHSASeverity(payload, normalizedGHSA)
+	if assessment.Severity == severityUnknown {
+		return assessment, false, fmt.Errorf("GHSA API returned no severity data for %s", normalizedGHSA)
+	}
+	return assessment, false, nil
+}
+
+func shouldRetrySeverityStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
 }
 
 func retryableNVDStatusError(statusCode int, cveID string) error {

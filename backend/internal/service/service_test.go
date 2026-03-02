@@ -163,6 +163,14 @@ func validateServiceResourceFlowPeopleProjectsGroups(t *testing.T, state *servic
 	t.Helper()
 	ctx := context.Background()
 
+	createServiceResourceFlowPeople(t, state, ctx)
+	createServiceResourceFlowProjects(t, state, ctx)
+	createServiceResourceFlowGroupAndLists(t, state, ctx)
+}
+
+func createServiceResourceFlowPeople(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
 	var err error
 	state.person1, err = state.svc.CreatePerson(ctx, state.admin, domain.Person{Name: "Alice", EmploymentPct: 100})
 	if err != nil {
@@ -188,7 +196,12 @@ func validateServiceResourceFlowPeopleProjectsGroups(t *testing.T, state *servic
 	if state.person2.Name != "Bob Updated" {
 		t.Fatalf("unexpected person update: %+v", state.person2)
 	}
+}
 
+func createServiceResourceFlowProjects(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.project1, err = state.svc.CreateProject(ctx, state.admin, testProjectInput("Project One"))
 	if err != nil {
 		t.Fatalf("create project1: %v", err)
@@ -221,7 +234,12 @@ func validateServiceResourceFlowPeopleProjectsGroups(t *testing.T, state *servic
 	if len(projectList) != 2 {
 		t.Fatalf("expected 2 projects, got %d", len(projectList))
 	}
+}
 
+func createServiceResourceFlowGroupAndLists(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.group, err = state.svc.CreateGroup(ctx, state.admin, domain.Group{Name: "Team", MemberIDs: []string{state.person1.ID}})
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -264,6 +282,15 @@ func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serv
 	t.Helper()
 	ctx := context.Background()
 
+	updateServiceResourceFlowGroupMembership(t, state, ctx)
+	createServiceResourceFlowAllocations(t, state, ctx)
+	createServiceResourceFlowCalendarEntries(t, state, ctx)
+	verifyServiceResourceFlowCalendarLists(t, state, ctx)
+}
+
+func updateServiceResourceFlowGroupMembership(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
 	var err error
 	state.group, err = state.svc.AddGroupMember(ctx, state.admin, state.group.ID, state.person2.ID)
 	if err != nil {
@@ -288,7 +315,12 @@ func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serv
 	if len(state.group.MemberIDs) != 1 {
 		t.Fatalf("expected 1 member after remove, got %v", state.group.MemberIDs)
 	}
+}
 
+func createServiceResourceFlowAllocations(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.groupAllocation, err = state.svc.CreateAllocation(ctx, state.admin, testGroupAllocationInput(state.group.ID, state.project2.ID, 20))
 	if err != nil {
 		t.Fatalf("create group allocation: %v", err)
@@ -329,7 +361,12 @@ func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serv
 	if len(allocationList) != 3 {
 		t.Fatalf("expected 3 allocations, got %d", len(allocationList))
 	}
+}
 
+func createServiceResourceFlowCalendarEntries(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
+	var err error
 	state.holiday, err = state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
 	if err != nil {
 		t.Fatalf("create org holiday: %v", err)
@@ -346,6 +383,10 @@ func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serv
 	if err != nil {
 		t.Fatalf("create second person unavailability: %v", err)
 	}
+}
+
+func verifyServiceResourceFlowCalendarLists(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
 
 	holidayList, err := state.svc.ListOrgHolidays(ctx, state.user)
 	if err != nil {
@@ -475,6 +516,21 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
+	assertServiceValidationOrganisationGuards(t, svc, ctx, globalAdmin)
+
+	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Validate")
+	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
+	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
+
+	assertServiceValidationPersonGuards(t, svc, ctx, admin, user)
+	assertServiceValidationProjectAndGroupGuards(t, svc, ctx, admin)
+	assertServiceValidationTenantListGuards(t, svc, ctx)
+	assertServiceValidationErrorHelpers(t)
+}
+
+func assertServiceValidationOrganisationGuards(t *testing.T, svc *Service, ctx context.Context, globalAdmin ports.AuthContext) {
+	t.Helper()
+
 	if _, err := svc.CreateOrganisation(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.Organisation{Name: "Bad", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden create organisation for org_user, got %v", err)
 	}
@@ -487,9 +543,10 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	if _, err := svc.ListOrganisations(ctx, ports.AuthContext{}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden list organisations without role, got %v", err)
 	}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Validate")
-	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
-	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
+}
+
+func assertServiceValidationPersonGuards(t *testing.T, svc *Service, ctx context.Context, admin, user ports.AuthContext) {
+	t.Helper()
 
 	if _, err := svc.CreatePerson(ctx, user, domain.Person{Name: "X", EmploymentPct: 50}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden create person for user role, got %v", err)
@@ -501,6 +558,10 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	if _, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Bad", EmploymentPct: 150}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validation for employment percent, got %v", err)
 	}
+}
+
+func assertServiceValidationProjectAndGroupGuards(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext) {
+	t.Helper()
 
 	if _, err := svc.CreateProject(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, testProjectInput("No Org")); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden for missing tenant org, got %v", err)
@@ -520,6 +581,10 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	if _, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "", MemberIDs: nil}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validation for empty group name, got %v", err)
 	}
+}
+
+func assertServiceValidationTenantListGuards(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 
 	if _, err := svc.ListPersons(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden when tenant missing for list persons, got %v", err)
@@ -545,6 +610,10 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	if _, err := svc.ListPersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, "person_1"); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden when tenant missing for list person unavailability by person, got %v", err)
 	}
+}
+
+func assertServiceValidationErrorHelpers(t *testing.T) {
+	t.Helper()
 
 	if !IsValidationError(domain.ErrValidation) {
 		t.Fatal("expected IsValidationError to match")
@@ -827,23 +896,45 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 		t.Fatalf("setup person: %v", err)
 	}
 
-	person, err = svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
+	person = applyTimelineEmploymentChanges(t, svc, ctx, admin, person)
+	if len(person.EmploymentChanges) != 2 {
+		t.Fatalf("expected 2 employment changes, got %+v", person.EmploymentChanges)
+	}
+
+	assertEmploymentPctOnDate(t, person, "2026-04-15", 80, "expected april employment percent")
+	assertEmploymentPctOnDate(t, person, "2026-06-15", 70, "expected june employment percent")
+	assertEmploymentPctOnDate(t, person, "2026-09-01", 50, "expected september employment percent")
+
+	person, err = svc.UpdatePerson(ctx, admin, person.ID, domain.Person{Name: "Timeline Person", EmploymentPct: 90})
+	if err != nil {
+		t.Fatalf("update baseline employment percent: %v", err)
+	}
+
+	assertEmploymentPctOnDate(t, person, "2026-04-15", 90, "expected april employment percent after baseline change")
+	assertEmploymentPctOnDate(t, person, "2026-06-15", 70, "expected june employment percent after baseline change")
+	assertEmploymentPctOnDate(t, person, "2026-09-01", 50, "expected september employment percent after baseline change")
+
+	assertEmploymentTimelineUnavailabilityCaps(t, svc, ctx, admin, person.ID)
+}
+
+func applyTimelineEmploymentChanges(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, person domain.Person) domain.Person {
+	t.Helper()
+
+	if _, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
 		Name:                         "Timeline Person",
 		EmploymentPct:                60,
 		EmploymentEffectiveFromMonth: "2026-05",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("set first monthly employment change: %v", err)
 	}
-	person, err = svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
+	if _, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
 		Name:                         "Timeline Person",
 		EmploymentPct:                50,
 		EmploymentEffectiveFromMonth: "2026-08",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("set second monthly employment change: %v", err)
 	}
-	person, err = svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
+	updatedPerson, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
 		Name:                         "Timeline Person",
 		EmploymentPct:                70,
 		EmploymentEffectiveFromMonth: "2026-05",
@@ -851,73 +942,37 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replace monthly employment change for same month: %v", err)
 	}
+	return updatedPerson
+}
 
-	if len(person.EmploymentChanges) != 2 {
-		t.Fatalf("expected 2 employment changes, got %+v", person.EmploymentChanges)
-	}
+func assertEmploymentPctOnDate(t *testing.T, person domain.Person, date string, want float64, contextLabel string) {
+	t.Helper()
 
-	aprilPct, err := domain.EmploymentPctOnDate(person, "2026-04-15")
+	got, err := domain.EmploymentPctOnDate(person, date)
 	if err != nil {
-		t.Fatalf("expected april employment percent, got %v", err)
+		t.Fatalf("%s, got %v", contextLabel, err)
 	}
-	if aprilPct != 80 {
-		t.Fatalf("expected april employment percent 80, got %v", aprilPct)
+	if got != want {
+		t.Fatalf("%s %v, got %v", contextLabel, want, got)
 	}
-	junePct, err := domain.EmploymentPctOnDate(person, "2026-06-15")
-	if err != nil {
-		t.Fatalf("expected june employment percent, got %v", err)
-	}
-	if junePct != 70 {
-		t.Fatalf("expected june employment percent 70, got %v", junePct)
-	}
-	septemberPct, err := domain.EmploymentPctOnDate(person, "2026-09-01")
-	if err != nil {
-		t.Fatalf("expected september employment percent, got %v", err)
-	}
-	if septemberPct != 50 {
-		t.Fatalf("expected september employment percent 50, got %v", septemberPct)
-	}
+}
 
-	person, err = svc.UpdatePerson(ctx, admin, person.ID, domain.Person{Name: "Timeline Person", EmploymentPct: 90})
-	if err != nil {
-		t.Fatalf("update baseline employment percent: %v", err)
-	}
+func assertEmploymentTimelineUnavailabilityCaps(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, personID string) {
+	t.Helper()
 
-	aprilPct, err = domain.EmploymentPctOnDate(person, "2026-04-15")
-	if err != nil {
-		t.Fatalf("expected april employment percent after baseline change, got %v", err)
-	}
-	if aprilPct != 90 {
-		t.Fatalf("expected april employment percent 90 after baseline change, got %v", aprilPct)
-	}
-	junePct, err = domain.EmploymentPctOnDate(person, "2026-06-15")
-	if err != nil {
-		t.Fatalf("expected june employment percent after baseline change, got %v", err)
-	}
-	if junePct != 70 {
-		t.Fatalf("expected june employment percent 70 after baseline change, got %v", junePct)
-	}
-	septemberPct, err = domain.EmploymentPctOnDate(person, "2026-09-01")
-	if err != nil {
-		t.Fatalf("expected september employment percent after baseline change, got %v", err)
-	}
-	if septemberPct != 50 {
-		t.Fatalf("expected september employment percent 50 after baseline change, got %v", septemberPct)
-	}
-
-	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-04-07", Hours: 7.2})
+	_, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: personID, Date: "2026-04-07", Hours: 7.2})
 	if err != nil {
 		t.Fatalf("expected april unavailability to use 90 pct cap, got %v", err)
 	}
-	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-06-07", Hours: 6})
+	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: personID, Date: "2026-06-07", Hours: 6})
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected june unavailability above 70 pct cap to fail, got %v", err)
 	}
-	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-06-08", Hours: 5.6})
+	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: personID, Date: "2026-06-08", Hours: 5.6})
 	if err != nil {
 		t.Fatalf("expected june unavailability within 70 pct cap, got %v", err)
 	}
-	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-09-02", Hours: 4.1})
+	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: personID, Date: "2026-09-02", Hours: 4.1})
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected september unavailability above 50 pct cap to fail, got %v", err)
 	}
@@ -1030,24 +1085,38 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 		t.Fatalf("setup allocation: %v", err)
 	}
 
-	_, err = svc.GetPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, person.ID)
+	assertServiceAdditionalForbiddenReads(t, svc, ctx, person.ID, project.ID, group.ID, allocation.ID)
+	assertServiceAdditionalMissingOrgCreates(t, svc, ctx, group.ID, person.ID)
+	assertServiceAdditionalUpdateScenarios(t, svc, ctx, admin, group.ID, project.ID, person.ID, allocation.ID)
+	assertServiceAdditionalTenantGuards(t, svc, ctx, organisation.ID, group.ID, person.ID)
+	assertServiceAdditionalReportAndHelperValidation(t, svc, ctx, admin, project.ID, person.ID)
+}
+
+func assertServiceAdditionalForbiddenReads(t *testing.T, svc *Service, ctx context.Context, personID, projectID, groupID, allocationID string) {
+	t.Helper()
+
+	_, err := svc.GetPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, personID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get person without org scope, got %v", err)
 	}
-	_, err = svc.GetProject(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, project.ID)
+	_, err = svc.GetProject(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, projectID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get project without org scope, got %v", err)
 	}
-	_, err = svc.GetGroup(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, group.ID)
+	_, err = svc.GetGroup(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, groupID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get group without org scope, got %v", err)
 	}
-	_, err = svc.GetAllocation(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, allocation.ID)
+	_, err = svc.GetAllocation(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, allocationID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden get allocation without org scope, got %v", err)
 	}
+}
 
-	_, err = svc.CreatePerson(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.Person{Name: "x", EmploymentPct: 50})
+func assertServiceAdditionalMissingOrgCreates(t *testing.T, svc *Service, ctx context.Context, groupID, personID string) {
+	t.Helper()
+
+	_, err := svc.CreatePerson(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.Person{Name: "x", EmploymentPct: 50})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create person with missing org to fail, got %v", err)
 	}
@@ -1055,49 +1124,61 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create holiday with missing org to fail, got %v", err)
 	}
-	_, err = svc.CreateGroupUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.GroupUnavailability{GroupID: group.ID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreateGroupUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.GroupUnavailability{GroupID: groupID, Date: "2026-01-01", Hours: 1})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create group unavailability with missing org to fail, got %v", err)
 	}
-	_, err = svc.CreatePersonUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreatePersonUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.PersonUnavailability{PersonID: personID, Date: "2026-01-01", Hours: 1})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create person unavailability with missing org to fail, got %v", err)
 	}
+}
 
-	_, err = svc.UpdateGroup(ctx, admin, group.ID, domain.Group{Name: "x", MemberIDs: []string{"missing"}})
+func assertServiceAdditionalUpdateScenarios(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, groupID, projectID, personID, allocationID string) {
+	t.Helper()
+
+	_, err := svc.UpdateGroup(ctx, admin, groupID, domain.Group{Name: "x", MemberIDs: []string{"missing"}})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update group member validation not found, got %v", err)
 	}
-	_, err = svc.UpdateAllocation(ctx, admin, allocation.ID, testPersonAllocationInput("missing", project.ID, 10))
+	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput("missing", projectID, 10))
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update allocation missing person to fail, got %v", err)
 	}
-	_, err = svc.UpdateAllocation(ctx, admin, allocation.ID, testPersonAllocationInput(person.ID, "missing", 10))
+	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput(personID, "missing", 10))
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update allocation missing project to fail, got %v", err)
 	}
-	updatedAllocation, err := svc.UpdateAllocation(ctx, admin, allocation.ID, testPersonAllocationInput(person.ID, project.ID, 60))
+	updatedAllocation, err := svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput(personID, projectID, 60))
 	if err != nil {
 		t.Fatalf("expected update allocation to allow over-employment load, got %v", err)
 	}
 	if updatedAllocation.Percent != 60 {
 		t.Fatalf("expected updated allocation percent 60, got %v", updatedAllocation.Percent)
 	}
+}
 
-	_, err = svc.AddGroupMember(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, group.ID, person.ID)
+func assertServiceAdditionalTenantGuards(t *testing.T, svc *Service, ctx context.Context, organisationID, groupID, personID string) {
+	t.Helper()
+
+	_, err := svc.AddGroupMember(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, groupID, personID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected add group member without org scope to fail, got %v", err)
 	}
-	_, err = svc.UpdateOrganisation(ctx, ports.AuthContext{OrganisationID: "other", Roles: []string{domain.RoleOrgAdmin}}, organisation.ID, domain.Organisation{Name: "x", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
+	_, err = svc.UpdateOrganisation(ctx, ports.AuthContext{OrganisationID: "other", Roles: []string{domain.RoleOrgAdmin}}, organisationID, domain.Organisation{Name: "x", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected update organisation cross tenant to fail, got %v", err)
 	}
-	err = svc.DeleteOrganisation(ctx, ports.AuthContext{OrganisationID: "other", Roles: []string{domain.RoleOrgAdmin}}, organisation.ID)
+	err = svc.DeleteOrganisation(ctx, ports.AuthContext{OrganisationID: "other", Roles: []string{domain.RoleOrgAdmin}}, organisationID)
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected delete organisation cross tenant to fail, got %v", err)
 	}
+}
 
-	_, err = svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopePerson, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-02", Granularity: domain.GranularityDay})
+func assertServiceAdditionalReportAndHelperValidation(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, projectID, personID string) {
+	t.Helper()
+
+	_, err := svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopePerson, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-02", Granularity: domain.GranularityDay})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected report missing person id to fail, got %v", err)
 	}
@@ -1114,11 +1195,11 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 	if !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected requireAnyRole with no roles to fail, got %v", err)
 	}
-	err = validateAllocation(testPersonAllocationInput(person.ID, project.ID, 101))
+	err = validateAllocation(testPersonAllocationInput(personID, projectID, 101))
 	if err != nil {
 		t.Fatalf("expected validate allocation percent above 100 to pass, got %v", err)
 	}
-	err = validateAllocation(testPersonAllocationInput(person.ID, project.ID, -1))
+	err = validateAllocation(testPersonAllocationInput(personID, projectID, -1))
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected validate allocation negative percent to fail, got %v", err)
 	}

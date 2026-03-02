@@ -81,14 +81,14 @@ linters-settings:
     under: 15
 
   cyclop:
-    max-complexity: 40
-    package-average: 20.0
+    max-complexity: 25
+    package-average: 12
 
   gocyclo:
-    min-complexity: 40
+    min-complexity: 20
 
   gocognit:
-    min-complexity: 80
+    min-complexity: 25
 
   nolintlint:
     require-explanation: true
