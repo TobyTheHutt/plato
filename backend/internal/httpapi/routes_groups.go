@@ -162,11 +162,11 @@ func (a *API) handleGroupUnavailabilityRoute(w http.ResponseWriter, r *http.Requ
 	case 4:
 		a.dispatchGroupUnavailabilityMethod(w, r, authCtx, groupID)
 	case 5:
-		if r.Method == http.MethodDelete {
-			a.deleteGroupUnavailabilityEntry(w, r, authCtx, segments)
+		if r.Method != http.MethodDelete {
+			methodNotAllowed(w)
 			return
 		}
-		notFound(w)
+		a.deleteGroupUnavailabilityEntry(w, r, authCtx, segments)
 	default:
 		notFound(w)
 	}

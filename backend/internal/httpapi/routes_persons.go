@@ -103,11 +103,11 @@ func (a *API) handlePersonUnavailabilityRoute(w http.ResponseWriter, r *http.Req
 	case 4:
 		a.dispatchPersonUnavailabilityMethod(w, r, authCtx, personID)
 	case 5:
-		if r.Method == http.MethodDelete {
-			a.deletePersonUnavailabilityEntry(w, r, authCtx, personID, segments)
+		if r.Method != http.MethodDelete {
+			methodNotAllowed(w)
 			return
 		}
-		notFound(w)
+		a.deletePersonUnavailabilityEntry(w, r, authCtx, personID, segments)
 	default:
 		notFound(w)
 	}

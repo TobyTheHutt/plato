@@ -110,11 +110,11 @@ func (a *API) handleOrganisationHolidaysRoute(w http.ResponseWriter, r *http.Req
 	case 4:
 		a.dispatchOrganisationHolidaysMethod(w, r, authCtx, organisationID)
 	case 5:
-		if r.Method == http.MethodDelete {
-			a.deleteOrganisationHolidayByID(w, r, authCtx, segments)
+		if r.Method != http.MethodDelete {
+			methodNotAllowed(w)
 			return
 		}
-		notFound(w)
+		a.deleteOrganisationHolidayByID(w, r, authCtx, segments)
 	default:
 		notFound(w)
 	}

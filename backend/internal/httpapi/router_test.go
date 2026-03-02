@@ -568,6 +568,33 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		t.Fatalf("decode setup allocation: %v", err)
 	}
 
+	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+orgID+"/holidays", map[string]any{"date": "2026-05-01", "hours": 8}, adminHeaders)
+	if createHoliday.Code != http.StatusCreated {
+		t.Fatalf("setup holiday failed: %d body=%s", createHoliday.Code, createHoliday.Body.String())
+	}
+	var holiday domain.OrgHoliday
+	if err := json.Unmarshal(createHoliday.Body.Bytes(), &holiday); err != nil {
+		t.Fatalf("decode setup holiday: %v", err)
+	}
+
+	createPersonUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/persons/"+personID+"/unavailability", map[string]any{"date": "2026-05-02", "hours": 4}, adminHeaders)
+	if createPersonUnavailability.Code != http.StatusCreated {
+		t.Fatalf("setup person unavailability failed: %d body=%s", createPersonUnavailability.Code, createPersonUnavailability.Body.String())
+	}
+	var personUnavailability domain.PersonUnavailability
+	if err := json.Unmarshal(createPersonUnavailability.Body.Bytes(), &personUnavailability); err != nil {
+		t.Fatalf("decode setup person unavailability: %v", err)
+	}
+
+	createGroupUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+group.ID+"/unavailability", map[string]any{"date": "2026-05-03", "hours": 6}, adminHeaders)
+	if createGroupUnavailability.Code != http.StatusCreated {
+		t.Fatalf("setup group unavailability failed: %d body=%s", createGroupUnavailability.Code, createGroupUnavailability.Body.String())
+	}
+	var groupUnavailability domain.GroupUnavailability
+	if err := json.Unmarshal(createGroupUnavailability.Body.Bytes(), &groupUnavailability); err != nil {
+		t.Fatalf("decode setup group unavailability: %v", err)
+	}
+
 	hits := []struct {
 		method     string
 		path       string
@@ -588,6 +615,12 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed},
 		{http.MethodPatch, "/api/allocations/" + allocation.ID, http.StatusMethodNotAllowed},
 		{http.MethodGet, "/api/reports/availability-load", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
+		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
+		{http.MethodGet, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed},
+		{http.MethodPatch, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed},
+		{http.MethodGet, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed},
+		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed},
 	}
 
 	for _, hit := range hits {
@@ -783,8 +816,8 @@ func TestOrganisationAndReportExtraBranches(t *testing.T) {
 		path   string
 		code   int
 	}{
-		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusNotFound},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusNotFound},
+		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
+		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
 		{http.MethodDelete, "/api/organisations/" + orgID + "/holidays/missing", http.StatusNotFound},
 		{http.MethodGet, "/api/organisations/" + orgID + "/unknown", http.StatusNotFound},
 		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/extra/path", http.StatusNotFound},
