@@ -5,7 +5,9 @@ import (
 	"errors"
 	"math"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"plato/backend/internal/adapters/impexp"
 	"plato/backend/internal/adapters/persistence"
@@ -1211,6 +1213,189 @@ func TestAllocationValidationHelpers(t *testing.T) {
 	}
 }
 
+func TestOverlapDateRanges(t *testing.T) {
+	tests := []struct {
+		name          string
+		rangeStartA   string
+		rangeEndA     string
+		rangeStartB   string
+		rangeEndB     string
+		expectOverlap bool
+		expectStart   string
+		expectEnd     string
+	}{
+		{
+			name:          "full overlap",
+			rangeStartA:   "2026-01-01",
+			rangeEndA:     "2026-01-10",
+			rangeStartB:   "2026-01-03",
+			rangeEndB:     "2026-01-08",
+			expectOverlap: true,
+			expectStart:   "2026-01-03",
+			expectEnd:     "2026-01-08",
+		},
+		{
+			name:          "left trimmed overlap",
+			rangeStartA:   "2026-01-05",
+			rangeEndA:     "2026-01-10",
+			rangeStartB:   "2026-01-01",
+			rangeEndB:     "2026-01-07",
+			expectOverlap: true,
+			expectStart:   "2026-01-05",
+			expectEnd:     "2026-01-07",
+		},
+		{
+			name:          "right trimmed overlap",
+			rangeStartA:   "2026-01-05",
+			rangeEndA:     "2026-01-10",
+			rangeStartB:   "2026-01-08",
+			rangeEndB:     "2026-01-15",
+			expectOverlap: true,
+			expectStart:   "2026-01-08",
+			expectEnd:     "2026-01-10",
+		},
+		{
+			name:          "single day overlap",
+			rangeStartA:   "2026-01-05",
+			rangeEndA:     "2026-01-10",
+			rangeStartB:   "2026-01-10",
+			rangeEndB:     "2026-01-15",
+			expectOverlap: true,
+			expectStart:   "2026-01-10",
+			expectEnd:     "2026-01-10",
+		},
+		{
+			name:          "no overlap",
+			rangeStartA:   "2026-01-05",
+			rangeEndA:     "2026-01-10",
+			rangeStartB:   "2026-01-11",
+			rangeEndB:     "2026-01-15",
+			expectOverlap: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rangeStartA := mustParseTestDate(t, tc.rangeStartA)
+			rangeEndA := mustParseTestDate(t, tc.rangeEndA)
+			rangeStartB := mustParseTestDate(t, tc.rangeStartB)
+			rangeEndB := mustParseTestDate(t, tc.rangeEndB)
+
+			start, end, overlaps := overlapDateRanges(rangeStartA, rangeEndA, rangeStartB, rangeEndB)
+			if overlaps != tc.expectOverlap {
+				t.Fatalf("expected overlap=%v, got %v", tc.expectOverlap, overlaps)
+			}
+			if !overlaps {
+				return
+			}
+			if start.Format(domain.DateLayout) != tc.expectStart {
+				t.Fatalf("expected overlap start %s, got %s", tc.expectStart, start.Format(domain.DateLayout))
+			}
+			if end.Format(domain.DateLayout) != tc.expectEnd {
+				t.Fatalf("expected overlap end %s, got %s", tc.expectEnd, end.Format(domain.DateLayout))
+			}
+		})
+	}
+}
+
+func TestBuildAllocationEvents(t *testing.T) {
+	candidateStart := mustParseTestDate(t, "2026-01-05")
+	candidateEnd := mustParseTestDate(t, "2026-01-15")
+	groupsByID := map[string]domain.Group{
+		"group_1": {ID: "group_1", MemberIDs: []string{"person_1"}},
+	}
+
+	tests := []struct {
+		name          string
+		allocations   []domain.Allocation
+		allocationID  string
+		personID      string
+		expectEvents  map[string]float64
+		expectErrType error
+	}{
+		{
+			name:         "tracks overlapping person and group allocations",
+			allocationID: "skip_me",
+			personID:     "person_1",
+			allocations: []domain.Allocation{
+				{
+					ID:         "skip_me",
+					TargetType: domain.AllocationTargetPerson,
+					TargetID:   "person_1",
+					StartDate:  "2026-01-01",
+					EndDate:    "2026-01-10",
+					Percent:    50,
+				},
+				{
+					ID:         "person_overlap",
+					TargetType: domain.AllocationTargetPerson,
+					TargetID:   "person_1",
+					StartDate:  "2026-01-01",
+					EndDate:    "2026-01-10",
+					Percent:    20,
+				},
+				{
+					ID:         "group_overlap",
+					TargetType: domain.AllocationTargetGroup,
+					TargetID:   "group_1",
+					StartDate:  "2026-01-10",
+					EndDate:    "2026-01-20",
+					Percent:    15,
+				},
+				{
+					ID:         "other_person",
+					TargetType: domain.AllocationTargetPerson,
+					TargetID:   "person_2",
+					StartDate:  "2026-01-05",
+					EndDate:    "2026-01-15",
+					Percent:    99,
+				},
+			},
+			expectEvents: map[string]float64{
+				"2026-01-05": 20,
+				"2026-01-10": 15,
+				"2026-01-11": -20,
+				"2026-01-16": -15,
+			},
+		},
+		{
+			name:         "rejects invalid allocation dates",
+			allocationID: "",
+			personID:     "person_1",
+			allocations: []domain.Allocation{
+				{
+					ID:         "bad_date",
+					TargetType: domain.AllocationTargetPerson,
+					TargetID:   "person_1",
+					StartDate:  "bad-date",
+					EndDate:    "2026-01-10",
+					Percent:    20,
+				},
+			},
+			expectErrType: domain.ErrValidation,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			events, err := buildAllocationEvents(tc.allocations, tc.allocationID, tc.personID, groupsByID, candidateStart, candidateEnd)
+			if tc.expectErrType != nil {
+				if !errors.Is(err, tc.expectErrType) {
+					t.Fatalf("expected error %v, got %v", tc.expectErrType, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("build allocation events: %v", err)
+			}
+			formattedEvents := formatEventMapByDate(events)
+			if !reflect.DeepEqual(formattedEvents, tc.expectEvents) {
+				t.Fatalf("unexpected events, expected %+v got %+v", tc.expectEvents, formattedEvents)
+			}
+		})
+	}
+}
+
 func TestAllocationTargetResolutionAndLimitRangeChecks(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1329,6 +1514,23 @@ func testGroupAllocationInput(groupID, projectID string, percent float64) domain
 		EndDate:    "2026-12-31",
 		Percent:    percent,
 	}
+}
+
+func mustParseTestDate(t *testing.T, date string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(domain.DateLayout, date)
+	if err != nil {
+		t.Fatalf("parse test date %q: %v", date, err)
+	}
+	return parsed
+}
+
+func formatEventMapByDate(events map[time.Time]float64) map[string]float64 {
+	formatted := make(map[string]float64, len(events))
+	for date, delta := range events {
+		formatted[date.Format(domain.DateLayout)] = delta
+	}
+	return formatted
 }
 
 func createOrganisationForService(t *testing.T, svc *Service, ctx context.Context, auth ports.AuthContext, name string) domain.Organisation {

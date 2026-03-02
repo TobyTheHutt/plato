@@ -11,6 +11,8 @@ import (
 	"plato/backend/internal/ports"
 )
 
+const allocationLimitTolerance = 1e-9
+
 func (s *Service) ListAllocations(ctx context.Context, auth ports.AuthContext) ([]domain.Allocation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -177,86 +179,167 @@ func (s *Service) validateAllocationLimit(
 	if err != nil {
 		return err
 	}
-	groups, err := s.repo.ListGroups(ctx, organisationID)
+	groupsByID, err := s.listGroupsByID(ctx, organisationID)
 	if err != nil {
 		return err
 	}
-	organisation, err := s.repo.GetOrganisation(ctx, organisationID)
+	maxPercentPerDay, err := s.maxAllocationPercentPerDay(ctx, organisationID)
 	if err != nil {
 		return err
-	}
-	if organisation.HoursPerDay <= 0 {
-		return domain.ErrValidation
-	}
-	maxPercentPerDay := (24.0 * 100.0) / organisation.HoursPerDay
-
-	groupsByID := make(map[string]domain.Group, len(groups))
-	for _, group := range groups {
-		groupsByID[group.ID] = group
 	}
 
 	for _, personID := range candidatePersonIDs {
-		_, err = s.repo.GetPerson(ctx, organisationID, personID)
-		if err != nil {
-			return err
-		}
-
-		total := candidate.Percent
-		if total > maxPercentPerDay+1e-9 {
-			return fmt.Errorf("allocation exceeds 24 hours/day theoretical limit: %w", domain.ErrValidation)
-		}
-
-		events := make(map[time.Time]float64)
-		for _, allocation := range allocations {
-			if allocation.ID == allocationID {
-				continue
-			}
-			if !allocationTargetsPerson(allocation, personID, groupsByID) {
-				continue
-			}
-
-			var existingStart, existingEnd time.Time
-			existingStart, existingEnd, err = parseDateRange(allocation.StartDate, allocation.EndDate)
-			if err != nil {
-				return domain.ErrValidation
-			}
-
-			overlapStart := existingStart
-			if overlapStart.Before(candidateStart) {
-				overlapStart = candidateStart
-			}
-			overlapEnd := existingEnd
-			if overlapEnd.After(candidateEnd) {
-				overlapEnd = candidateEnd
-			}
-			if overlapEnd.Before(overlapStart) {
-				continue
-			}
-
-			events[overlapStart] += allocation.Percent
-			events[overlapEnd.AddDate(0, 0, 1)] -= allocation.Percent
-		}
-
-		eventDates := make([]time.Time, 0, len(events))
-		for eventDate := range events {
-			eventDates = append(eventDates, eventDate)
-		}
-		sort.Slice(eventDates, func(i int, j int) bool {
-			return eventDates[i].Before(eventDates[j])
-		})
-
-		for _, eventDate := range eventDates {
-			if eventDate.After(candidateEnd) {
-				break
-			}
-			total += events[eventDate]
-			if total > maxPercentPerDay+1e-9 {
-				return fmt.Errorf("allocation exceeds 24 hours/day theoretical limit: %w", domain.ErrValidation)
-			}
+		personValidationErr := s.validatePersonAllocationLimit(
+			ctx,
+			organisationID,
+			personID,
+			allocationID,
+			candidate,
+			candidateStart,
+			candidateEnd,
+			allocations,
+			groupsByID,
+			maxPercentPerDay,
+		)
+		if personValidationErr != nil {
+			return personValidationErr
 		}
 	}
 
 	return nil
+}
+
+func (s *Service) validatePersonAllocationLimit(
+	ctx context.Context,
+	organisationID string,
+	personID string,
+	allocationID string,
+	candidate domain.Allocation,
+	candidateStart time.Time,
+	candidateEnd time.Time,
+	allocations []domain.Allocation,
+	groupsByID map[string]domain.Group,
+	maxPercentPerDay float64,
+) error {
+	if _, err := s.repo.GetPerson(ctx, organisationID, personID); err != nil {
+		return err
+	}
+
+	total := candidate.Percent
+	if exceedsAllocationLimit(total, maxPercentPerDay) {
+		return allocationLimitExceededError()
+	}
+
+	events, err := buildAllocationEvents(allocations, allocationID, personID, groupsByID, candidateStart, candidateEnd)
+	if err != nil {
+		return err
+	}
+
+	eventDates := sortedEventDates(events)
+	for _, eventDate := range eventDates {
+		if eventDate.After(candidateEnd) {
+			return nil
+		}
+		total += events[eventDate]
+		if exceedsAllocationLimit(total, maxPercentPerDay) {
+			return allocationLimitExceededError()
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) listGroupsByID(ctx context.Context, organisationID string) (map[string]domain.Group, error) {
+	groups, err := s.repo.ListGroups(ctx, organisationID)
+	if err != nil {
+		return nil, err
+	}
+	groupsByID := make(map[string]domain.Group, len(groups))
+	for _, group := range groups {
+		groupsByID[group.ID] = group
+	}
+	return groupsByID, nil
+}
+
+func (s *Service) maxAllocationPercentPerDay(ctx context.Context, organisationID string) (float64, error) {
+	organisation, err := s.repo.GetOrganisation(ctx, organisationID)
+	if err != nil {
+		return 0, err
+	}
+	if organisation.HoursPerDay <= 0 {
+		return 0, domain.ErrValidation
+	}
+	return (24.0 * 100.0) / organisation.HoursPerDay, nil
+}
+
+func buildAllocationEvents(
+	allocations []domain.Allocation,
+	allocationID string,
+	personID string,
+	groupsByID map[string]domain.Group,
+	candidateStart time.Time,
+	candidateEnd time.Time,
+) (map[time.Time]float64, error) {
+	events := make(map[time.Time]float64)
+	for _, allocation := range allocations {
+		if allocation.ID == allocationID {
+			continue
+		}
+		if !allocationTargetsPerson(allocation, personID, groupsByID) {
+			continue
+		}
+
+		existingStart, existingEnd, err := parseDateRange(allocation.StartDate, allocation.EndDate)
+		if err != nil {
+			return nil, domain.ErrValidation
+		}
+		overlapStart, overlapEnd, overlaps := overlapDateRanges(candidateStart, candidateEnd, existingStart, existingEnd)
+		if !overlaps {
+			continue
+		}
+		events[overlapStart] += allocation.Percent
+		events[overlapEnd.AddDate(0, 0, 1)] -= allocation.Percent
+	}
+	return events, nil
+}
+
+func overlapDateRanges(
+	rangeStartA time.Time,
+	rangeEndA time.Time,
+	rangeStartB time.Time,
+	rangeEndB time.Time,
+) (time.Time, time.Time, bool) {
+	overlapStart := rangeStartA
+	if rangeStartB.After(overlapStart) {
+		overlapStart = rangeStartB
+	}
+	overlapEnd := rangeEndA
+	if rangeEndB.Before(overlapEnd) {
+		overlapEnd = rangeEndB
+	}
+	if overlapEnd.Before(overlapStart) {
+		return time.Time{}, time.Time{}, false
+	}
+	return overlapStart, overlapEnd, true
+}
+
+func sortedEventDates(events map[time.Time]float64) []time.Time {
+	eventDates := make([]time.Time, 0, len(events))
+	for eventDate := range events {
+		eventDates = append(eventDates, eventDate)
+	}
+	sort.Slice(eventDates, func(i int, j int) bool {
+		return eventDates[i].Before(eventDates[j])
+	})
+	return eventDates
+}
+
+func exceedsAllocationLimit(total float64, maxPercentPerDay float64) bool {
+	return total > maxPercentPerDay+allocationLimitTolerance
+}
+
+func allocationLimitExceededError() error {
+	return fmt.Errorf("allocation exceeds 24 hours/day theoretical limit: %w", domain.ErrValidation)
 }
 
 func normalizeAllocationInput(input domain.Allocation) domain.Allocation {
@@ -280,22 +363,30 @@ func (s *Service) resolveAllocationTargetPersons(
 ) ([]string, error) {
 	switch targetType {
 	case domain.AllocationTargetPerson:
-		if _, err := s.repo.GetPerson(ctx, organisationID, targetID); err != nil {
-			return nil, err
-		}
-		return []string{targetID}, nil
+		return s.resolvePersonAllocationTarget(ctx, organisationID, targetID)
 	case domain.AllocationTargetGroup:
-		group, err := s.repo.GetGroup(ctx, organisationID, targetID)
-		if err != nil {
-			return nil, err
-		}
-		if len(group.MemberIDs) == 0 {
-			return nil, domain.ErrValidation
-		}
-		return uniqueStringIDs(group.MemberIDs), nil
+		return s.resolveGroupAllocationTarget(ctx, organisationID, targetID)
 	default:
 		return nil, domain.ErrValidation
 	}
+}
+
+func (s *Service) resolvePersonAllocationTarget(ctx context.Context, organisationID string, personID string) ([]string, error) {
+	if _, err := s.repo.GetPerson(ctx, organisationID, personID); err != nil {
+		return nil, err
+	}
+	return []string{personID}, nil
+}
+
+func (s *Service) resolveGroupAllocationTarget(ctx context.Context, organisationID string, groupID string) ([]string, error) {
+	group, err := s.repo.GetGroup(ctx, organisationID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if len(group.MemberIDs) == 0 {
+		return nil, domain.ErrValidation
+	}
+	return uniqueStringIDs(group.MemberIDs), nil
 }
 
 func allocationTargetsPerson(allocation domain.Allocation, personID string, groupsByID map[string]domain.Group) bool {
