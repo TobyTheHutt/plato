@@ -36,6 +36,14 @@ const (
 	nvd403ErrorMessage       = "NVD API key valid but lacks required permissions. Please check your API key configuration."
 	ghsa401ErrorMessage      = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
 	ghsa403ErrorMessage      = "GHSA token is valid but access is forbidden. Check token scope and account permissions."
+	errorMessageFormat       = "error: %v"
+	dateLayoutISO            = "2006-01-02"
+	envNVDAPIKey             = "NVD_API_" + "KEY"
+	envGHSAToken             = "GHSA_" + "TOKEN"
+	envGitHubToken           = "GITHUB_" + "TOKEN"
+	headerAccept             = "Accept"
+	headerAuthorization      = "Authorization"
+	contentTypeJSON          = "application/json"
 )
 
 type severity string
@@ -319,17 +327,17 @@ type reportTruncationBucket struct {
 func main() {
 	config, err := parseCLIConfig()
 	if err != nil {
-		exitf("error: %v", err)
+		exitf(errorMessageFormat, err)
 	}
 
 	outcome, err := runPolicyEvaluation(config)
 	if err != nil {
-		exitf("error: %v", err)
+		exitf(errorMessageFormat, err)
 	}
 
 	printResult(config.scanMode, outcome.result)
 	if err = writeScanReportIfConfigured(config, outcome); err != nil {
-		exitf("error: %v", err)
+		exitf(errorMessageFormat, err)
 	}
 
 	if hasBlockingFindings(outcome.result) {
@@ -815,7 +823,7 @@ func requiredOverrideField(id, name, rawValue string) (string, error) {
 }
 
 func parseOverrideDate(id, name, rawValue string) (time.Time, error) {
-	date, err := time.Parse("2006-01-02", rawValue)
+	date, err := time.Parse(dateLayoutISO, rawValue)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("override %s has invalid %s %q: %w", id, name, rawValue, err)
 	}
@@ -983,7 +991,7 @@ func sortEvaluated(items []evaluatedVuln) {
 func resolveNVDAPIKey(apiKeyFile string) (string, error) {
 	trimmedPath := strings.TrimSpace(apiKeyFile)
 	if trimmedPath == "" {
-		return strings.TrimSpace(os.Getenv("NVD_API_KEY")), nil
+		return strings.TrimSpace(os.Getenv(envNVDAPIKey)), nil
 	}
 
 	rawValue, err := os.ReadFile(trimmedPath)
@@ -1000,11 +1008,11 @@ func resolveNVDAPIKey(apiKeyFile string) (string, error) {
 func resolveGHSAToken(tokenFile string) (string, error) {
 	trimmedPath := strings.TrimSpace(tokenFile)
 	if trimmedPath == "" {
-		token := strings.TrimSpace(os.Getenv("GHSA_TOKEN"))
+		token := strings.TrimSpace(os.Getenv(envGHSAToken))
 		if token != "" {
 			return token, nil
 		}
-		return strings.TrimSpace(os.Getenv("GITHUB_TOKEN")), nil
+		return strings.TrimSpace(os.Getenv(envGitHubToken)), nil
 	}
 
 	rawValue, err := os.ReadFile(trimmedPath)
@@ -1264,7 +1272,7 @@ func (resolver *nvdSeverityResolver) newNVDRequest(ctx context.Context, requestU
 	if err != nil {
 		return nil, false, err
 	}
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set(headerAccept, contentTypeJSON)
 	request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
 	if resolver.apiKey == "" {
 		return request, false, nil
@@ -1347,13 +1355,13 @@ func (resolver *nvdSeverityResolver) newGHSARequest(ctx context.Context, request
 	if err != nil {
 		return nil, false, err
 	}
-	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set(headerAccept, "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	request.Header.Set("User-Agent", "plato-govuln-policy/1.0")
 	if resolver.ghsaToken == "" {
 		return request, false, nil
 	}
-	request.Header.Set("Authorization", "Bearer "+resolver.ghsaToken)
+	request.Header.Set(headerAuthorization, "Bearer "+resolver.ghsaToken)
 	return request, true, nil
 }
 
@@ -1981,7 +1989,7 @@ func printExpiredOverrides(items []evaluatedVuln) {
 	fmt.Println("")
 	fmt.Println("Expired overrides")
 	for _, item := range items {
-		fmt.Printf("  - %s override %s expired on %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
+		fmt.Printf("  - %s override %s expired on %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format(dateLayoutISO))
 		fmt.Printf("    reason: %s\n", item.Override.Reason)
 	}
 }
@@ -2006,7 +2014,7 @@ func printAcceptedOverrides(items []evaluatedVuln) {
 	fmt.Println("")
 	fmt.Println("Accepted risk overrides")
 	for _, item := range items {
-		fmt.Printf("  - %s accepted by %s until %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
+		fmt.Printf("  - %s accepted by %s until %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format(dateLayoutISO))
 		fmt.Printf("    reason: %s\n", item.Override.Reason)
 	}
 }

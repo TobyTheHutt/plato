@@ -22,6 +22,30 @@ import (
 	"time"
 )
 
+const (
+	testGHSAAdvisoryID       = "GHSA-ABCD-1234-WXYZ"
+	testGHSAShortID          = "GHSA-X"
+	testSeverityMediumLower  = "medium"
+	testSeverityHighLower    = "high"
+	testScoreEightPointOne   = 8.1
+	testScoreSevenPointEight = 7.8
+	testScoreSevenPointFour  = 7.4
+	testFromEnvValue         = "from-env"
+	testGitHubEnvValue       = "github-env"
+	testConfiguredValue      = "configured"
+	testCVE20261001          = "CVE-2026-1001"
+	testCVE20262001          = "CVE-2026-2001"
+	testInvalidURL           = "://bad-url"
+	testHeaderContentType    = "Content-Type"
+	errWriteSnapshotFileFmt  = "write snapshot file: %v"
+	errWriteResponseFmt      = "write response: %v"
+	errResolveGHSATokenFmt   = "resolveGHSAToken returned error: %v"
+	errWriteInvalidFileFmt   = "write invalid file: %v"
+	errUnexpectedTokenFmt    = "unexpected token: %q"
+	errUnexpectedAssessFmt   = "unexpected assessment: %#v"
+	msgGHSALookupFailed      = "GHSA lookup failed"
+)
+
 type fakeSeverityResolver struct {
 	byID  map[string]severityAssessment
 	errID map[string]error
@@ -147,8 +171,8 @@ func assertLoadOverridesRequiredFields(t *testing.T, tempDir string) {
 	if override.Reason == "" {
 		t.Fatal("expected non-empty reason")
 	}
-	if override.ExpiresOn.Format("2006-01-02") != "2026-03-15" {
-		t.Fatalf("unexpected expiry date: %s", override.ExpiresOn.Format("2006-01-02"))
+	if override.ExpiresOn.Format(dateLayoutISO) != "2026-03-15" {
+		t.Fatalf("unexpected expiry date: %s", override.ExpiresOn.Format(dateLayoutISO))
 	}
 	if override.Owner != "@plato-security" {
 		t.Fatalf("unexpected owner: %s", override.Owner)
@@ -193,7 +217,7 @@ func assertLoadOverridesOptionalFields(t *testing.T, tempDir string) {
 	if override.ApprovedBy != "@plato-security" {
 		t.Fatalf("unexpected approved_by: %s", override.ApprovedBy)
 	}
-	if override.ApprovedDate == nil || override.ApprovedDate.Format("2006-01-02") != "2026-02-20" {
+	if override.ApprovedDate == nil || override.ApprovedDate.Format(dateLayoutISO) != "2026-02-20" {
 		t.Fatalf("unexpected approved_date: %#v", override.ApprovedDate)
 	}
 	if override.Severity != severityCritical {
@@ -337,7 +361,7 @@ func TestEvaluateVulnerabilities(t *testing.T) {
 
 	resolver := &fakeSeverityResolver{
 		byID: map[string]severityAssessment{
-			"GO-A": {Severity: severityHigh, Score: 8.1},
+			"GO-A": {Severity: severityHigh, Score: testScoreEightPointOne},
 			"GO-B": {Severity: severityMedium, Score: 5.0},
 		},
 		errID: map[string]error{
@@ -372,10 +396,10 @@ func TestCollectCVEIDs(t *testing.T) {
 	t.Parallel()
 	vuln := vulnAssessment{
 		ID:      "go-1234",
-		Aliases: []string{"CVE-2026-1000", "cve-2026-1000", "GHSA-1", "CVE-2026-1001"},
+		Aliases: []string{"CVE-2026-1000", "cve-2026-1000", "GHSA-1", testCVE20261001},
 	}
 	actual := collectCVEIDs(vuln)
-	expected := []string{"CVE-2026-1000", "CVE-2026-1001"}
+	expected := []string{"CVE-2026-1000", testCVE20261001}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("unexpected CVE IDs: got %#v want %#v", actual, expected)
 	}
@@ -389,7 +413,7 @@ func TestCollectGHSAIDs(t *testing.T) {
 		Aliases: []string{"GHSA-abcd-1234-wxyz", "ghsa-abcd-1234-wxyz", "CVE-2026-1000", "GHSA-0000-1111-2222"},
 	}
 	actual := collectGHSAIDs(vuln)
-	expected := []string{"GHSA-0000-1111-2222", "GHSA-ABCD-1234-WXYZ"}
+	expected := []string{"GHSA-0000-1111-2222", testGHSAAdvisoryID}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("unexpected GHSA IDs: got %#v want %#v", actual, expected)
 	}
@@ -463,8 +487,8 @@ func TestBestNVDSeverity(t *testing.T) {
 	mediumMetric.CVSSData.BaseSeverity = "MEDIUM"
 
 	highMetric := nvdMetric{}
-	highMetric.CVSSData.BaseScore = 7.8
-	highMetric.CVSSData.BaseSeverity = "HIGH"
+	highMetric.CVSSData.BaseScore = testScoreSevenPointEight
+	highMetric.CVSSData.BaseSeverity = string(severityHigh)
 
 	payload.Vulnerabilities[0].CVE.Metrics.CVSSMetricV31 = []nvdMetric{mediumMetric}
 	payload.Vulnerabilities[0].CVE.Metrics.CVSSMetricV30 = []nvdMetric{highMetric}
@@ -473,7 +497,7 @@ func TestBestNVDSeverity(t *testing.T) {
 	if severityValue != severityHigh {
 		t.Fatalf("expected HIGH severity, got %s", severityValue)
 	}
-	if score != 7.8 {
+	if score != testScoreSevenPointEight {
 		t.Fatalf("expected score 7.8, got %.1f", score)
 	}
 }
@@ -487,7 +511,7 @@ func TestNormalizeSeverity(t *testing.T) {
 
 func TestResolveNVDAPIKey(t *testing.T) {
 	t.Run("from file", func(t *testing.T) {
-		t.Setenv("NVD_API_KEY", "from-env")
+		t.Setenv(envNVDAPIKey, testFromEnvValue)
 		tempDir := t.TempDir()
 		apiKeyPath := filepath.Join(tempDir, "nvd.key")
 		if err := os.WriteFile(apiKeyPath, []byte("from-file\n"), 0o600); err != nil {
@@ -516,12 +540,12 @@ func TestResolveNVDAPIKey(t *testing.T) {
 	})
 
 	t.Run("fallback to env", func(t *testing.T) {
-		t.Setenv("NVD_API_KEY", "from-env")
+		t.Setenv(envNVDAPIKey, testFromEnvValue)
 		apiKey, err := resolveNVDAPIKey("")
 		if err != nil {
 			t.Fatalf("resolveNVDAPIKey returned error: %v", err)
 		}
-		if apiKey != "from-env" {
+		if apiKey != testFromEnvValue {
 			t.Fatalf("unexpected api key: %q", apiKey)
 		}
 	})
@@ -535,7 +559,7 @@ func TestResolveGHSAToken(t *testing.T) {
 }
 
 func testResolveGHSATokenFromFile(t *testing.T) {
-	t.Setenv("GHSA_TOKEN", "from-env")
+	t.Setenv(envGHSAToken, testFromEnvValue)
 	tempDir := t.TempDir()
 	tokenPath := filepath.Join(tempDir, "ghsa.token")
 	if err := os.WriteFile(tokenPath, []byte("from-file\n"), 0o600); err != nil {
@@ -544,10 +568,10 @@ func testResolveGHSATokenFromFile(t *testing.T) {
 
 	resolved, err := resolveGHSAToken(tokenPath)
 	if err != nil {
-		t.Fatalf("resolveGHSAToken returned error: %v", err)
+		t.Fatalf(errResolveGHSATokenFmt, err)
 	}
 	if resolved != "from-file" {
-		t.Fatalf("unexpected token: %q", resolved)
+		t.Fatalf(errUnexpectedTokenFmt, resolved)
 	}
 }
 
@@ -563,26 +587,26 @@ func testResolveGHSATokenEmptyFileFails(t *testing.T) {
 }
 
 func testResolveGHSATokenFallsBackToGHSATokenEnv(t *testing.T) {
-	t.Setenv("GHSA_TOKEN", "ghsa-env")
-	t.Setenv("GITHUB_TOKEN", "github-env")
+	t.Setenv(envGHSAToken, "ghsa-env")
+	t.Setenv(envGitHubToken, testGitHubEnvValue)
 	resolved, err := resolveGHSAToken("")
 	if err != nil {
-		t.Fatalf("resolveGHSAToken returned error: %v", err)
+		t.Fatalf(errResolveGHSATokenFmt, err)
 	}
 	if resolved != "ghsa-env" {
-		t.Fatalf("unexpected token: %q", resolved)
+		t.Fatalf(errUnexpectedTokenFmt, resolved)
 	}
 }
 
 func testResolveGHSATokenFallsBackToGitHubTokenEnv(t *testing.T) {
-	t.Setenv("GHSA_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "github-env")
+	t.Setenv(envGHSAToken, "")
+	t.Setenv(envGitHubToken, testGitHubEnvValue)
 	resolved, err := resolveGHSAToken("")
 	if err != nil {
-		t.Fatalf("resolveGHSAToken returned error: %v", err)
+		t.Fatalf(errResolveGHSATokenFmt, err)
 	}
-	if resolved != "github-env" {
-		t.Fatalf("unexpected token: %q", resolved)
+	if resolved != testGitHubEnvValue {
+		t.Fatalf(errUnexpectedTokenFmt, resolved)
 	}
 }
 
@@ -599,7 +623,7 @@ func TestLoadSeveritySnapshot(t *testing.T) {
   }
 }`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("write snapshot file: %v", err)
+			t.Fatalf(errWriteSnapshotFileFmt, err)
 		}
 
 		snapshot, err := loadSeveritySnapshot(path)
@@ -608,11 +632,11 @@ func TestLoadSeveritySnapshot(t *testing.T) {
 		}
 
 		high := snapshot["CVE-2026-1000"]
-		if high.Severity != severityHigh || high.Score != 8.1 {
+		if high.Severity != severityHigh || high.Score != testScoreEightPointOne {
 			t.Fatalf("unexpected severity for CVE-2026-1000: %#v", high)
 		}
 
-		medium := snapshot["CVE-2026-1001"]
+		medium := snapshot[testCVE20261001]
 		if medium.Severity != severityMedium || medium.Score != 4.5 {
 			t.Fatalf("unexpected severity for CVE-2026-1001: %#v", medium)
 		}
@@ -622,7 +646,7 @@ func TestLoadSeveritySnapshot(t *testing.T) {
 		path := filepath.Join(tempDir, "invalid.json")
 		content := `{"cves":{"GHSA-123":{"severity":"HIGH","score":8.0}}}`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("write snapshot file: %v", err)
+			t.Fatalf(errWriteSnapshotFileFmt, err)
 		}
 
 		if _, err := loadSeveritySnapshot(path); err == nil {
@@ -655,7 +679,7 @@ func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 		t.Fatalf("unexpected snapshot assessment: %#v", fromSnapshot)
 	}
 
-	missing, missingErr := resolver.resolveCVE(context.Background(), "CVE-2026-1001")
+	missing, missingErr := resolver.resolveCVE(context.Background(), testCVE20261001)
 	if missingErr == nil {
 		t.Fatal("expected error for missing snapshot CVE in offline mode")
 	}
@@ -666,7 +690,7 @@ func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 		t.Fatalf("unexpected missing snapshot error: %v", missingErr)
 	}
 
-	cached, cachedErr := resolver.resolveCVE(context.Background(), "CVE-2026-1001")
+	cached, cachedErr := resolver.resolveCVE(context.Background(), testCVE20261001)
 	if cachedErr == nil {
 		t.Fatal("expected cached error for missing snapshot CVE")
 	}
@@ -677,7 +701,7 @@ func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 		t.Fatalf("expected cached UNKNOWN severity, got %#v", cached)
 	}
 
-	if got := cached.Source; got != "CVE-2026-1001" {
+	if got := cached.Source; got != testCVE20261001 {
 		t.Fatalf("unexpected cached source: %s", got)
 	}
 }
@@ -801,7 +825,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(tempDir, "invalid-json.json")
 		if err := os.WriteFile(path, []byte(`{"overrides":[`), 0o600); err != nil {
-			t.Fatalf("write invalid file: %v", err)
+			t.Fatalf(errWriteInvalidFileFmt, err)
 		}
 		if _, loadErr := loadOverrides(path); loadErr == nil {
 			t.Fatal("expected invalid json error")
@@ -813,7 +837,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 		path := filepath.Join(tempDir, "missing-id.json")
 		content := `{"overrides":[{"reason":"x","expires_on":"2026-03-01","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("write invalid file: %v", err)
+			t.Fatalf(errWriteInvalidFileFmt, err)
 		}
 		if _, loadErr := loadOverrides(path); loadErr == nil {
 			t.Fatal("expected missing id error")
@@ -825,7 +849,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 		path := filepath.Join(tempDir, "invalid-date.json")
 		content := `{"overrides":[{"id":"GO-1","reason":"x","expires_on":"03/01/2026","owner":"@a","tracking_ticket":"SEC-1","scope":"backend"}]}`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("write invalid file: %v", err)
+			t.Fatalf(errWriteInvalidFileFmt, err)
 		}
 		if _, loadErr := loadOverrides(path); loadErr == nil {
 			t.Fatal("expected invalid expires_on error")
@@ -849,7 +873,7 @@ func TestLoadSeveritySnapshotErrorPaths(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(tempDir, "snapshot-invalid.json")
 		if err := os.WriteFile(path, []byte(`{"cves":`), 0o600); err != nil {
-			t.Fatalf("write snapshot file: %v", err)
+			t.Fatalf(errWriteSnapshotFileFmt, err)
 		}
 		if _, err := loadSeveritySnapshot(path); err == nil {
 			t.Fatal("expected invalid snapshot json error")
@@ -910,24 +934,24 @@ func TestResolveUsesCachedCVEsAndJoinedErrors(t *testing.T) {
 		snapshot: map[string]severityAssessment{},
 		cache: map[string]severityAssessment{
 			"CVE-2026-1000": {Severity: severityMedium, Score: 6.0, Source: "CVE-2026-1000"},
-			"CVE-2026-1001": {Severity: severityUnknown, Source: "CVE-2026-1001"},
-			"CVE-2026-1002": {Severity: severityHigh, Score: 8.1, Source: "CVE-2026-1002"},
+			testCVE20261001: {Severity: severityUnknown, Source: testCVE20261001},
+			"CVE-2026-1002": {Severity: severityHigh, Score: testScoreEightPointOne, Source: "CVE-2026-1002"},
 		},
 		errorMap: map[string]error{
-			"CVE-2026-1001": errors.New("lookup failed"),
+			testCVE20261001: errors.New("lookup failed"),
 		},
 	}
 
 	vuln := vulnAssessment{
 		ID:      "GO-TEST-1",
-		Aliases: []string{"CVE-2026-1001", "cve-2026-1000", "CVE-2026-1002"},
+		Aliases: []string{testCVE20261001, "cve-2026-1000", "CVE-2026-1002"},
 	}
 
 	assessment, err := resolver.Resolve(context.Background(), vuln)
 	if err == nil {
 		t.Fatal("expected joined resolver error")
 	}
-	if assessment.Severity != severityHigh || assessment.Score != 8.1 || assessment.Source != "CVE-2026-1002" {
+	if assessment.Severity != severityHigh || assessment.Score != testScoreEightPointOne || assessment.Source != "CVE-2026-1002" {
 		t.Fatalf("unexpected best assessment: %#v", assessment)
 	}
 	if !strings.Contains(err.Error(), "lookup failed") {
@@ -946,7 +970,7 @@ func TestResolvePrefersOSVSeverityWhenPresent(t *testing.T) {
 
 	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
 		ID:      "GO-ONLY",
-		Aliases: []string{"GHSA-ABCD-1234-WXYZ", "CVE-2026-1234"},
+		Aliases: []string{testGHSAAdvisoryID, "CVE-2026-1234"},
 		OSVSeverity: severityAssessment{
 			Severity: severityMedium,
 			Score:    5.2,
@@ -968,20 +992,20 @@ func TestResolvePrefersGHSAOverNVD(t *testing.T) {
 	resolver := &nvdSeverityResolver{
 		snapshot: map[string]severityAssessment{},
 		cache: map[string]severityAssessment{
-			"GHSA-ABCD-1234-WXYZ": {Severity: severityLow, Score: 2.0, Source: "GHSA-ABCD-1234-WXYZ", Method: severityMethodGHSA},
-			"CVE-2026-1234":       {Severity: severityCritical, Score: 9.8, Source: "CVE-2026-1234", Method: severityMethodNVD},
+			testGHSAAdvisoryID: {Severity: severityLow, Score: 2.0, Source: testGHSAAdvisoryID, Method: severityMethodGHSA},
+			"CVE-2026-1234":    {Severity: severityCritical, Score: 9.8, Source: "CVE-2026-1234", Method: severityMethodNVD},
 		},
 		errorMap: map[string]error{},
 	}
 
 	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
 		ID:      "GO-ONLY",
-		Aliases: []string{"GHSA-ABCD-1234-WXYZ", "CVE-2026-1234"},
+		Aliases: []string{testGHSAAdvisoryID, "CVE-2026-1234"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error resolving GHSA-first severity: %v", err)
 	}
-	if assessment.Severity != severityLow || assessment.Method != severityMethodGHSA || assessment.Source != "GHSA-ABCD-1234-WXYZ" {
+	if assessment.Severity != severityLow || assessment.Method != severityMethodGHSA || assessment.Source != testGHSAAdvisoryID {
 		t.Fatalf("unexpected GHSA-first assessment: %#v", assessment)
 	}
 }
@@ -992,17 +1016,17 @@ func TestResolveFallsBackToNVDWhenGHSAFails(t *testing.T) {
 	resolver := &nvdSeverityResolver{
 		snapshot: map[string]severityAssessment{},
 		cache: map[string]severityAssessment{
-			"GHSA-ABCD-1234-WXYZ": {Severity: severityUnknown, Source: "GHSA-ABCD-1234-WXYZ", Method: severityMethodGHSA},
-			"CVE-2026-1234":       {Severity: severityHigh, Score: 8.0, Source: "CVE-2026-1234", Method: severityMethodNVD},
+			testGHSAAdvisoryID: {Severity: severityUnknown, Source: testGHSAAdvisoryID, Method: severityMethodGHSA},
+			"CVE-2026-1234":    {Severity: severityHigh, Score: 8.0, Source: "CVE-2026-1234", Method: severityMethodNVD},
 		},
 		errorMap: map[string]error{
-			"GHSA-ABCD-1234-WXYZ": errors.New("ghsa failed"),
+			testGHSAAdvisoryID: errors.New("ghsa failed"),
 		},
 	}
 
 	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
 		ID:      "GO-ONLY",
-		Aliases: []string{"GHSA-ABCD-1234-WXYZ", "CVE-2026-1234"},
+		Aliases: []string{testGHSAAdvisoryID, "CVE-2026-1234"},
 	})
 	if err == nil {
 		t.Fatal("expected GHSA failure warning when NVD fallback succeeds")
@@ -1045,18 +1069,18 @@ func TestResolveUnknownSeverityReasonLookupFailures(t *testing.T) {
 	resolver := &nvdSeverityResolver{
 		snapshot: map[string]severityAssessment{},
 		cache: map[string]severityAssessment{
-			"GHSA-ABCD-1234-WXYZ": {Severity: severityUnknown, Source: "GHSA-ABCD-1234-WXYZ", Method: severityMethodGHSA},
-			"CVE-2026-1234":       {Severity: severityUnknown, Source: "CVE-2026-1234", Method: severityMethodNVD},
+			testGHSAAdvisoryID: {Severity: severityUnknown, Source: testGHSAAdvisoryID, Method: severityMethodGHSA},
+			"CVE-2026-1234":    {Severity: severityUnknown, Source: "CVE-2026-1234", Method: severityMethodNVD},
 		},
 		errorMap: map[string]error{
-			"GHSA-ABCD-1234-WXYZ": errors.New("ghsa down"),
-			"CVE-2026-1234":       errors.New("nvd down"),
+			testGHSAAdvisoryID: errors.New("ghsa down"),
+			"CVE-2026-1234":    errors.New("nvd down"),
 		},
 	}
 
 	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
 		ID:      "GO-ONLY",
-		Aliases: []string{"GHSA-ABCD-1234-WXYZ", "CVE-2026-1234"},
+		Aliases: []string{testGHSAAdvisoryID, "CVE-2026-1234"},
 	})
 	if err == nil {
 		t.Fatal("expected joined resolver error")
@@ -1064,7 +1088,7 @@ func TestResolveUnknownSeverityReasonLookupFailures(t *testing.T) {
 	if assessment.Severity != severityUnknown || assessment.Method != severityMethodUnknown {
 		t.Fatalf("expected UNKNOWN assessment, got %#v", assessment)
 	}
-	if !strings.Contains(assessment.Reason, "GHSA lookup failed") || !strings.Contains(assessment.Reason, "NVD lookup failed") {
+	if !strings.Contains(assessment.Reason, msgGHSALookupFailed) || !strings.Contains(assessment.Reason, "NVD lookup failed") {
 		t.Fatalf("expected explicit lookup failure reason, got %#v", assessment)
 	}
 }
@@ -1074,16 +1098,16 @@ func TestResolveWithOnlyGHSAAliasFallsBackToUnknownReason(t *testing.T) {
 
 	resolver := &nvdSeverityResolver{
 		cache: map[string]severityAssessment{
-			"GHSA-ABCD-1234-WXYZ": {Severity: severityUnknown, Source: "GHSA-ABCD-1234-WXYZ", Method: severityMethodGHSA},
+			testGHSAAdvisoryID: {Severity: severityUnknown, Source: testGHSAAdvisoryID, Method: severityMethodGHSA},
 		},
 		errorMap: map[string]error{
-			"GHSA-ABCD-1234-WXYZ": errors.New("ghsa lookup failed"),
+			testGHSAAdvisoryID: errors.New("ghsa lookup failed"),
 		},
 	}
 
 	assessment, err := resolver.Resolve(context.Background(), vulnAssessment{
 		ID:      "GO-ONLY",
-		Aliases: []string{"GHSA-ABCD-1234-WXYZ"},
+		Aliases: []string{testGHSAAdvisoryID},
 	})
 	if err == nil {
 		t.Fatal("expected GHSA lookup error")
@@ -1091,7 +1115,7 @@ func TestResolveWithOnlyGHSAAliasFallsBackToUnknownReason(t *testing.T) {
 	if assessment.Severity != severityUnknown {
 		t.Fatalf("expected UNKNOWN severity, got %#v", assessment)
 	}
-	if !strings.Contains(assessment.Reason, "GHSA lookup failed") || !strings.Contains(assessment.Reason, "no CVE aliases found") {
+	if !strings.Contains(assessment.Reason, msgGHSALookupFailed) || !strings.Contains(assessment.Reason, "no CVE aliases found") {
 		t.Fatalf("expected explicit mixed reason, got %#v", assessment)
 	}
 }
@@ -1120,13 +1144,19 @@ func TestResolveGHSASuccessfulLookupIsCachedWithoutToken(t *testing.T) {
 		if got := request.Header.Get("Accept"); got != "application/vnd.github+json" {
 			t.Fatalf("unexpected accept header: %q", got)
 		}
-		if got := request.URL.Path; got != "/advisories/GHSA-ABCD-1234-WXYZ" {
+		if got := request.URL.Path; got != "/advisories/"+testGHSAAdvisoryID {
 			t.Fatalf("unexpected advisory path: %s", got)
 		}
-		writer.Header().Set("Content-Type", "application/json")
-		_, writeErr := writer.Write([]byte(`{"ghsa_id":"GHSA-ABCD-1234-WXYZ","severity":"high","cvss":{"score":7.4}}`))
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
+		_, writeErr := fmt.Fprintf(
+			writer,
+			`{"ghsa_id":"%s","severity":"%s","cvss":{"score":%.1f}}`,
+			testGHSAAdvisoryID,
+			testSeverityHighLower,
+			testScoreSevenPointFour,
+		)
 		if writeErr != nil {
-			t.Fatalf("write response: %v", writeErr)
+			t.Fatalf(errWriteResponseFmt, writeErr)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -1142,11 +1172,11 @@ func TestResolveGHSASuccessfulLookupIsCachedWithoutToken(t *testing.T) {
 	if firstErr != nil {
 		t.Fatalf("unexpected first GHSA lookup error: %v", firstErr)
 	}
-	if first.Severity != severityHigh || first.Score != 7.4 || first.Method != severityMethodGHSA {
+	if first.Severity != severityHigh || first.Score != testScoreSevenPointFour || first.Method != severityMethodGHSA {
 		t.Fatalf("unexpected first GHSA assessment: %#v", first)
 	}
 
-	second, secondErr := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	second, secondErr := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if secondErr != nil {
 		t.Fatalf("unexpected cached GHSA lookup error: %v", secondErr)
 	}
@@ -1165,10 +1195,10 @@ func TestResolveGHSAUsesBearerTokenWhenConfigured(t *testing.T) {
 		if got := request.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("unexpected authorization header: %q", got)
 		}
-		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		_, writeErr := writer.Write([]byte(`{"ghsa_id":"GHSA-ABCD-1234-WXYZ","severity":"medium","cvss":{"score":5.5}}`))
 		if writeErr != nil {
-			t.Fatalf("write response: %v", writeErr)
+			t.Fatalf(errWriteResponseFmt, writeErr)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -1181,7 +1211,7 @@ func TestResolveGHSAUsesBearerTokenWhenConfigured(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err != nil {
 		t.Fatalf("unexpected GHSA lookup error: %v", err)
 	}
@@ -1199,14 +1229,14 @@ func TestResolveGHSAOfflineMode(t *testing.T) {
 		errorMap: map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected offline GHSA error")
 	}
 	if !strings.Contains(err.Error(), "offline mode enabled") {
 		t.Fatalf("unexpected offline error: %v", err)
 	}
-	if assessment.Severity != severityUnknown || assessment.Source != "GHSA-ABCD-1234-WXYZ" {
+	if assessment.Severity != severityUnknown || assessment.Source != testGHSAAdvisoryID {
 		t.Fatalf("unexpected offline assessment: %#v", assessment)
 	}
 }
@@ -1216,16 +1246,16 @@ func TestResolveGHSAInvalidBaseURL(t *testing.T) {
 
 	resolver := &nvdSeverityResolver{
 		client:      &http.Client{Timeout: time.Second},
-		ghsaBaseURL: "://bad-url",
+		ghsaBaseURL: testInvalidURL,
 		cache:       map[string]severityAssessment{},
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected invalid GHSA base URL error")
 	}
-	if assessment.Severity != severityUnknown || assessment.Source != "GHSA-ABCD-1234-WXYZ" {
+	if assessment.Severity != severityUnknown || assessment.Source != testGHSAAdvisoryID {
 		t.Fatalf("unexpected invalid-url assessment: %#v", assessment)
 	}
 }
@@ -1247,7 +1277,7 @@ func TestResolveGHSAUnauthorizedStatusFailsFast(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA HTTP 401 error")
 	}
@@ -1279,7 +1309,7 @@ func TestResolveGHSAForbiddenStatusFailsFast(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA HTTP 403 error")
 	}
@@ -1309,7 +1339,7 @@ func TestResolveGHSANon200Status(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA non-200 error")
 	}
@@ -1325,10 +1355,10 @@ func TestResolveGHSADecodeError(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		_, writeErr := writer.Write([]byte("{not-json"))
 		if writeErr != nil {
-			t.Fatalf("write response: %v", writeErr)
+			t.Fatalf(errWriteResponseFmt, writeErr)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -1340,7 +1370,7 @@ func TestResolveGHSADecodeError(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA decode error")
 	}
@@ -1353,10 +1383,10 @@ func TestResolveGHSAUnknownSeverityFails(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		_, writeErr := writer.Write([]byte(`{"ghsa_id":"GHSA-ABCD-1234-WXYZ"}`))
 		if writeErr != nil {
-			t.Fatalf("write response: %v", writeErr)
+			t.Fatalf(errWriteResponseFmt, writeErr)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -1368,7 +1398,7 @@ func TestResolveGHSAUnknownSeverityFails(t *testing.T) {
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA unknown-severity error")
 	}
@@ -1393,12 +1423,12 @@ func TestResolveGHSARetryableStatusEventuallyFails(t *testing.T) {
 	resolver := &nvdSeverityResolver{
 		client:      server.Client(),
 		ghsaBaseURL: server.URL + "/advisories",
-		ghsaToken:   "configured",
+		ghsaToken:   testConfiguredValue,
 		cache:       map[string]severityAssessment{},
 		errorMap:    map[string]error{},
 	}
 
-	assessment, err := resolver.resolveGHSA(context.Background(), "GHSA-ABCD-1234-WXYZ")
+	assessment, err := resolver.resolveGHSA(context.Background(), testGHSAAdvisoryID)
 	if err == nil {
 		t.Fatal("expected GHSA retry exhaustion error")
 	}
@@ -1416,13 +1446,13 @@ func TestResolveGHSARetryableStatusEventuallyFails(t *testing.T) {
 func TestResolveCVEInvalidBaseURL(t *testing.T) {
 	t.Parallel()
 
-	resolver := newTestResolver(&http.Client{Timeout: time.Second}, "://bad-url", "")
+	resolver := newTestResolver(&http.Client{Timeout: time.Second}, testInvalidURL, "")
 	assessment, err := resolver.resolveCVE(context.Background(), "cve-2026-2000")
 	if err == nil {
 		t.Fatal("expected URL parse error")
 	}
 	if assessment.Severity != severityUnknown || assessment.Source != "CVE-2026-2000" {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 }
 
@@ -1435,7 +1465,7 @@ func TestResolveCVENon200Status(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	resolver := newTestResolver(server.Client(), server.URL, "")
-	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	assessment, err := resolver.resolveCVE(context.Background(), testCVE20262001)
 	if err == nil {
 		t.Fatal("expected HTTP status error")
 	}
@@ -1443,7 +1473,7 @@ func TestResolveCVENon200Status(t *testing.T) {
 		t.Fatalf("unexpected status error: %v", err)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 }
 
@@ -1458,7 +1488,7 @@ func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	resolver := newTestResolver(server.Client(), server.URL, "")
-	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	assessment, err := resolver.resolveCVE(context.Background(), testCVE20262001)
 	if err == nil {
 		t.Fatal("expected HTTP 401 error")
 	}
@@ -1466,7 +1496,7 @@ func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
 		t.Fatalf("unexpected 401 error: got %q want %q", err.Error(), nvd401ErrorMessage)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("expected one attempt for HTTP 401, got %d", calls.Load())
@@ -1484,7 +1514,7 @@ func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	resolver := newTestResolver(server.Client(), server.URL, "")
-	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2001")
+	assessment, err := resolver.resolveCVE(context.Background(), testCVE20262001)
 	if err == nil {
 		t.Fatal("expected HTTP 403 error")
 	}
@@ -1492,7 +1522,7 @@ func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 		t.Fatalf("unexpected 403 error: got %q want %q", err.Error(), nvd403ErrorMessage)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("expected one attempt for HTTP 403, got %d", calls.Load())
@@ -1503,7 +1533,7 @@ func TestResolveCVEDecodeError(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		_, writeErr := writer.Write([]byte("{not-json"))
 		if writeErr != nil {
 			return
@@ -1517,7 +1547,7 @@ func TestResolveCVEDecodeError(t *testing.T) {
 		t.Fatal("expected decode error")
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 }
 
@@ -1542,11 +1572,11 @@ func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
 		}
 
 		metric := nvdMetric{}
-		metric.CVSSData.BaseSeverity = "HIGH"
-		metric.CVSSData.BaseScore = 7.4
+		metric.CVSSData.BaseSeverity = string(severityHigh)
+		metric.CVSSData.BaseScore = testScoreSevenPointFour
 		response.Vulnerabilities[0].CVE.Metrics.CVSSMetricV31 = []nvdMetric{metric}
 
-		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		encodeErr := json.NewEncoder(writer).Encode(response)
 		if encodeErr != nil {
 			http.Error(writer, encodeErr.Error(), http.StatusInternalServerError)
@@ -1560,7 +1590,7 @@ func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
 	if firstErr != nil {
 		t.Fatalf("unexpected first lookup error: %v", firstErr)
 	}
-	if first.Severity != severityHigh || first.Score != 7.4 {
+	if first.Severity != severityHigh || first.Score != testScoreSevenPointFour {
 		t.Fatalf("unexpected first assessment: %#v", first)
 	}
 
@@ -1586,7 +1616,7 @@ func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	resolver := newTestResolver(server.Client(), server.URL, "configured")
+	resolver := newTestResolver(server.Client(), server.URL, testConfiguredValue)
 	assessment, err := resolver.resolveCVE(context.Background(), "CVE-2026-2004")
 	if err == nil {
 		t.Fatal("expected error after retries")
@@ -1595,7 +1625,7 @@ func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 		t.Fatalf("unexpected retry error: %v", err)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("expected three attempts, got %d", calls.Load())
@@ -1633,7 +1663,7 @@ func TestResolveCVERateLimitStatusEventuallyFails(t *testing.T) {
 		t.Fatalf("unexpected auth/authz text in 429 error: %v", err)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("expected three attempts for HTTP 429, got %d", calls.Load())
@@ -1653,13 +1683,13 @@ func TestResolveCVERetryableStatusReturnsContextCancellation(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	resolver := newTestResolver(server.Client(), server.URL, "configured")
+	resolver := newTestResolver(server.Client(), server.URL, testConfiguredValue)
 	assessment, err := resolver.resolveCVE(ctx, "CVE-2026-2005")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got: %v", err)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("expected one request before cancellation, got %d", calls.Load())
@@ -1679,7 +1709,7 @@ func TestResolveCVETransportErrorWithCanceledContext(t *testing.T) {
 			}),
 		},
 		"https://example.test",
-		"configured",
+		testConfiguredValue,
 	)
 
 	assessment, err := resolver.resolveCVE(ctx, "CVE-2026-2006")
@@ -1687,7 +1717,7 @@ func TestResolveCVETransportErrorWithCanceledContext(t *testing.T) {
 		t.Fatalf("expected context cancellation, got: %v", err)
 	}
 	if assessment.Severity != severityUnknown {
-		t.Fatalf("unexpected assessment: %#v", assessment)
+		t.Fatalf(errUnexpectedAssessFmt, assessment)
 	}
 }
 
@@ -1719,11 +1749,11 @@ func TestBestNVDSeverityPrefersHigherScoreOnTies(t *testing.T) {
 
 	first := nvdMetric{}
 	first.CVSSData.BaseScore = 7.1
-	first.CVSSData.BaseSeverity = "HIGH"
+	first.CVSSData.BaseSeverity = string(severityHigh)
 
 	second := nvdMetric{}
 	second.CVSSData.BaseScore = 8.3
-	second.CVSSData.BaseSeverity = "HIGH"
+	second.CVSSData.BaseSeverity = string(severityHigh)
 
 	payload.Vulnerabilities[0].CVE.Metrics.CVSSMetricV30 = []nvdMetric{first, second}
 
@@ -1744,7 +1774,7 @@ func TestBetterSeverity(t *testing.T) {
 	}
 
 	if !betterSeverity(
-		severityAssessment{Severity: severityHigh, Score: 8.1},
+		severityAssessment{Severity: severityHigh, Score: testScoreEightPointOne},
 		severityAssessment{Severity: severityHigh, Score: 7.1},
 	) {
 		t.Fatal("expected higher score on equal rank to win")
@@ -1793,7 +1823,7 @@ func TestAddQueryParam(t *testing.T) {
 		t.Fatalf("unexpected query update: %s", updated)
 	}
 
-	if _, queryErr := addQueryParam("://bad-url", "k", "v"); queryErr == nil {
+	if _, queryErr := addQueryParam(testInvalidURL, "k", "v"); queryErr == nil {
 		t.Fatal("expected invalid URL error")
 	}
 }
@@ -1801,15 +1831,15 @@ func TestAddQueryParam(t *testing.T) {
 func TestAdvisoryLookupURL(t *testing.T) {
 	t.Parallel()
 
-	updated, err := advisoryLookupURL("https://api.github.com/advisories", "GHSA-ABCD-1234-WXYZ")
+	updated, err := advisoryLookupURL("https://api.github.com/advisories", testGHSAAdvisoryID)
 	if err != nil {
 		t.Fatalf("advisoryLookupURL returned error: %v", err)
 	}
-	if updated != "https://api.github.com/advisories/GHSA-ABCD-1234-WXYZ" {
+	if updated != "https://api.github.com/advisories/"+testGHSAAdvisoryID {
 		t.Fatalf("unexpected advisory URL: %s", updated)
 	}
 
-	withPath, pathErr := advisoryLookupURL("https://example.test/api/v1/", "GHSA-X")
+	withPath, pathErr := advisoryLookupURL("https://example.test/api/v1/", testGHSAShortID)
 	if pathErr != nil {
 		t.Fatalf("advisoryLookupURL path returned error: %v", pathErr)
 	}
@@ -1817,10 +1847,10 @@ func TestAdvisoryLookupURL(t *testing.T) {
 		t.Fatalf("unexpected advisory path URL: %s", withPath)
 	}
 
-	if _, emptyErr := advisoryLookupURL("", "GHSA-X"); emptyErr == nil {
+	if _, emptyErr := advisoryLookupURL("", testGHSAShortID); emptyErr == nil {
 		t.Fatal("expected empty base URL error")
 	}
-	if _, invalidErr := advisoryLookupURL("://bad-url", "GHSA-X"); invalidErr == nil {
+	if _, invalidErr := advisoryLookupURL(testInvalidURL, testGHSAShortID); invalidErr == nil {
 		t.Fatal("expected invalid base URL error")
 	}
 }
@@ -1828,13 +1858,13 @@ func TestAdvisoryLookupURL(t *testing.T) {
 func TestRetryableGHSAStatusError(t *testing.T) {
 	t.Parallel()
 
-	rateLimitErr := retryableGHSAStatusError(http.StatusTooManyRequests, "GHSA-ABCD-1234-WXYZ")
+	rateLimitErr := retryableGHSAStatusError(http.StatusTooManyRequests, testGHSAAdvisoryID)
 	if !strings.Contains(rateLimitErr.Error(), "HTTP 429") || !strings.Contains(rateLimitErr.Error(), "GHSA_TOKEN_FILE") {
 		t.Fatalf("unexpected GHSA 429 message: %v", rateLimitErr)
 	}
 
-	serverErr := retryableGHSAStatusError(http.StatusBadGateway, "GHSA-ABCD-1234-WXYZ")
-	if serverErr.Error() != "GHSA API returned HTTP 502 for GHSA-ABCD-1234-WXYZ" {
+	serverErr := retryableGHSAStatusError(http.StatusBadGateway, testGHSAAdvisoryID)
+	if serverErr.Error() != "GHSA API returned HTTP 502 for "+testGHSAAdvisoryID {
 		t.Fatalf("unexpected GHSA status message: %v", serverErr)
 	}
 }
@@ -1848,7 +1878,7 @@ func TestParseScore(t *testing.T) {
 		want  float64
 		ok    bool
 	}{
-		{name: "float64", input: 7.4, want: 7.4, ok: true},
+		{name: "float64", input: testScoreSevenPointFour, want: testScoreSevenPointFour, ok: true},
 		{name: "float32", input: float32(6.1), want: float64(float32(6.1)), ok: true},
 		{name: "int", input: 5, want: 5, ok: true},
 		{name: "int32", input: int32(4), want: 4, ok: true},
@@ -1880,7 +1910,7 @@ func TestResolveOSVSeverityAndCandidateExtraction(t *testing.T) {
 		ID:       "GO-OSV-1",
 		Severity: []interface{}{"low", map[string]interface{}{"severity": "critical", "score": 9.8}},
 	}
-	osv.DatabaseSpecific.Severity = "medium"
+	osv.DatabaseSpecific.Severity = testSeverityMediumLower
 	osv.DatabaseSpecific.Score = 4.2
 
 	assessment, ok := resolveOSVSeverity(osv)
@@ -1891,13 +1921,13 @@ func TestResolveOSVSeverityAndCandidateExtraction(t *testing.T) {
 		t.Fatalf("unexpected OSV assessment: %#v", assessment)
 	}
 
-	stringCandidates := extractOSVSeverityCandidates("high")
-	if len(stringCandidates) != 1 || stringCandidates[0].Severity != "high" {
+	stringCandidates := extractOSVSeverityCandidates(testSeverityHighLower)
+	if len(stringCandidates) != 1 || stringCandidates[0].Severity != testSeverityHighLower {
 		t.Fatalf("unexpected string candidates: %#v", stringCandidates)
 	}
 
-	mapCandidates := extractOSVSeverityCandidates(map[string]interface{}{"severity": "medium", "score": "7.0"})
-	if len(mapCandidates) != 1 || mapCandidates[0].Severity != "medium" || mapCandidates[0].Score != 7.0 {
+	mapCandidates := extractOSVSeverityCandidates(map[string]interface{}{"severity": testSeverityMediumLower, "score": "7.0"})
+	if len(mapCandidates) != 1 || mapCandidates[0].Severity != testSeverityMediumLower || mapCandidates[0].Score != 7.0 {
 		t.Fatalf("unexpected map candidates: %#v", mapCandidates)
 	}
 
@@ -1910,16 +1940,16 @@ func TestResolveOSVSeverityAndCandidateExtraction(t *testing.T) {
 func TestCandidateFromMapAndScoreFromCVSSText(t *testing.T) {
 	t.Parallel()
 
-	withNumericScore := candidateFromMap(map[string]interface{}{"severity": "high", "score": 8.1})
-	if withNumericScore.Severity != "high" || withNumericScore.Score != 8.1 {
+	withNumericScore := candidateFromMap(map[string]interface{}{"severity": testSeverityHighLower, "score": testScoreEightPointOne})
+	if withNumericScore.Severity != testSeverityHighLower || withNumericScore.Score != testScoreEightPointOne {
 		t.Fatalf("unexpected numeric candidate: %#v", withNumericScore)
 	}
 
 	withVectorScore := candidateFromMap(map[string]interface{}{
-		"severity": "medium",
+		"severity": testSeverityMediumLower,
 		"score":    "CVSS:3.1/AV:N/SCORE:7.7",
 	})
-	if withVectorScore.Severity != "medium" || withVectorScore.Score != 7.7 {
+	if withVectorScore.Severity != testSeverityMediumLower || withVectorScore.Score != 7.7 {
 		t.Fatalf("unexpected vector candidate: %#v", withVectorScore)
 	}
 
@@ -1940,17 +1970,17 @@ func TestBestGHSASeverity(t *testing.T) {
 	t.Parallel()
 
 	payload := ghsaResponse{
-		GHSAID:   "GHSA-ABCD-1234-WXYZ",
-		Severity: "medium",
+		GHSAID:   testGHSAAdvisoryID,
+		Severity: testSeverityMediumLower,
 		CVSS:     ghsaCVSS{Score: "5.0"},
 		CVSSSeverities: ghsaSevData{
-			CVSSV3: ghsaCVSSData{Severity: "HIGH", Score: 7.8},
+			CVSSV3: ghsaCVSSData{Severity: string(severityHigh), Score: testScoreSevenPointEight},
 			CVSSV4: ghsaCVSSData{Severity: "LOW", Score: 3.0},
 		},
 	}
 
 	assessment := bestGHSASeverity(payload, "GHSA-FALLBACK")
-	if assessment.Severity != severityHigh || assessment.Score != 7.8 || assessment.Source != "GHSA-ABCD-1234-WXYZ" {
+	if assessment.Severity != severityHigh || assessment.Score != testScoreSevenPointEight || assessment.Source != testGHSAAdvisoryID {
 		t.Fatalf("unexpected GHSA best severity: %#v", assessment)
 	}
 
@@ -1973,7 +2003,7 @@ func TestPrintResult(t *testing.T) {
 				},
 				Severity: severityAssessment{
 					Severity: severityHigh,
-					Score:    8.1,
+					Score:    testScoreEightPointOne,
 					Source:   "CVE-2026-3000",
 					Method:   severityMethodNVD,
 					Reason:   "GHSA lookup failed, NVD fallback used",
@@ -2089,11 +2119,11 @@ func buildScanReportFixtureResult() evaluationResult {
 				Vuln: vulnAssessment{
 					ID:      "GO-FAIL",
 					Summary: "unknown severity fallback",
-					Aliases: []string{"GHSA-ABCD-1234-WXYZ"},
+					Aliases: []string{testGHSAAdvisoryID},
 				},
 				Severity: severityAssessment{
 					Severity: severityUnknown,
-					Source:   "GHSA-ABCD-1234-WXYZ",
+					Source:   testGHSAAdvisoryID,
 					Method:   severityMethodUnknown,
 					Reason:   "OSV severity unavailable in govulncheck input, GHSA lookup failed, no CVE aliases found",
 				},
@@ -2170,10 +2200,10 @@ func assertBuildScanReportFindingsAndTruncation(t *testing.T, report scanReport)
 	if failSeverity == nil {
 		t.Fatal("expected fail severity in report finding")
 	}
-	if failSeverity.Source != "GHSA-ABCD-1234-WXYZ" {
+	if failSeverity.Source != testGHSAAdvisoryID {
 		t.Fatalf("unexpected fail severity source: %s", failSeverity.Source)
 	}
-	if !strings.Contains(failSeverity.Reason, "GHSA lookup failed") {
+	if !strings.Contains(failSeverity.Reason, msgGHSALookupFailed) {
 		t.Fatalf("expected unknown severity reason, got: %s", failSeverity.Reason)
 	}
 
@@ -2449,7 +2479,7 @@ func setupMainOfflineSnapshotFlowFiles(t *testing.T) mainOfflineSnapshotFlowPath
 	}
 	snapshotContent := `{"cves":{"CVE-2026-1234":{"severity":"LOW","score":1.1}}}`
 	if err := os.WriteFile(paths.snapshotPath, []byte(snapshotContent), 0o600); err != nil {
-		t.Fatalf("write snapshot file: %v", err)
+		t.Fatalf(errWriteSnapshotFileFmt, err)
 	}
 	return paths
 }

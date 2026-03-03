@@ -34,6 +34,17 @@ type FileRepository struct {
 	persistedState fileState
 }
 
+const (
+	organisationIDPrefix         = "org"
+	personIDPrefix               = "person"
+	projectIDPrefix              = "project"
+	groupIDPrefix                = "group"
+	allocationIDPrefix           = "allocation"
+	orgHolidayIDPrefix           = "org_holiday"
+	groupUnavailabilityIDPrefix  = "group_unavailability"
+	personUnavailabilityIDPrefix = "person_unavailability"
+)
+
 func (r *FileRepository) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -367,7 +378,7 @@ func (r *FileRepository) CreateOrganisation(ctx context.Context, organisation do
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	organisation.ID = r.nextIDLocked("org")
+	organisation.ID = r.nextIDLocked(organisationIDPrefix)
 	organisation.CreatedAt = now
 	organisation.UpdatedAt = now
 	r.state.Organisations[organisation.ID] = organisation
@@ -529,7 +540,7 @@ func (r *FileRepository) CreatePerson(ctx context.Context, person domain.Person)
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	person.ID = r.nextIDLocked("person")
+	person.ID = r.nextIDLocked(personIDPrefix)
 	person.CreatedAt = now
 	person.UpdatedAt = now
 	r.state.Persons[person.ID] = person
@@ -666,7 +677,7 @@ func (r *FileRepository) CreateProject(ctx context.Context, project domain.Proje
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	project.ID = r.nextIDLocked("project")
+	project.ID = r.nextIDLocked(projectIDPrefix)
 	project.CreatedAt = now
 	project.UpdatedAt = now
 	r.state.Projects[project.ID] = project
@@ -767,7 +778,7 @@ func (r *FileRepository) CreateGroup(ctx context.Context, group domain.Group) (d
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	group.ID = r.nextIDLocked("group")
+	group.ID = r.nextIDLocked(groupIDPrefix)
 	group.MemberIDs = uniqueStrings(group.MemberIDs)
 	group.CreatedAt = now
 	group.UpdatedAt = now
@@ -882,7 +893,7 @@ func (r *FileRepository) CreateAllocation(ctx context.Context, allocation domain
 	} else {
 		allocation.PersonID = ""
 	}
-	allocation.ID = r.nextIDLocked("allocation")
+	allocation.ID = r.nextIDLocked(allocationIDPrefix)
 	allocation.CreatedAt = now
 	allocation.UpdatedAt = now
 	r.state.Allocations[allocation.ID] = allocation
@@ -967,7 +978,7 @@ func (r *FileRepository) CreateOrgHoliday(ctx context.Context, entry domain.OrgH
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	entry.ID = r.nextIDLocked("org_holiday")
+	entry.ID = r.nextIDLocked(orgHolidayIDPrefix)
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	r.state.OrgHolidays[entry.ID] = entry
@@ -1022,7 +1033,7 @@ func (r *FileRepository) CreateGroupUnavailability(ctx context.Context, entry do
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	entry.ID = r.nextIDLocked("group_unavailability")
+	entry.ID = r.nextIDLocked(groupUnavailabilityIDPrefix)
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	r.state.GroupUnavailability[entry.ID] = entry
@@ -1113,7 +1124,7 @@ func (r *FileRepository) CreatePersonUnavailability(ctx context.Context, entry d
 	defer r.mu.Unlock()
 
 	now := time.Now().UTC()
-	entry.ID = r.nextIDLocked("person_unavailability")
+	entry.ID = r.nextIDLocked(personUnavailabilityIDPrefix)
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	r.state.PersonUnavailability[entry.ID] = entry
@@ -1144,7 +1155,7 @@ func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(ctx context.Co
 	}
 
 	now := time.Now().UTC()
-	entry.ID = r.nextIDLocked("person_unavailability")
+	entry.ID = r.nextIDLocked(personUnavailabilityIDPrefix)
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	r.state.PersonUnavailability[entry.ID] = entry

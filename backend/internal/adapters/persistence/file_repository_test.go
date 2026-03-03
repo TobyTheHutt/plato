@@ -11,6 +11,14 @@ import (
 	"plato/backend/internal/domain"
 )
 
+const (
+	testRepoFileName         = "repo.json"
+	testMissingID            = "missing"
+	testNonexistentOrgID     = "nonexistent_org"
+	errCreateRepositoryFmt   = "create repository: %v"
+	errCreateOrganisationFmt = "create organisation: %v"
+)
+
 func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	state := setupRepositoryCascadeState(t)
 	createRepositoryCascadeFixtures(t, state)
@@ -40,7 +48,7 @@ type repositoryCascadeState struct {
 
 func setupRepositoryCascadeState(t *testing.T) *repositoryCascadeState {
 	t.Helper()
-	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "repo.json"))
+	repo, err := NewFileRepository(filepath.Join(t.TempDir(), testRepoFileName))
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
@@ -447,48 +455,48 @@ func verifyRepositoryCascadePersistence(t *testing.T, state *repositoryCascadeSt
 
 func TestFileRepositoryNotFoundCases(t *testing.T) {
 	ctx := context.Background()
-	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "repo.json"))
+	repo, err := NewFileRepository(filepath.Join(t.TempDir(), testRepoFileName))
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
 
-	_, err = repo.GetOrganisation(ctx, "missing")
+	_, err = repo.GetOrganisation(ctx, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for organisation, got %v", err)
 	}
-	err = repo.DeleteOrganisation(ctx, "missing")
+	err = repo.DeleteOrganisation(ctx, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for delete organisation, got %v", err)
 	}
-	_, err = repo.GetProject(ctx, "org", "missing")
+	_, err = repo.GetProject(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for project, got %v", err)
 	}
-	err = repo.DeletePerson(ctx, "org", "missing")
+	err = repo.DeletePerson(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person delete, got %v", err)
 	}
-	err = repo.DeleteGroup(ctx, "org", "missing")
+	err = repo.DeleteGroup(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for group delete, got %v", err)
 	}
-	err = repo.DeleteAllocation(ctx, "org", "missing")
+	err = repo.DeleteAllocation(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for allocation delete, got %v", err)
 	}
-	err = repo.DeleteOrgHoliday(ctx, "org", "missing")
+	err = repo.DeleteOrgHoliday(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for holiday delete, got %v", err)
 	}
-	err = repo.DeleteGroupUnavailability(ctx, "org", "missing")
+	err = repo.DeleteGroupUnavailability(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for group unavailability delete, got %v", err)
 	}
-	err = repo.DeletePersonUnavailability(ctx, "org", "missing")
+	err = repo.DeletePersonUnavailability(ctx, testNonexistentOrgID, testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person unavailability delete, got %v", err)
 	}
-	err = repo.DeletePersonUnavailabilityByPerson(ctx, "org", "person", "missing")
+	err = repo.DeletePersonUnavailabilityByPerson(ctx, testNonexistentOrgID, "person", testMissingID)
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for person-scoped person unavailability delete, got %v", err)
 	}
@@ -574,7 +582,7 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	}
 
 	if runtime.GOOS != "windows" {
-		_, err = NewFileRepository(filepath.Join(os.DevNull, "repo.json"))
+		_, err = NewFileRepository(filepath.Join(os.DevNull, testRepoFileName))
 		if err == nil {
 			t.Fatal("expected path error for unwritable directory")
 		}
@@ -596,7 +604,7 @@ func TestPersistenceHelperBranches(t *testing.T) {
 	if err := os.WriteFile(blockerPath, []byte("x"), 0o600); err != nil {
 		t.Fatalf("create blocker file: %v", err)
 	}
-	repo.path = filepath.Join(blockerPath, "repo.json")
+	repo.path = filepath.Join(blockerPath, testRepoFileName)
 	if err := repo.persistLocked(); err == nil {
 		t.Fatal("expected persist error when parent path is a file")
 	}
@@ -618,7 +626,7 @@ func TestFileRepositoryRollsBackStateOnPersistFailure(t *testing.T) {
 	ctx := context.Background()
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "rollback-state.json"))
 	if err != nil {
-		t.Fatalf("create repository: %v", err)
+		t.Fatalf(errCreateRepositoryFmt, err)
 	}
 
 	initial, err := repo.CreateOrganisation(ctx, domain.Organisation{Name: "Persisted Org", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080})
@@ -744,11 +752,11 @@ func verifySortedPersonUnavailability(t *testing.T) {
 
 func TestFileRepositoryClose(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "repo.json")
+	path := filepath.Join(t.TempDir(), testRepoFileName)
 
 	repo, err := NewFileRepository(path)
 	if err != nil {
-		t.Fatalf("create repository: %v", err)
+		t.Fatalf(errCreateRepositoryFmt, err)
 	}
 
 	created, err := repo.CreateOrganisation(ctx, domain.Organisation{
@@ -758,7 +766,7 @@ func TestFileRepositoryClose(t *testing.T) {
 		HoursPerYear: 2080,
 	})
 	if err != nil {
-		t.Fatalf("create organisation: %v", err)
+		t.Fatalf(errCreateOrganisationFmt, err)
 	}
 
 	err = repo.Close()
@@ -787,7 +795,7 @@ func TestFileRepositoryClose(t *testing.T) {
 func TestFileRepositoryContextCancellation(t *testing.T) {
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-repo.json"))
 	if err != nil {
-		t.Fatalf("create repository: %v", err)
+		t.Fatalf(errCreateRepositoryFmt, err)
 	}
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
@@ -822,7 +830,7 @@ func TestFileRepositoryContextCancellation(t *testing.T) {
 		HoursPerYear: 2080,
 	})
 	if err != nil {
-		t.Fatalf("create organisation: %v", err)
+		t.Fatalf(errCreateOrganisationFmt, err)
 	}
 
 	err = repo.DeleteOrganisation(cancelledCtx, created.ID)
@@ -839,7 +847,7 @@ func TestFileRepositoryContextCancellation(t *testing.T) {
 func TestFileRepositoryCancelledContextAcrossMethods(t *testing.T) {
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-all-methods.json"))
 	if err != nil {
-		t.Fatalf("create repository: %v", err)
+		t.Fatalf(errCreateRepositoryFmt, err)
 	}
 
 	backgroundCtx := context.Background()
@@ -850,7 +858,7 @@ func TestFileRepositoryCancelledContextAcrossMethods(t *testing.T) {
 		HoursPerYear: 2080,
 	})
 	if err != nil {
-		t.Fatalf("create organisation: %v", err)
+		t.Fatalf(errCreateOrganisationFmt, err)
 	}
 	person, err := repo.CreatePerson(backgroundCtx, domain.Person{
 		OrganisationID: organisation.ID,

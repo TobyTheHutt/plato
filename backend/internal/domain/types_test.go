@@ -21,7 +21,7 @@ func TestValidationHelpers(t *testing.T) {
 func testBasicValidationHelpers(t *testing.T) {
 	t.Helper()
 
-	if _, err := ValidateDate("2026-01-01"); err != nil {
+	if _, err := ValidateDate(date20260101); err != nil {
 		t.Fatalf("expected valid date: %v", err)
 	}
 	if _, err := ValidateDate("bad"); err == nil {
@@ -107,7 +107,7 @@ func testEmploymentPctOnDateValidation(t *testing.T) {
 	if pct != 100 {
 		t.Fatalf("expected August employment percent 100, got %v", pct)
 	}
-	_, err = EmploymentPctOnDate(Person{EmploymentPct: 80, EmploymentChanges: []EmploymentChange{{EffectiveMonth: "bad", EmploymentPct: 70}}}, "2026-01-01")
+	_, err = EmploymentPctOnDate(Person{EmploymentPct: 80, EmploymentChanges: []EmploymentChange{{EffectiveMonth: "bad", EmploymentPct: 70}}}, date20260101)
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid employment month to fail, got %v", err)
 	}
@@ -115,7 +115,7 @@ func testEmploymentPctOnDateValidation(t *testing.T) {
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid employment date to fail, got %v", err)
 	}
-	_, err = EmploymentPctOnDate(Person{EmploymentPct: 101}, "2026-01-01")
+	_, err = EmploymentPctOnDate(Person{EmploymentPct: 101}, date20260101)
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected invalid base employment percent to fail, got %v", err)
 	}
@@ -156,7 +156,7 @@ func TestPeriodStartAndRoundHelpers(t *testing.T) {
 	if got := periodStart(day, GranularityMonth).Format(DateLayout); got != "2026-02-01" {
 		t.Fatalf("unexpected month period: %s", got)
 	}
-	if got := periodStart(day, GranularityYear).Format(DateLayout); got != "2026-01-01" {
+	if got := periodStart(day, GranularityYear).Format(DateLayout); got != date20260101 {
 		t.Fatalf("unexpected year period: %s", got)
 	}
 	if got := periodStart(day, "invalid").Format(DateLayout); got != "2026-02-18" {

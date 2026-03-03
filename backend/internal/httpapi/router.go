@@ -15,7 +15,11 @@ import (
 	"plato/backend/internal/service"
 )
 
-const maxJSONBodyBytes int64 = 1 << 20
+const (
+	maxJSONBodyBytes int64 = 1 << 20
+	dataFileEnvVar         = "PLATO_DATA_FILE"
+	healthRoutePath        = "/healthz"
+)
 
 type API struct {
 	authProvider ports.AuthProvider
@@ -38,7 +42,7 @@ var apiRouteMatchers = []apiRouteMatcher{
 }
 
 func NewRouter(runtimeConfig RuntimeConfig) (http.Handler, error) {
-	dataFile := strings.TrimSpace(os.Getenv("PLATO_DATA_FILE"))
+	dataFile := strings.TrimSpace(os.Getenv(dataFileEnvVar))
 	repo, err := persistence.NewFileRepository(dataFile)
 	if err != nil {
 		return nil, fmt.Errorf("create repository (%q): %w", dataFile, err)
@@ -123,7 +127,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.Path == "/healthz" {
+	if r.URL.Path == healthRoutePath {
 		healthz(w, r)
 		return
 	}

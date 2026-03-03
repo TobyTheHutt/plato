@@ -16,6 +16,17 @@ import (
 	"plato/backend/internal/ports"
 )
 
+const (
+	testMissingID         = "missing"
+	testPersonIDOne       = "person_1"
+	testProjectIDOne      = "project_1"
+	testDate20260101      = "2026-01-01"
+	errSetupPersonFmt     = "setup person: %v"
+	errSetupProjectFmt    = "setup project: %v"
+	errSetupGroupFmt      = "setup group: %v"
+	errSetupAllocationFmt = "setup allocation: %v"
+)
+
 func TestServiceOrganisationCRUDAndTenantEnforcement(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -367,7 +378,7 @@ func createServiceResourceFlowCalendarEntries(t *testing.T, state *serviceResour
 	t.Helper()
 
 	var err error
-	state.holiday, err = state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
+	state.holiday, err = state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: testDate20260101, Hours: 8})
 	if err != nil {
 		t.Fatalf("create org holiday: %v", err)
 	}
@@ -435,7 +446,7 @@ func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlow
 	report, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
 		Scope:       domain.ScopePerson,
 		IDs:         []string{state.person1.ID},
-		FromDate:    "2026-01-01",
+		FromDate:    testDate20260101,
 		ToDate:      "2026-01-02",
 		Granularity: domain.GranularityDay,
 	})
@@ -449,8 +460,8 @@ func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlow
 	reportByGroup, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
 		Scope:       domain.ScopeGroup,
 		IDs:         []string{state.group.ID},
-		FromDate:    "2026-01-01",
-		ToDate:      "2026-01-01",
+		FromDate:    testDate20260101,
+		ToDate:      testDate20260101,
 		Granularity: domain.GranularityDay,
 	})
 	if err != nil {
@@ -460,7 +471,7 @@ func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlow
 		t.Fatalf("expected 1 group report bucket, got %d", len(reportByGroup))
 	}
 
-	_, err = state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeProject, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay})
+	_, err = state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeProject, IDs: []string{testMissingID}, FromDate: testDate20260101, ToDate: testDate20260101, Granularity: domain.GranularityDay})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for missing report scope id, got %v", err)
 	}
@@ -586,7 +597,7 @@ func assertServiceValidationProjectAndGroupGuards(t *testing.T, svc *Service, ct
 		t.Fatalf("expected date validation for org holiday, got %v", err)
 	}
 
-	if _, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Team", MemberIDs: []string{"missing"}}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Team", MemberIDs: []string{testMissingID}}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected member not found, got %v", err)
 	}
 	if _, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "", MemberIDs: nil}); !errors.Is(err, domain.ErrValidation) {
@@ -618,7 +629,7 @@ func assertServiceValidationTenantListGuards(t *testing.T, svc *Service, ctx con
 	if _, err := svc.ListPersonUnavailability(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden when tenant missing for list person unavailability, got %v", err)
 	}
-	if _, err := svc.ListPersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, "person_1"); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := svc.ListPersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, testPersonIDOne); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected forbidden when tenant missing for list person unavailability by person, got %v", err)
 	}
 }
@@ -667,19 +678,19 @@ func setupServiceRemainingErrorBranchesState(t *testing.T) *serviceRemainingErro
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Error Person", EmploymentPct: 80})
 	if err != nil {
-		t.Fatalf("setup person: %v", err)
+		t.Fatalf(errSetupPersonFmt, err)
 	}
 	project, err := svc.CreateProject(ctx, admin, testProjectInput("Error Project"))
 	if err != nil {
-		t.Fatalf("setup project: %v", err)
+		t.Fatalf(errSetupProjectFmt, err)
 	}
 	group, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Error Group", MemberIDs: []string{person.ID}})
 	if err != nil {
-		t.Fatalf("setup group: %v", err)
+		t.Fatalf(errSetupGroupFmt, err)
 	}
 	allocation, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person.ID, project.ID, 20))
 	if err != nil {
-		t.Fatalf("setup allocation: %v", err)
+		t.Fatalf(errSetupAllocationFmt, err)
 	}
 
 	return &serviceRemainingErrorBranchesState{
@@ -741,7 +752,7 @@ func validateServiceRemainingErrorBranchesUpdates(t *testing.T, state *serviceRe
 	t.Helper()
 	ctx := context.Background()
 
-	if _, err := state.svc.UpdatePerson(ctx, state.admin, "missing", domain.Person{Name: "x", EmploymentPct: 80}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdatePerson(ctx, state.admin, testMissingID, domain.Person{Name: "x", EmploymentPct: 80}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected person not found on update, got %v", err)
 	}
 	if _, err := state.svc.UpdatePerson(ctx, state.admin, state.person.ID, domain.Person{Name: "x", EmploymentPct: 120}); !errors.Is(err, domain.ErrValidation) {
@@ -750,19 +761,19 @@ func validateServiceRemainingErrorBranchesUpdates(t *testing.T, state *serviceRe
 	if _, err := state.svc.UpdatePerson(ctx, state.admin, state.person.ID, domain.Person{Name: "x", EmploymentPct: 80, EmploymentEffectiveFromMonth: "bad"}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected person month validation failure on update, got %v", err)
 	}
-	if _, err := state.svc.UpdateProject(ctx, state.admin, "missing", testProjectInput("x")); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateProject(ctx, state.admin, testMissingID, testProjectInput("x")); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected project not found on update, got %v", err)
 	}
 	if _, err := state.svc.UpdateProject(ctx, state.admin, state.project.ID, testProjectInput("")); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected project validation failure on update, got %v", err)
 	}
-	if _, err := state.svc.UpdateGroup(ctx, state.admin, "missing", domain.Group{Name: "x"}); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateGroup(ctx, state.admin, testMissingID, domain.Group{Name: "x"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group not found on update, got %v", err)
 	}
 	if _, err := state.svc.UpdateGroup(ctx, state.admin, state.group.ID, domain.Group{Name: "", MemberIDs: []string{state.person.ID}}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected group validation failure on update, got %v", err)
 	}
-	if _, err := state.svc.UpdateAllocation(ctx, state.admin, "missing", testPersonAllocationInput(state.person.ID, state.project.ID, 10)); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := state.svc.UpdateAllocation(ctx, state.admin, testMissingID, testPersonAllocationInput(state.person.ID, state.project.ID, 10)); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected allocation not found on update, got %v", err)
 	}
 	if _, err := state.svc.UpdateAllocation(ctx, state.admin, state.allocation.ID, testPersonAllocationInput("", state.project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
@@ -806,56 +817,56 @@ func assertServiceRemainingDeleteMissingEntities(t *testing.T, state *serviceRem
 		{
 			name: "delete missing person",
 			run: func() error {
-				return state.svc.DeletePerson(ctx, state.admin, "missing")
+				return state.svc.DeletePerson(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing project",
 			run: func() error {
-				return state.svc.DeleteProject(ctx, state.admin, "missing")
+				return state.svc.DeleteProject(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing group",
 			run: func() error {
-				return state.svc.DeleteGroup(ctx, state.admin, "missing")
+				return state.svc.DeleteGroup(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing allocation",
 			run: func() error {
-				return state.svc.DeleteAllocation(ctx, state.admin, "missing")
+				return state.svc.DeleteAllocation(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing holiday",
 			run: func() error {
-				return state.svc.DeleteOrgHoliday(ctx, state.admin, "missing")
+				return state.svc.DeleteOrgHoliday(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing group unavailability",
 			run: func() error {
-				return state.svc.DeleteGroupUnavailability(ctx, state.admin, "missing")
+				return state.svc.DeleteGroupUnavailability(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing person unavailability",
 			run: func() error {
-				return state.svc.DeletePersonUnavailability(ctx, state.admin, "missing")
+				return state.svc.DeletePersonUnavailability(ctx, state.admin, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
 		{
 			name: "delete missing person-scoped unavailability",
 			run: func() error {
-				return state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person.ID, "missing")
+				return state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person.ID, testMissingID)
 			},
 			want: domain.ErrNotFound,
 		},
@@ -885,7 +896,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "add missing group member",
 			run: func() error {
-				_, err := state.svc.AddGroupMember(ctx, state.admin, state.group.ID, "missing")
+				_, err := state.svc.AddGroupMember(ctx, state.admin, state.group.ID, testMissingID)
 				return err
 			},
 			want: domain.ErrNotFound,
@@ -893,7 +904,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "remove member from missing group",
 			run: func() error {
-				_, err := state.svc.RemoveGroupMember(ctx, state.admin, "missing", state.person.ID)
+				_, err := state.svc.RemoveGroupMember(ctx, state.admin, testMissingID, state.person.ID)
 				return err
 			},
 			want: domain.ErrNotFound,
@@ -901,7 +912,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "create group unavailability missing group",
 			run: func() error {
-				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: "missing", Date: "2026-01-01", Hours: 2})
+				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: testMissingID, Date: testDate20260101, Hours: 2})
 				return err
 			},
 			want: domain.ErrNotFound,
@@ -909,7 +920,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "create group unavailability invalid hours",
 			run: func() error {
-				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: "2026-01-01", Hours: 99})
+				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: testDate20260101, Hours: 99})
 				return err
 			},
 			want: domain.ErrValidation,
@@ -917,7 +928,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "create person unavailability missing person",
 			run: func() error {
-				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: "missing", Date: "2026-01-01", Hours: 2})
+				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: testMissingID, Date: testDate20260101, Hours: 2})
 				return err
 			},
 			want: domain.ErrNotFound,
@@ -933,7 +944,7 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "create person unavailability invalid hours",
 			run: func() error {
-				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "2026-01-01", Hours: 99})
+				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: testDate20260101, Hours: 99})
 				return err
 			},
 			want: domain.ErrValidation,
@@ -941,14 +952,14 @@ func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *servic
 		{
 			name: "delete person-scoped unavailability without tenant",
 			run: func() error {
-				return state.svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, state.person.ID, "missing")
+				return state.svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, state.person.ID, testMissingID)
 			},
 			want: domain.ErrForbidden,
 		},
 		{
 			name: "create org holiday invalid hours",
 			run: func() error {
-				_, err := state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 99})
+				_, err := state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: testDate20260101, Hours: 99})
 				return err
 			},
 			want: domain.ErrValidation,
@@ -960,22 +971,22 @@ func validateServiceRemainingErrorBranchesReports(t *testing.T, state *serviceRe
 	t.Helper()
 	ctx := context.Background()
 
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: "bad", FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: "bad", FromDate: testDate20260101, ToDate: testDate20260101, Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid scope validation, got %v", err)
 	}
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: "bad"}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: testDate20260101, ToDate: testDate20260101, Granularity: "bad"}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid granularity validation, got %v", err)
 	}
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "bad", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "bad", ToDate: testDate20260101, Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid from date validation, got %v", err)
 	}
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "bad", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: testDate20260101, ToDate: "bad", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid to date validation, got %v", err)
 	}
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: testDate20260101, ToDate: testDate20260101, Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected report forbidden without tenant, got %v", err)
 	}
-	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: "2026-01-01", ToDate: "2026-01-01", Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
+	if _, err := state.svc.ReportAvailabilityAndLoad(ctx, ports.AuthContext{OrganisationID: state.organisation.ID, Roles: []string{}}, domain.ReportRequest{Scope: domain.ScopeOrganisation, FromDate: testDate20260101, ToDate: testDate20260101, Granularity: domain.GranularityDay}); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected report forbidden without role, got %v", err)
 	}
 }
@@ -990,7 +1001,7 @@ func TestServicePersonUnavailabilityEmploymentDailyCap(t *testing.T) {
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Part Time", EmploymentPct: 80})
 	if err != nil {
-		t.Fatalf("setup person: %v", err)
+		t.Fatalf(errSetupPersonFmt, err)
 	}
 
 	_, err = svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-03-01", Hours: 4})
@@ -1022,7 +1033,7 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Timeline Person", EmploymentPct: 80})
 	if err != nil {
-		t.Fatalf("setup person: %v", err)
+		t.Fatalf(errSetupPersonFmt, err)
 	}
 
 	person = applyTimelineEmploymentChanges(t, svc, ctx, admin, person)
@@ -1117,19 +1128,19 @@ func TestServiceForbiddenMutationsForOrgUser(t *testing.T) {
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Lock Person", EmploymentPct: 100})
 	if err != nil {
-		t.Fatalf("setup person: %v", err)
+		t.Fatalf(errSetupPersonFmt, err)
 	}
 	project, err := svc.CreateProject(ctx, admin, testProjectInput("Lock Project"))
 	if err != nil {
-		t.Fatalf("setup project: %v", err)
+		t.Fatalf(errSetupProjectFmt, err)
 	}
 	group, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Lock Group", MemberIDs: []string{person.ID}})
 	if err != nil {
-		t.Fatalf("setup group: %v", err)
+		t.Fatalf(errSetupGroupFmt, err)
 	}
 	allocation, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person.ID, project.ID, 10))
 	if err != nil {
-		t.Fatalf("setup allocation: %v", err)
+		t.Fatalf(errSetupAllocationFmt, err)
 	}
 	holiday, err := svc.CreateOrgHoliday(ctx, admin, domain.OrgHoliday{Date: "2026-02-01", Hours: 8})
 	if err != nil {
@@ -1171,13 +1182,13 @@ func TestServiceForbiddenMutationsForOrgUser(t *testing.T) {
 	_, err = svc.UpdateAllocation(ctx, user, allocation.ID, testPersonAllocationInput(person.ID, project.ID, 1))
 	expectForbiddenError(t, err)
 	expectForbiddenError(t, svc.DeleteAllocation(ctx, user, allocation.ID))
-	_, err = svc.CreateOrgHoliday(ctx, user, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
+	_, err = svc.CreateOrgHoliday(ctx, user, domain.OrgHoliday{Date: testDate20260101, Hours: 8})
 	expectForbiddenError(t, err)
 	expectForbiddenError(t, svc.DeleteOrgHoliday(ctx, user, holiday.ID))
-	_, err = svc.CreateGroupUnavailability(ctx, user, domain.GroupUnavailability{GroupID: group.ID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreateGroupUnavailability(ctx, user, domain.GroupUnavailability{GroupID: group.ID, Date: testDate20260101, Hours: 1})
 	expectForbiddenError(t, err)
 	expectForbiddenError(t, svc.DeleteGroupUnavailability(ctx, user, groupUnavailable.ID))
-	_, err = svc.CreatePersonUnavailability(ctx, user, domain.PersonUnavailability{PersonID: person.ID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreatePersonUnavailability(ctx, user, domain.PersonUnavailability{PersonID: person.ID, Date: testDate20260101, Hours: 1})
 	expectForbiddenError(t, err)
 	expectForbiddenError(t, svc.DeletePersonUnavailability(ctx, user, personUnavailable.ID))
 	expectForbiddenError(t, svc.DeletePersonUnavailabilityByPerson(ctx, user, person.ID, personUnavailable.ID))
@@ -1199,19 +1210,19 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Extra Person", EmploymentPct: 50})
 	if err != nil {
-		t.Fatalf("setup person: %v", err)
+		t.Fatalf(errSetupPersonFmt, err)
 	}
 	project, err := svc.CreateProject(ctx, admin, testProjectInput("Extra Project"))
 	if err != nil {
-		t.Fatalf("setup project: %v", err)
+		t.Fatalf(errSetupProjectFmt, err)
 	}
 	group, err := svc.CreateGroup(ctx, admin, domain.Group{Name: "Extra Group", MemberIDs: []string{person.ID}})
 	if err != nil {
-		t.Fatalf("setup group: %v", err)
+		t.Fatalf(errSetupGroupFmt, err)
 	}
 	allocation, err := svc.CreateAllocation(ctx, admin, testPersonAllocationInput(person.ID, project.ID, 20))
 	if err != nil {
-		t.Fatalf("setup allocation: %v", err)
+		t.Fatalf(errSetupAllocationFmt, err)
 	}
 
 	assertServiceAdditionalForbiddenReads(t, svc, ctx, person.ID, project.ID, group.ID, allocation.ID)
@@ -1245,19 +1256,19 @@ func assertServiceAdditionalForbiddenReads(t *testing.T, svc *Service, ctx conte
 func assertServiceAdditionalMissingOrgCreates(t *testing.T, svc *Service, ctx context.Context, groupID, personID string) {
 	t.Helper()
 
-	_, err := svc.CreatePerson(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.Person{Name: "x", EmploymentPct: 50})
+	_, err := svc.CreatePerson(ctx, ports.AuthContext{OrganisationID: testMissingID, Roles: []string{domain.RoleOrgAdmin}}, domain.Person{Name: "x", EmploymentPct: 50})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create person with missing org to fail, got %v", err)
 	}
-	_, err = svc.CreateOrgHoliday(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.OrgHoliday{Date: "2026-01-01", Hours: 8})
+	_, err = svc.CreateOrgHoliday(ctx, ports.AuthContext{OrganisationID: testMissingID, Roles: []string{domain.RoleOrgAdmin}}, domain.OrgHoliday{Date: testDate20260101, Hours: 8})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create holiday with missing org to fail, got %v", err)
 	}
-	_, err = svc.CreateGroupUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.GroupUnavailability{GroupID: groupID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreateGroupUnavailability(ctx, ports.AuthContext{OrganisationID: testMissingID, Roles: []string{domain.RoleOrgAdmin}}, domain.GroupUnavailability{GroupID: groupID, Date: testDate20260101, Hours: 1})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create group unavailability with missing org to fail, got %v", err)
 	}
-	_, err = svc.CreatePersonUnavailability(ctx, ports.AuthContext{OrganisationID: "missing", Roles: []string{domain.RoleOrgAdmin}}, domain.PersonUnavailability{PersonID: personID, Date: "2026-01-01", Hours: 1})
+	_, err = svc.CreatePersonUnavailability(ctx, ports.AuthContext{OrganisationID: testMissingID, Roles: []string{domain.RoleOrgAdmin}}, domain.PersonUnavailability{PersonID: personID, Date: testDate20260101, Hours: 1})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected create person unavailability with missing org to fail, got %v", err)
 	}
@@ -1266,15 +1277,15 @@ func assertServiceAdditionalMissingOrgCreates(t *testing.T, svc *Service, ctx co
 func assertServiceAdditionalUpdateScenarios(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, groupID, projectID, personID, allocationID string) {
 	t.Helper()
 
-	_, err := svc.UpdateGroup(ctx, admin, groupID, domain.Group{Name: "x", MemberIDs: []string{"missing"}})
+	_, err := svc.UpdateGroup(ctx, admin, groupID, domain.Group{Name: "x", MemberIDs: []string{testMissingID}})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update group member validation not found, got %v", err)
 	}
-	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput("missing", projectID, 10))
+	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput(testMissingID, projectID, 10))
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update allocation missing person to fail, got %v", err)
 	}
-	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput(personID, "missing", 10))
+	_, err = svc.UpdateAllocation(ctx, admin, allocationID, testPersonAllocationInput(personID, testMissingID, 10))
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected update allocation missing project to fail, got %v", err)
 	}
@@ -1307,15 +1318,15 @@ func assertServiceAdditionalTenantGuards(t *testing.T, svc *Service, ctx context
 func assertServiceAdditionalReportAndHelperValidation(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, projectID, personID string) {
 	t.Helper()
 
-	_, err := svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopePerson, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-02", Granularity: domain.GranularityDay})
+	_, err := svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopePerson, IDs: []string{testMissingID}, FromDate: testDate20260101, ToDate: "2026-01-02", Granularity: domain.GranularityDay})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected report missing person id to fail, got %v", err)
 	}
-	_, err = svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopeGroup, IDs: []string{"missing"}, FromDate: "2026-01-01", ToDate: "2026-01-02", Granularity: domain.GranularityDay})
+	_, err = svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopeGroup, IDs: []string{testMissingID}, FromDate: testDate20260101, ToDate: "2026-01-02", Granularity: domain.GranularityDay})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected report missing group id to fail, got %v", err)
 	}
-	_, err = svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopeOrganisation, IDs: nil, FromDate: "2026-01-02", ToDate: "2026-01-01", Granularity: domain.GranularityDay})
+	_, err = svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopeOrganisation, IDs: nil, FromDate: "2026-01-02", ToDate: testDate20260101, Granularity: domain.GranularityDay})
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected report reversed date range to fail, got %v", err)
 	}
@@ -1363,7 +1374,7 @@ func assertProjectValidationHelpers(t *testing.T) {
 
 	reversedDateProject := testProjectInput("Reversed Date")
 	reversedDateProject.StartDate = "2026-02-01"
-	reversedDateProject.EndDate = "2026-01-01"
+	reversedDateProject.EndDate = testDate20260101
 	if err := validateProject(reversedDateProject); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected reversed date validation error, got %v", err)
 	}
@@ -1372,11 +1383,11 @@ func assertProjectValidationHelpers(t *testing.T) {
 func assertAllocationValidationHelpers(t *testing.T) {
 	t.Helper()
 
-	validAllocation := testPersonAllocationInput("person_1", "project_1", 10)
+	validAllocation := testPersonAllocationInput(testPersonIDOne, testProjectIDOne, 10)
 	if err := validateAllocation(validAllocation); err != nil {
 		t.Fatalf("expected valid allocation, got %v", err)
 	}
-	if err := validateDateHours("2026-01-01", math.NaN(), 8); !errors.Is(err, domain.ErrValidation) {
+	if err := validateDateHours(testDate20260101, math.NaN(), 8); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected NaN hours validation error, got %v", err)
 	}
 
@@ -1420,7 +1431,7 @@ func assertDateRangeValidationHelpers(t *testing.T) {
 	if !openStart.Before(openEnd) {
 		t.Fatalf("expected open range start before end, got %v %v", openStart, openEnd)
 	}
-	_, _, err = parseDateRange("2026-02-01", "2026-01-01")
+	_, _, err = parseDateRange("2026-02-01", testDate20260101)
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected parseDateRange reversed date error, got %v", err)
 	}
@@ -1430,13 +1441,13 @@ func assertAllocationWithinProjectRangeHelpers(t *testing.T) {
 	t.Helper()
 
 	project := testProjectInput("Project Range")
-	allocationWithin := testPersonAllocationInput("person_1", "project_1", 10)
+	allocationWithin := testPersonAllocationInput(testPersonIDOne, testProjectIDOne, 10)
 	err := validateAllocationWithinProjectRange(allocationWithin, project)
 	if err != nil {
 		t.Fatalf("expected allocation inside project range, got %v", err)
 	}
 
-	allocationOutside := testPersonAllocationInput("person_1", "project_1", 10)
+	allocationOutside := testPersonAllocationInput(testPersonIDOne, testProjectIDOne, 10)
 	allocationOutside.StartDate = "2025-12-31"
 	err = validateAllocationWithinProjectRange(allocationOutside, project)
 	if !errors.Is(err, domain.ErrValidation) {
@@ -1457,7 +1468,7 @@ func TestOverlapDateRanges(t *testing.T) {
 	}{
 		{
 			name:          "full overlap",
-			rangeStartA:   "2026-01-01",
+			rangeStartA:   testDate20260101,
 			rangeEndA:     "2026-01-10",
 			rangeStartB:   "2026-01-03",
 			rangeEndB:     "2026-01-08",
@@ -1469,7 +1480,7 @@ func TestOverlapDateRanges(t *testing.T) {
 			name:          "left trimmed overlap",
 			rangeStartA:   "2026-01-05",
 			rangeEndA:     "2026-01-10",
-			rangeStartB:   "2026-01-01",
+			rangeStartB:   testDate20260101,
 			rangeEndB:     "2026-01-07",
 			expectOverlap: true,
 			expectStart:   "2026-01-05",
@@ -1533,7 +1544,7 @@ func TestBuildAllocationEvents(t *testing.T) {
 	candidateStart := mustParseTestDate(t, "2026-01-05")
 	candidateEnd := mustParseTestDate(t, "2026-01-15")
 	groupsByID := map[string]domain.Group{
-		"group_1": {ID: "group_1", MemberIDs: []string{"person_1"}},
+		"group_1": {ID: "group_1", MemberIDs: []string{testPersonIDOne}},
 	}
 
 	tests := []struct {
@@ -1547,21 +1558,21 @@ func TestBuildAllocationEvents(t *testing.T) {
 		{
 			name:         "tracks overlapping person and group allocations",
 			allocationID: "skip_me",
-			personID:     "person_1",
+			personID:     testPersonIDOne,
 			allocations: []domain.Allocation{
 				{
 					ID:         "skip_me",
 					TargetType: domain.AllocationTargetPerson,
-					TargetID:   "person_1",
-					StartDate:  "2026-01-01",
+					TargetID:   testPersonIDOne,
+					StartDate:  testDate20260101,
 					EndDate:    "2026-01-10",
 					Percent:    50,
 				},
 				{
 					ID:         "person_overlap",
 					TargetType: domain.AllocationTargetPerson,
-					TargetID:   "person_1",
-					StartDate:  "2026-01-01",
+					TargetID:   testPersonIDOne,
+					StartDate:  testDate20260101,
 					EndDate:    "2026-01-10",
 					Percent:    20,
 				},
@@ -1592,12 +1603,12 @@ func TestBuildAllocationEvents(t *testing.T) {
 		{
 			name:         "rejects invalid allocation dates",
 			allocationID: "",
-			personID:     "person_1",
+			personID:     testPersonIDOne,
 			allocations: []domain.Allocation{
 				{
 					ID:         "bad_date",
 					TargetType: domain.AllocationTargetPerson,
-					TargetID:   "person_1",
+					TargetID:   testPersonIDOne,
 					StartDate:  "bad-date",
 					EndDate:    "2026-01-10",
 					Percent:    20,
@@ -1723,7 +1734,7 @@ func assertAllocationTargetsPersonChecks(t *testing.T, state allocationTargetRes
 func assertAllocationLimitRangeChecks(t *testing.T, svc *Service, ctx context.Context, state allocationTargetResolutionState) {
 	t.Helper()
 
-	_, err := svc.CreateAllocation(ctx, state.admin, testPersonAllocationInputForRange(state.person.ID, state.project.ID, 280, "2026-01-01", "2026-01-10"))
+	_, err := svc.CreateAllocation(ctx, state.admin, testPersonAllocationInputForRange(state.person.ID, state.project.ID, 280, testDate20260101, "2026-01-10"))
 	if err != nil {
 		t.Fatalf("create baseline allocation: %v", err)
 	}
@@ -1751,7 +1762,7 @@ func TestValidateScopeIDsRejectsUnknownScope(t *testing.T) {
 func testProjectInput(name string) domain.Project {
 	return domain.Project{
 		Name:                 name,
-		StartDate:            "2026-01-01",
+		StartDate:            testDate20260101,
 		EndDate:              "2026-12-31",
 		EstimatedEffortHours: 1000,
 	}
@@ -1762,7 +1773,7 @@ func testPersonAllocationInput(personID, projectID string, percent float64) doma
 		TargetType: domain.AllocationTargetPerson,
 		TargetID:   personID,
 		ProjectID:  projectID,
-		StartDate:  "2026-01-01",
+		StartDate:  testDate20260101,
 		EndDate:    "2026-12-31",
 		Percent:    percent,
 	}
@@ -1780,7 +1791,7 @@ func testGroupAllocationInput(groupID, projectID string, percent float64) domain
 		TargetType: domain.AllocationTargetGroup,
 		TargetID:   groupID,
 		ProjectID:  projectID,
-		StartDate:  "2026-01-01",
+		StartDate:  testDate20260101,
 		EndDate:    "2026-12-31",
 		Percent:    percent,
 	}

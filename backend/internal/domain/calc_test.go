@@ -7,6 +7,19 @@ import (
 	"time"
 )
 
+const (
+	projectIDPrimary      = "pr1"
+	projectIDSecondary    = "pr2"
+	date20260101          = "2026-01-01"
+	date20260102          = "2026-01-02"
+	date20260131          = "2026-01-31"
+	date20260201          = "2026-02-01"
+	approxTolerance       = 0.01
+	hoursEightyPercentDay = 6.4 // 8 * 0.80
+	errUnexpected         = "unexpected error: %v"
+	errExpectedOneBucket  = "expected 1 bucket, got %d"
+)
+
 func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{
@@ -21,11 +34,11 @@ func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing
 			OrganisationID: "org-1",
 			MemberIDs:      []string{"p1"},
 		}},
-		Projects: []Project{testProject("pr1")},
+		Projects: []Project{testProject(projectIDPrimary)},
 		Allocations: []Allocation{
-			personAllocationEntry("a1", "p1", "pr1", 50, "2026-01-01", "2026-01-31"),
+			personAllocationEntry("a1", "p1", projectIDPrimary, 50, date20260101, date20260131),
 		},
-		OrgHolidays: []OrgHoliday{{ID: "h1", OrganisationID: "org-1", Date: "2026-01-02", Hours: 8}},
+		OrgHolidays: []OrgHoliday{{ID: "h1", OrganisationID: "org-1", Date: date20260102, Hours: 8}},
 		GroupUnavailability: []GroupUnavailability{{
 			ID:             "gu1",
 			OrganisationID: "org-1",
@@ -43,7 +56,7 @@ func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing
 		Request: ReportRequest{
 			Scope:       ScopePerson,
 			IDs:         []string{"p1"},
-			FromDate:    "2026-01-01",
+			FromDate:    date20260101,
 			ToDate:      "2026-01-03",
 			Granularity: GranularityDay,
 		},
@@ -51,14 +64,14 @@ func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 3 {
 		t.Fatalf("expected 3 buckets, got %d", len(result))
 	}
 
-	assertBucket(t, result[0], "2026-01-01", 8, 4, 4)
-	assertBucket(t, result[1], "2026-01-02", 0, 4, -4)
+	assertBucket(t, result[0], date20260101, 8, 4, 4)
+	assertBucket(t, result[1], date20260102, 0, 4, -4)
 	assertBucket(t, result[2], "2026-01-03", 2, 4, -2)
 }
 
@@ -75,31 +88,31 @@ func TestCalculateAvailabilityLoadGroupScopeMonthAggregation(t *testing.T) {
 			{ID: "p2", OrganisationID: "org-1", EmploymentPct: 50},
 		},
 		Groups:   []Group{{ID: "g1", OrganisationID: "org-1", MemberIDs: []string{"p1", "p2"}}},
-		Projects: []Project{testProject("pr1"), testProject("pr2")},
+		Projects: []Project{testProject(projectIDPrimary), testProject(projectIDSecondary)},
 		Allocations: []Allocation{
-			personAllocationEntry("a1", "p1", "pr1", 25, "2026-01-01", "2026-01-31"),
-			groupAllocation("a2", "g1", "pr2", 20, "2026-01-01", "2026-01-31"),
+			personAllocationEntry("a1", "p1", projectIDPrimary, 25, date20260101, date20260131),
+			groupAllocation("a2", "g1", projectIDSecondary, 20, date20260101, date20260131),
 		},
 		Request: ReportRequest{
 			Scope:       ScopeGroup,
 			IDs:         []string{"g1"},
-			FromDate:    "2026-01-01",
-			ToDate:      "2026-01-02",
+			FromDate:    date20260101,
+			ToDate:      date20260102,
 			Granularity: GranularityMonth,
 		},
 	}
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 1 {
-		t.Fatalf("expected 1 bucket, got %d", len(result))
+		t.Fatalf(errExpectedOneBucket, len(result))
 	}
 
-	assertBucket(t, result[0], "2026-01-01", 24, 10.4, 13.6)
-	if !approxEqual(43.33, result[0].UtilizationPct, 0.01) {
-		t.Fatalf("expected utilization 43.33 +/- 0.01, got %v", result[0].UtilizationPct)
+	assertBucket(t, result[0], date20260101, 24, 10.4, 13.6)
+	if !approxEqual(43.33, result[0].UtilizationPct, approxTolerance) {
+		t.Fatalf("expected utilization 43.33 +/- %v, got %v", approxTolerance, result[0].UtilizationPct)
 	}
 }
 
@@ -107,21 +120,21 @@ func TestCalculateAvailabilityLoadProjectScopeFiltersAllocationAndRange(t *testi
 	input := CalculationInput{
 		Organisation: Organisation{ID: "org-1", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080},
 		Persons:      []Person{{ID: "p1", OrganisationID: "org-1", EmploymentPct: 100}},
-		Projects:     []Project{testProject("pr1"), testProject("pr2")},
+		Projects:     []Project{testProject(projectIDPrimary), testProject(projectIDSecondary)},
 		Allocations: []Allocation{
-			personAllocationEntry("a1", "p1", "pr1", 60, "2026-01-01", "2026-01-31"),
-			personAllocationEntry("a2", "p1", "pr1", 30, "2026-02-01", "2026-02-28"),
-			personAllocationEntry("a3", "p1", "pr2", 20, "2026-01-01", "2026-01-31"),
+			personAllocationEntry("a1", "p1", projectIDPrimary, 60, date20260101, date20260131),
+			personAllocationEntry("a2", "p1", projectIDPrimary, 30, date20260201, "2026-02-28"),
+			personAllocationEntry("a3", "p1", projectIDSecondary, 20, date20260101, date20260131),
 		},
-		Request: ReportRequest{Scope: ScopeProject, IDs: []string{"pr1"}, FromDate: "2026-01-10", ToDate: "2026-01-10", Granularity: GranularityDay},
+		Request: ReportRequest{Scope: ScopeProject, IDs: []string{projectIDPrimary}, FromDate: "2026-01-10", ToDate: "2026-01-10", Granularity: GranularityDay},
 	}
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 1 {
-		t.Fatalf("expected 1 bucket, got %d", len(result))
+		t.Fatalf(errExpectedOneBucket, len(result))
 	}
 
 	assertBucket(t, result[0], "2026-01-10", 8, 4.8, 3.2)
@@ -146,19 +159,19 @@ func TestCalculateAvailabilityLoadProjectScopeIncludesGroupAllocations(t *testin
 		Groups: []Group{
 			{ID: "g1", OrganisationID: "org-1", MemberIDs: []string{"p1", "p2"}},
 		},
-		Projects: []Project{testProject("pr1")},
+		Projects: []Project{testProject(projectIDPrimary)},
 		Allocations: []Allocation{
-			groupAllocation("a1", "g1", "pr1", 50, "2026-01-01", "2026-01-31"),
+			groupAllocation("a1", "g1", projectIDPrimary, 50, date20260101, date20260131),
 		},
-		Request: ReportRequest{Scope: ScopeProject, IDs: []string{"pr1"}, FromDate: "2026-01-10", ToDate: "2026-01-10", Granularity: GranularityDay},
+		Request: ReportRequest{Scope: ScopeProject, IDs: []string{projectIDPrimary}, FromDate: "2026-01-10", ToDate: "2026-01-10", Granularity: GranularityDay},
 	}
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 1 {
-		t.Fatalf("expected 1 bucket, got %d", len(result))
+		t.Fatalf(errExpectedOneBucket, len(result))
 	}
 
 	assertBucket(t, result[0], "2026-01-10", 16, 8, 8)
@@ -178,34 +191,34 @@ func TestCalculateAvailabilityLoadProjectScopeUsesCumulativeProjectLoadForComple
 		Organisation: Organisation{ID: "org-1", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080},
 		Persons:      []Person{{ID: "p1", OrganisationID: "org-1", EmploymentPct: 100}},
 		Projects: []Project{{
-			ID:                   "pr1",
+			ID:                   projectIDPrimary,
 			OrganisationID:       "org-1",
-			Name:                 "pr1",
-			StartDate:            "2026-01-01",
+			Name:                 projectIDPrimary,
+			StartDate:            date20260101,
 			EndDate:              "2026-12-31",
 			EstimatedEffortHours: 16,
 		}},
 		Allocations: []Allocation{
-			personAllocationEntry("a1", "p1", "pr1", 50, "2026-01-01", "2026-01-31"),
+			personAllocationEntry("a1", "p1", projectIDPrimary, 50, date20260101, date20260131),
 		},
 		Request: ReportRequest{
 			Scope:       ScopeProject,
-			IDs:         []string{"pr1"},
-			FromDate:    "2026-01-01",
-			ToDate:      "2026-01-02",
+			IDs:         []string{projectIDPrimary},
+			FromDate:    date20260101,
+			ToDate:      date20260102,
 			Granularity: GranularityDay,
 		},
 	}
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 buckets, got %d", len(result))
 	}
 
-	assertBucket(t, result[0], "2026-01-01", 8, 4, 4)
+	assertBucket(t, result[0], date20260101, 8, 4, 4)
 	if result[0].ProjectLoadHours != 4 {
 		t.Fatalf("expected day 1 cumulative project load 4, got %v", result[0].ProjectLoadHours)
 	}
@@ -213,7 +226,7 @@ func TestCalculateAvailabilityLoadProjectScopeUsesCumulativeProjectLoadForComple
 		t.Fatalf("expected day 1 completion 25, got %v", result[0].CompletionPct)
 	}
 
-	assertBucket(t, result[1], "2026-01-02", 8, 4, 4)
+	assertBucket(t, result[1], date20260102, 8, 4, 4)
 	if result[1].ProjectLoadHours != 8 {
 		t.Fatalf("expected day 2 cumulative project load 8, got %v", result[1].ProjectLoadHours)
 	}
@@ -231,10 +244,10 @@ func TestCalculateAvailabilityLoadAllocationsUseFullTimeScale(t *testing.T) {
 			HoursPerYear: 2080,
 		},
 		Persons:  []Person{{ID: "p1", OrganisationID: "org-1", EmploymentPct: 80}},
-		Projects: []Project{testProject("pr1"), testProject("pr2")},
+		Projects: []Project{testProject(projectIDPrimary), testProject(projectIDSecondary)},
 		Allocations: []Allocation{
-			personAllocationEntry("a1", "p1", "pr1", 60, "2026-01-01", "2026-01-31"),
-			personAllocationEntry("a2", "p1", "pr2", 20, "2026-01-01", "2026-01-31"),
+			personAllocationEntry("a1", "p1", projectIDPrimary, 60, date20260101, date20260131),
+			personAllocationEntry("a2", "p1", projectIDSecondary, 20, date20260101, date20260131),
 		},
 		Request: ReportRequest{
 			Scope:       ScopePerson,
@@ -247,15 +260,15 @@ func TestCalculateAvailabilityLoadAllocationsUseFullTimeScale(t *testing.T) {
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 1 {
-		t.Fatalf("expected 1 bucket, got %d", len(result))
+		t.Fatalf(errExpectedOneBucket, len(result))
 	}
 
-	assertBucket(t, result[0], "2026-01-05", 6.4, 6.4, 0)
-	if !approxEqual(100, result[0].UtilizationPct, 0.01) {
-		t.Fatalf("expected utilization 100 +/- 0.01, got %v", result[0].UtilizationPct)
+	assertBucket(t, result[0], "2026-01-05", hoursEightyPercentDay, hoursEightyPercentDay, 0)
+	if !approxEqual(100, result[0].UtilizationPct, approxTolerance) {
+		t.Fatalf("expected utilization 100 +/- %v, got %v", approxTolerance, result[0].UtilizationPct)
 	}
 }
 
@@ -286,20 +299,20 @@ func TestCalculateAvailabilityLoadUsesEmploymentTimelineByDate(t *testing.T) {
 
 	result, err := CalculateAvailabilityLoad(input)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf(errUnexpected, err)
 	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 buckets, got %d", len(result))
 	}
 
-	assertBucket(t, result[0], "2026-05-31", 6.4, 0, 6.4)
+	assertBucket(t, result[0], "2026-05-31", hoursEightyPercentDay, 0, hoursEightyPercentDay)
 	assertBucket(t, result[1], "2026-06-01", 4, 0, 4)
 }
 
 func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 	_, err := CalculateAvailabilityLoad(CalculationInput{
 		Organisation: Organisation{HoursPerDay: 8, HoursPerYear: 2080},
-		Request:      ReportRequest{Scope: "bad", Granularity: GranularityDay, FromDate: "2026-01-01", ToDate: "2026-01-01"},
+		Request:      ReportRequest{Scope: "bad", Granularity: GranularityDay, FromDate: date20260101, ToDate: date20260101},
 	})
 	if err == nil {
 		t.Fatal("expected validation error")
@@ -307,7 +320,7 @@ func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 
 	_, err = CalculateAvailabilityLoad(CalculationInput{
 		Organisation: Organisation{HoursPerDay: 8, HoursPerYear: 2080},
-		Request:      ReportRequest{Scope: ScopeOrganisation, Granularity: GranularityDay, FromDate: "2026-01-02", ToDate: "2026-01-01"},
+		Request:      ReportRequest{Scope: ScopeOrganisation, Granularity: GranularityDay, FromDate: date20260102, ToDate: date20260101},
 	})
 	if err == nil {
 		t.Fatal("expected date range validation error")
@@ -316,7 +329,7 @@ func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 	_, err = CalculateAvailabilityLoad(CalculationInput{
 		Organisation: Organisation{HoursPerDay: 8, HoursPerYear: 2080},
 		Persons:      []Person{{ID: "p1"}},
-		Request:      ReportRequest{Scope: ScopePerson, IDs: []string{"missing"}, Granularity: GranularityDay, FromDate: "2026-01-01", ToDate: "2026-01-01"},
+		Request:      ReportRequest{Scope: ScopePerson, IDs: []string{"missing"}, Granularity: GranularityDay, FromDate: date20260101, ToDate: date20260101},
 	})
 	if err == nil {
 		t.Fatal("expected not found error")
@@ -324,8 +337,8 @@ func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 
 	_, err = CalculateAvailabilityLoad(CalculationInput{
 		Organisation: Organisation{HoursPerDay: 8, HoursPerYear: 2080},
-		Projects:     []Project{testProject("pr1")},
-		Request:      ReportRequest{Scope: ScopeProject, IDs: []string{"missing"}, Granularity: GranularityDay, FromDate: "2026-01-01", ToDate: "2026-01-01"},
+		Projects:     []Project{testProject(projectIDPrimary)},
+		Request:      ReportRequest{Scope: ScopeProject, IDs: []string{"missing"}, Granularity: GranularityDay, FromDate: date20260101, ToDate: date20260101},
 	})
 	if err == nil {
 		t.Fatal("expected project not found error")
@@ -348,10 +361,10 @@ func TestAllocationHelperValidationBranches(t *testing.T) {
 		t.Fatalf("expected legacy target normalization, got %s/%s", targetType, targetID)
 	}
 
-	if _, _, err := parseAllocationDateRange("bad-date", "2026-01-01"); err == nil {
+	if _, _, err := parseAllocationDateRange("bad-date", date20260101); err == nil {
 		t.Fatal("expected invalid allocation start date")
 	}
-	if _, _, err := parseAllocationDateRange("2026-01-02", "2026-01-01"); err == nil {
+	if _, _, err := parseAllocationDateRange(date20260102, date20260101); err == nil {
 		t.Fatal("expected reversed allocation range")
 	}
 
@@ -363,7 +376,7 @@ func TestAllocationHelperValidationBranches(t *testing.T) {
 	}
 
 	personResolved, ok, err := resolveAllocation(
-		personAllocationEntry("a1", "p1", "pr1", 10, "2026-01-01", "2026-01-31"),
+		personAllocationEntry("a1", "p1", projectIDPrimary, 10, date20260101, date20260131),
 		personsByID,
 		groupsByID,
 	)
@@ -372,7 +385,7 @@ func TestAllocationHelperValidationBranches(t *testing.T) {
 	}
 
 	groupResolved, ok, err := resolveAllocation(
-		groupAllocation("a2", "g1", "pr1", 10, "2026-01-01", "2026-01-31"),
+		groupAllocation("a2", "g1", projectIDPrimary, 10, date20260101, date20260131),
 		personsByID,
 		groupsByID,
 	)
@@ -381,7 +394,7 @@ func TestAllocationHelperValidationBranches(t *testing.T) {
 	}
 
 	_, ok, err = resolveAllocation(
-		groupAllocation("a3", "missing_group", "pr1", 10, "2026-01-01", "2026-01-31"),
+		groupAllocation("a3", "missing_group", projectIDPrimary, 10, date20260101, date20260131),
 		personsByID,
 		groupsByID,
 	)
@@ -426,7 +439,7 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 	}
 
 	_, ok, err := resolveAllocation(
-		personAllocationEntry("a1", "missing-person", "pr1", 10, "2026-01-01", "2026-01-31"),
+		personAllocationEntry("a1", "missing-person", projectIDPrimary, 10, date20260101, date20260131),
 		personsByID,
 		groupsByID,
 	)
@@ -435,7 +448,7 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 	}
 
 	_, ok, err = resolveAllocation(
-		groupAllocation("a2", "g-empty", "pr1", 10, "2026-01-01", "2026-01-31"),
+		groupAllocation("a2", "g-empty", projectIDPrimary, 10, date20260101, date20260131),
 		personsByID,
 		groupsByID,
 	)
@@ -447,8 +460,8 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 		Allocation{
 			TargetType: "unknown",
 			TargetID:   "x",
-			StartDate:  "2026-01-01",
-			EndDate:    "2026-01-31",
+			StartDate:  date20260101,
+			EndDate:    date20260131,
 		},
 		personsByID,
 		groupsByID,
@@ -462,7 +475,7 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 			TargetType: AllocationTargetPerson,
 			TargetID:   "p1",
 			StartDate:  "bad-date",
-			EndDate:    "2026-01-31",
+			EndDate:    date20260131,
 		},
 		personsByID,
 		groupsByID,
@@ -483,12 +496,12 @@ func TestScopeSelectionHelperFunctions(t *testing.T) {
 	}
 	allPersonIDs := []string{"p1", "p2"}
 	allGroupIDs := []string{"g1", "g2"}
-	allProjectIDs := []string{"pr1", "pr2"}
+	allProjectIDs := []string{projectIDPrimary, projectIDSecondary}
 	allocations := []Allocation{
-		{TargetType: AllocationTargetPerson, TargetID: "p1", ProjectID: "pr1"},
-		{TargetType: AllocationTargetGroup, TargetID: "g1", ProjectID: "pr1"},
-		{TargetType: AllocationTargetGroup, TargetID: "missing", ProjectID: "pr1"},
-		{TargetType: AllocationTargetPerson, TargetID: "p2", ProjectID: "pr2"},
+		{TargetType: AllocationTargetPerson, TargetID: "p1", ProjectID: projectIDPrimary},
+		{TargetType: AllocationTargetGroup, TargetID: "g1", ProjectID: projectIDPrimary},
+		{TargetType: AllocationTargetGroup, TargetID: "missing", ProjectID: projectIDPrimary},
+		{TargetType: AllocationTargetPerson, TargetID: "p2", ProjectID: projectIDSecondary},
 	}
 
 	selected, targetProjects, err := selectPeopleForOrganisationScope(allPersonIDs)
@@ -535,7 +548,7 @@ func TestScopeSelectionHelperFunctions(t *testing.T) {
 	}
 
 	selected, targetProjects, err = selectPeopleForProjectScope(
-		[]string{"pr1"},
+		[]string{projectIDPrimary},
 		allProjectIDs,
 		personsByID,
 		groupsByID,
@@ -545,7 +558,7 @@ func TestScopeSelectionHelperFunctions(t *testing.T) {
 		t.Fatalf("unexpected project helper scoped selection error: %v", err)
 	}
 	assertStringSetEqual(t, selected, []string{"p1", "p2"})
-	if len(targetProjects) != 1 || !targetProjects["pr1"] {
+	if len(targetProjects) != 1 || !targetProjects[projectIDPrimary] {
 		t.Fatalf("expected only pr1 target project, got %v", targetProjects)
 	}
 
@@ -560,7 +573,7 @@ func TestScopeSelectionHelperFunctions(t *testing.T) {
 		t.Fatalf("unexpected project helper all selection error: %v", err)
 	}
 	assertStringSetEqual(t, selected, []string{"p1", "p2"})
-	if len(targetProjects) != 2 || !targetProjects["pr1"] || !targetProjects["pr2"] {
+	if len(targetProjects) != 2 || !targetProjects[projectIDPrimary] || !targetProjects[projectIDSecondary] {
 		t.Fatalf("expected both project ids in target set, got %v", targetProjects)
 	}
 
@@ -581,7 +594,7 @@ func testProject(id string) Project {
 		ID:                   id,
 		OrganisationID:       "org-1",
 		Name:                 id,
-		StartDate:            "2026-01-01",
+		StartDate:            date20260101,
 		EndDate:              "2026-12-31",
 		EstimatedEffortHours: 1000,
 	}
@@ -619,14 +632,14 @@ func assertBucket(t *testing.T, bucket ReportBucket, period string, availability
 	if bucket.PeriodStart != period {
 		t.Fatalf("expected period %s got %s", period, bucket.PeriodStart)
 	}
-	if !approxEqual(availability, bucket.AvailabilityHours, 0.01) {
-		t.Fatalf("expected availability %v +/- 0.01 got %v", availability, bucket.AvailabilityHours)
+	if !approxEqual(availability, bucket.AvailabilityHours, approxTolerance) {
+		t.Fatalf("expected availability %v +/- %v got %v", availability, approxTolerance, bucket.AvailabilityHours)
 	}
-	if !approxEqual(load, bucket.LoadHours, 0.01) {
-		t.Fatalf("expected load %v +/- 0.01 got %v", load, bucket.LoadHours)
+	if !approxEqual(load, bucket.LoadHours, approxTolerance) {
+		t.Fatalf("expected load %v +/- %v got %v", load, approxTolerance, bucket.LoadHours)
 	}
-	if !approxEqual(free, bucket.FreeHours, 0.01) {
-		t.Fatalf("expected free %v +/- 0.01 got %v", free, bucket.FreeHours)
+	if !approxEqual(free, bucket.FreeHours, approxTolerance) {
+		t.Fatalf("expected free %v +/- %v got %v", free, approxTolerance, bucket.FreeHours)
 	}
 }
 

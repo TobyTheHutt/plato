@@ -22,6 +22,17 @@ import (
 	"plato/backend/internal/service"
 )
 
+const (
+	routeAllocations      = "/api/allocations"
+	routeProjects         = "/api/projects"
+	routePersons          = "/api/persons"
+	routeGroups           = "/api/groups"
+	routeAvailabilityLoad = "/api/reports/availability-load"
+	envBoolTrue           = "true"
+	testOrgIDOne          = "org_1"
+	errCreateServiceFmt   = "create service: %v"
+)
+
 func TestHealthz(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
@@ -46,7 +57,7 @@ func TestRBACOrgUserCannotMutate(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
 
-	rec := doJSONRequest(t, router, http.MethodPost, "/api/projects", map[string]any{"name": "Hidden"}, map[string]string{"X-Role": "org_user", "X-Org-ID": orgID})
+	rec := doJSONRequest(t, router, http.MethodPost, routeProjects, map[string]any{"name": "Hidden"}, map[string]string{"X-Role": "org_user", "X-Org-ID": orgID})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected forbidden, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -81,17 +92,17 @@ func TestAllocationValidationAndReportEndpoint(t *testing.T) {
 	personID := createPerson(t, router, orgID, "Bob", 50)
 	projectID := createProject(t, router, orgID, "Phoenix")
 
-	firstAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 40), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
+	firstAllocation := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 40), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
 	if firstAllocation.Code != http.StatusCreated {
 		t.Fatalf("expected first allocation to pass, got %d body=%s", firstAllocation.Code, firstAllocation.Body.String())
 	}
 
-	overEmploymentAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 20), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
+	overEmploymentAllocation := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 20), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
 	if overEmploymentAllocation.Code != http.StatusCreated {
 		t.Fatalf("expected over-employment allocation to pass, got %d body=%s", overEmploymentAllocation.Code, overEmploymentAllocation.Body.String())
 	}
 
-	overTheoreticalLimitAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 250), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
+	overTheoreticalLimitAllocation := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 250), map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID})
 	if overTheoreticalLimitAllocation.Code != http.StatusBadRequest {
 		t.Fatalf("expected theoretical limit allocation error, got %d body=%s", overTheoreticalLimitAllocation.Code, overTheoreticalLimitAllocation.Body.String())
 	}
@@ -103,7 +114,7 @@ func TestAllocationValidationAndReportEndpoint(t *testing.T) {
 		t.Fatalf("unexpected theoretical limit validation body: %+v", validationBody)
 	}
 
-	report := doJSONRequest(t, router, http.MethodPost, "/api/reports/availability-load", map[string]any{"scope": "organisation", "from_date": "2026-01-01", "to_date": "2026-01-01", "granularity": "day"}, map[string]string{"X-Role": "org_user", "X-Org-ID": orgID})
+	report := doJSONRequest(t, router, http.MethodPost, routeAvailabilityLoad, map[string]any{"scope": "organisation", "from_date": "2026-01-01", "to_date": "2026-01-01", "granularity": "day"}, map[string]string{"X-Role": "org_user", "X-Org-ID": orgID})
 	if report.Code != http.StatusOK {
 		t.Fatalf("expected report success, got %d body=%s", report.Code, report.Body.String())
 	}
@@ -125,16 +136,16 @@ func TestAllocationValidationAndReportEndpoint(t *testing.T) {
 func TestMethodAndJSONErrors(t *testing.T) {
 	router := newTestRouter(t)
 
-	badMethod := doRawRequest(t, router, http.MethodPatch, "/api/persons", nil, map[string]string{"X-Role": "org_admin"})
+	badMethod := doRawRequest(t, router, http.MethodPatch, routePersons, nil, map[string]string{"X-Role": "org_admin"})
 	if badMethod.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", badMethod.Code)
 	}
-	if got := badMethod.Header().Get("Allow"); got != "GET, POST" {
+	if got := badMethod.Header().Get(headerAllow); got != "GET, POST" {
 		t.Fatalf("expected allow header GET, POST for /api/persons method error, got %q", got)
 	}
 
 	badJSON := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/organisations", bytes.NewBufferString("{"))
+	req := httptest.NewRequest(http.MethodPost, testOrganisationsPath, bytes.NewBufferString("{"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Role", "org_admin")
 	router.ServeHTTP(badJSON, req)
@@ -145,7 +156,7 @@ func TestMethodAndJSONErrors(t *testing.T) {
 
 func TestDefaultAuthValuesEnableDevFlow(t *testing.T) {
 	router := newTestRouter(t)
-	rec := doJSONRequest(t, router, http.MethodPost, "/api/organisations", map[string]any{"name": "Org dev", "hours_per_day": 8, "hours_per_week": 40, "hours_per_year": 2080}, nil)
+	rec := doJSONRequest(t, router, http.MethodPost, testOrganisationsPath, map[string]any{"name": "Org dev", "hours_per_day": 8, "hours_per_week": 40, "hours_per_year": 2080}, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected create organisation with default auth, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -225,7 +236,7 @@ func setupEndToEndCRUDRoutesState(t *testing.T, router http.Handler) *endToEndCR
 func validateEndToEndCRUDOrganisationPersonsProjects(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
-	organisations := doJSONRequest(t, router, http.MethodGet, "/api/organisations", nil, state.adminHeaders)
+	organisations := doJSONRequest(t, router, http.MethodGet, testOrganisationsPath, nil, state.adminHeaders)
 	if organisations.Code != http.StatusOK {
 		t.Fatalf("expected list organisations success, got %d", organisations.Code)
 	}
@@ -253,7 +264,7 @@ func validateEndToEndCRUDOrganisationPersonsProjects(t *testing.T, router http.H
 		t.Fatalf("expected update person success, got %d body=%s", updatePerson.Code, updatePerson.Body.String())
 	}
 
-	listPersons := doJSONRequest(t, router, http.MethodGet, "/api/persons", nil, state.adminHeaders)
+	listPersons := doJSONRequest(t, router, http.MethodGet, routePersons, nil, state.adminHeaders)
 	if listPersons.Code != http.StatusOK {
 		t.Fatalf("expected list persons success, got %d", listPersons.Code)
 	}
@@ -271,7 +282,7 @@ func validateEndToEndCRUDOrganisationPersonsProjects(t *testing.T, router http.H
 		t.Fatalf("expected update project success, got %d body=%s", updateProject.Code, updateProject.Body.String())
 	}
 
-	listProjects := doJSONRequest(t, router, http.MethodGet, "/api/projects", nil, state.adminHeaders)
+	listProjects := doJSONRequest(t, router, http.MethodGet, routeProjects, nil, state.adminHeaders)
 	if listProjects.Code != http.StatusOK {
 		t.Fatalf("expected list projects success, got %d", listProjects.Code)
 	}
@@ -288,7 +299,7 @@ func validateEndToEndCRUDGroupsAllocationsCalendar(t *testing.T, router http.Han
 func createAndVerifyEndToEndGroupRoutes(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
-	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Team One", "member_ids": []string{state.personA}}, state.adminHeaders)
+	createGroup := doJSONRequest(t, router, http.MethodPost, routeGroups, map[string]any{"name": "Team One", "member_ids": []string{state.personA}}, state.adminHeaders)
 	if createGroup.Code != http.StatusCreated {
 		t.Fatalf("expected create group success, got %d body=%s", createGroup.Code, createGroup.Body.String())
 	}
@@ -302,7 +313,7 @@ func createAndVerifyEndToEndGroupRoutes(t *testing.T, router http.Handler, state
 	if getGroup.Code != http.StatusOK {
 		t.Fatalf("expected get group success, got %d", getGroup.Code)
 	}
-	if code := doJSONRequest(t, router, http.MethodGet, "/api/groups", nil, state.adminHeaders).Code; code != http.StatusOK {
+	if code := doJSONRequest(t, router, http.MethodGet, routeGroups, nil, state.adminHeaders).Code; code != http.StatusOK {
 		t.Fatalf("expected list groups success, got %d", code)
 	}
 
@@ -317,7 +328,7 @@ func createAndVerifyEndToEndGroupRoutes(t *testing.T, router http.Handler, state
 func createAndVerifyEndToEndAllocationRoutes(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
-	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(state.personA, state.projectA, 50), state.adminHeaders)
+	createAllocation := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(state.personA, state.projectA, 50), state.adminHeaders)
 	if createAllocation.Code != http.StatusCreated {
 		t.Fatalf("expected create allocation success, got %d body=%s", createAllocation.Code, createAllocation.Body.String())
 	}
@@ -333,7 +344,7 @@ func createAndVerifyEndToEndAllocationRoutes(t *testing.T, router http.Handler, 
 	if code := doJSONRequest(t, router, http.MethodPut, "/api/allocations/"+state.allocationID, personAllocationPayload(state.personA, state.projectA, 45), state.adminHeaders).Code; code != http.StatusOK {
 		t.Fatalf("expected update allocation success, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodGet, "/api/allocations", nil, state.adminHeaders).Code; code != http.StatusOK {
+	if code := doJSONRequest(t, router, http.MethodGet, routeAllocations, nil, state.adminHeaders).Code; code != http.StatusOK {
 		t.Fatalf("expected list allocations success, got %d", code)
 	}
 }
@@ -395,7 +406,7 @@ func validateEndToEndCRUDReportsAndDeletion(t *testing.T, router http.Handler, s
 func verifyEndToEndReportResponse(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
-	report := doJSONRequest(t, router, http.MethodPost, "/api/reports/availability-load", map[string]any{
+	report := doJSONRequest(t, router, http.MethodPost, routeAvailabilityLoad, map[string]any{
 		"scope":       "project",
 		"ids":         []string{state.projectA},
 		"from_date":   "2026-01-01",
@@ -429,17 +440,17 @@ func verifyEndToEndReportResponse(t *testing.T, router http.Handler, state *endT
 func verifyEndToEndRouterMetaEndpoints(t *testing.T, router http.Handler, state *endToEndCRUDRoutesState) {
 	t.Helper()
 
-	if code := doRawRequest(t, router, http.MethodOptions, "/api/persons", nil, nil).Code; code != http.StatusNoContent {
+	if code := doRawRequest(t, router, http.MethodOptions, routePersons, nil, nil).Code; code != http.StatusNoContent {
 		t.Fatalf("expected options status 204, got %d", code)
 	}
 	if code := doJSONRequest(t, router, http.MethodGet, "/api/missing", nil, state.adminHeaders).Code; code != http.StatusNotFound {
 		t.Fatalf("expected not found status, got %d", code)
 	}
-	reportMethodNotAllowed := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, state.adminHeaders)
+	reportMethodNotAllowed := doJSONRequest(t, router, http.MethodGet, routeAvailabilityLoad, nil, state.adminHeaders)
 	if reportMethodNotAllowed.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected report wrong method 405, got %d", reportMethodNotAllowed.Code)
 	}
-	if got := reportMethodNotAllowed.Header().Get("Allow"); got != "POST" {
+	if got := reportMethodNotAllowed.Header().Get(headerAllow); got != "POST" {
 		t.Fatalf("expected allow header POST for report endpoint, got %q", got)
 	}
 }
@@ -483,8 +494,8 @@ func executeEndToEndDeletionFlow(t *testing.T, router http.Handler, state *endTo
 }
 
 func TestRouterNewRouterAndAuthFailure(t *testing.T) {
-	t.Setenv("DEV_MODE", "true")
-	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "router-data.json"))
+	t.Setenv("DEV_MODE", envBoolTrue)
+	t.Setenv(dataFileEnvVar, filepath.Join(t.TempDir(), "router-data.json"))
 	router, err := NewRouterFromEnv()
 	if err != nil {
 		t.Fatalf("create router: %v", err)
@@ -500,21 +511,21 @@ func TestRouterNewRouterAndAuthFailure(t *testing.T) {
 	}
 	svc, err := service.New(repo, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
 	if err != nil {
-		t.Fatalf("create service: %v", err)
+		t.Fatalf(errCreateServiceFmt, err)
 	}
 	routerWithFailingAuth := NewRouterWithDependencies(failingAuthProvider{}, svc)
 
-	response := doRawRequest(t, routerWithFailingAuth, http.MethodGet, "/api/organisations", nil, nil)
+	response := doRawRequest(t, routerWithFailingAuth, http.MethodGet, testOrganisationsPath, nil, nil)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized for failing auth provider, got %d", response.Code)
 	}
 }
 
 func TestRouterNewRouterProductionModeRequiresJWTSecret(t *testing.T) {
-	t.Setenv("PRODUCTION_MODE", "true")
-	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("PRODUCTION_MODE", envBoolTrue)
+	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", testAppOrigin)
 	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "")
-	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "prod-data.json"))
+	t.Setenv(dataFileEnvVar, filepath.Join(t.TempDir(), "prod-data.json"))
 
 	if _, err := NewRouterFromEnv(); err == nil {
 		t.Fatal("expected router creation to fail without production JWT secret")
@@ -522,27 +533,27 @@ func TestRouterNewRouterProductionModeRequiresJWTSecret(t *testing.T) {
 }
 
 func TestRouterNewRouterProductionModeCORSAllowlistAndAuth(t *testing.T) {
-	t.Setenv("PRODUCTION_MODE", "true")
+	t.Setenv("PRODUCTION_MODE", envBoolTrue)
 	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "test-secret")
-	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", "https://app.example.com")
-	t.Setenv("PLATO_DATA_FILE", filepath.Join(t.TempDir(), "prod-router-data.json"))
+	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", testAppOrigin)
+	t.Setenv(dataFileEnvVar, filepath.Join(t.TempDir(), "prod-router-data.json"))
 
 	router, err := NewRouterFromEnv()
 	if err != nil {
 		t.Fatalf("create production router: %v", err)
 	}
 
-	allowlistedOriginResponse := doRawRequest(t, router, http.MethodGet, "/api/organisations", nil, map[string]string{
-		"Origin": "https://app.example.com",
+	allowlistedOriginResponse := doRawRequest(t, router, http.MethodGet, testOrganisationsPath, nil, map[string]string{
+		"Origin": testAppOrigin,
 	})
 	if allowlistedOriginResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized without bearer token, got %d", allowlistedOriginResponse.Code)
 	}
-	if got := allowlistedOriginResponse.Header().Get("Access-Control-Allow-Origin"); got != "https://app.example.com" {
+	if got := allowlistedOriginResponse.Header().Get("Access-Control-Allow-Origin"); got != testAppOrigin {
 		t.Fatalf("expected allowlisted origin header, got %q", got)
 	}
 
-	blockedOriginResponse := doRawRequest(t, router, http.MethodGet, "/api/organisations", nil, map[string]string{
+	blockedOriginResponse := doRawRequest(t, router, http.MethodGet, testOrganisationsPath, nil, map[string]string{
 		"Origin": "https://blocked.example.com",
 	})
 	if got := blockedOriginResponse.Header().Get("Access-Control-Allow-Origin"); got != "" {
@@ -599,7 +610,7 @@ func setupMethodNotAllowedState(t *testing.T, router http.Handler) methodNotAllo
 func decodeCreatedGroupForMethodNotAllowed(t *testing.T, router http.Handler, personID string, headers map[string]string) domain.Group {
 	t.Helper()
 
-	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Method Group", "member_ids": []string{personID}}, headers)
+	createGroup := doJSONRequest(t, router, http.MethodPost, routeGroups, map[string]any{"name": "Method Group", "member_ids": []string{personID}}, headers)
 	if createGroup.Code != http.StatusCreated {
 		t.Fatalf("setup group failed: %d body=%s", createGroup.Code, createGroup.Body.String())
 	}
@@ -613,7 +624,7 @@ func decodeCreatedGroupForMethodNotAllowed(t *testing.T, router http.Handler, pe
 func decodeCreatedAllocationForMethodNotAllowed(t *testing.T, router http.Handler, personID, projectID string, headers map[string]string) domain.Allocation {
 	t.Helper()
 
-	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 20), headers)
+	createAllocation := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 20), headers)
 	if createAllocation.Code != http.StatusCreated {
 		t.Fatalf("setup allocation failed: %d body=%s", createAllocation.Code, createAllocation.Body.String())
 	}
@@ -675,21 +686,21 @@ func verifyMethodNotAllowedHits(t *testing.T, router http.Handler, state methodN
 		statusCode int
 		allow      string
 	}{
-		{http.MethodPatch, "/api/organisations", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, testOrganisationsPath, http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPost, "/api/organisations/" + state.orgID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
 		{http.MethodPatch, "/api/organisations/" + state.orgID + "/holidays", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/persons", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, routePersons, http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPost, "/api/persons/" + state.personID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
 		{http.MethodPatch, "/api/persons/" + state.personID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/projects", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, routeProjects, http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/projects/" + state.projectID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
-		{http.MethodPatch, "/api/groups", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, routeGroups, http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/groups/" + state.groupID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
 		{http.MethodGet, "/api/groups/" + state.groupID + "/members", http.StatusMethodNotAllowed, "POST"},
 		{http.MethodPatch, "/api/groups/" + state.groupID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, routeAllocations, http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/allocations/" + state.allocationID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
-		{http.MethodGet, "/api/reports/availability-load", http.StatusMethodNotAllowed, "POST"},
+		{http.MethodGet, routeAvailabilityLoad, http.StatusMethodNotAllowed, "POST"},
 		{http.MethodGet, "/api/organisations/" + state.orgID + "/holidays/" + state.holidayID, http.StatusMethodNotAllowed, "DELETE"},
 		{http.MethodPatch, "/api/organisations/" + state.orgID + "/holidays/" + state.holidayID, http.StatusMethodNotAllowed, "DELETE"},
 		{http.MethodGet, "/api/persons/" + state.personID + "/unavailability/" + state.personUnavailabilityID, http.StatusMethodNotAllowed, "DELETE"},
@@ -703,7 +714,7 @@ func verifyMethodNotAllowedHits(t *testing.T, router http.Handler, state methodN
 		if rec.Code != hit.statusCode {
 			t.Fatalf("expected %d for %s %s got %d body=%s", hit.statusCode, hit.method, hit.path, rec.Code, rec.Body.String())
 		}
-		if got := rec.Header().Get("Allow"); got != hit.allow {
+		if got := rec.Header().Get(headerAllow); got != hit.allow {
 			t.Fatalf("expected allow header %q for %s %s got %q", hit.allow, hit.method, hit.path, got)
 		}
 	}
@@ -723,10 +734,10 @@ func verifyMethodNotAllowedInternalErrorBranch(t *testing.T) {
 	}
 	errSvc, err := service.New(errorRepository{Repository: repo}, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
 	if err != nil {
-		t.Fatalf("create service: %v", err)
+		t.Fatalf(errCreateServiceFmt, err)
 	}
 	errRouter := NewRouterWithDependencies(auth.NewDevAuthProvider(), errSvc)
-	res := doJSONRequest(t, errRouter, http.MethodGet, "/api/organisations", nil, map[string]string{"X-Role": "org_admin"})
+	res := doJSONRequest(t, errRouter, http.MethodGet, testOrganisationsPath, nil, map[string]string{"X-Role": "org_admin"})
 	if res.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 from repository failure, got %d body=%s", res.Code, res.Body.String())
 	}
@@ -739,7 +750,7 @@ func TestInvalidJSONAcrossMutatingRoutes(t *testing.T) {
 
 	personID := createPerson(t, router, orgID, "Bad JSON Person", 100)
 	projectID := createProject(t, router, orgID, "Bad JSON Project")
-	groupResp := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Bad JSON Group", "member_ids": []string{personID}}, headers)
+	groupResp := doJSONRequest(t, router, http.MethodPost, routeGroups, map[string]any{"name": "Bad JSON Group", "member_ids": []string{personID}}, headers)
 	if groupResp.Code != http.StatusCreated {
 		t.Fatalf("create group for bad json test failed: %d body=%s", groupResp.Code, groupResp.Body.String())
 	}
@@ -747,7 +758,7 @@ func TestInvalidJSONAcrossMutatingRoutes(t *testing.T) {
 	if err := json.Unmarshal(groupResp.Body.Bytes(), &group); err != nil {
 		t.Fatalf("decode group for bad json test: %v", err)
 	}
-	allocResp := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 10), headers)
+	allocResp := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 10), headers)
 	if allocResp.Code != http.StatusCreated {
 		t.Fatalf("create allocation for bad json test failed: %d body=%s", allocResp.Code, allocResp.Body.String())
 	}
@@ -760,21 +771,21 @@ func TestInvalidJSONAcrossMutatingRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/organisations"},
+		{http.MethodPost, testOrganisationsPath},
 		{http.MethodPut, "/api/organisations/" + orgID},
 		{http.MethodPost, "/api/organisations/" + orgID + "/holidays"},
-		{http.MethodPost, "/api/persons"},
+		{http.MethodPost, routePersons},
 		{http.MethodPut, "/api/persons/" + personID},
 		{http.MethodPost, "/api/persons/" + personID + "/unavailability"},
-		{http.MethodPost, "/api/projects"},
+		{http.MethodPost, routeProjects},
 		{http.MethodPut, "/api/projects/" + projectID},
-		{http.MethodPost, "/api/groups"},
+		{http.MethodPost, routeGroups},
 		{http.MethodPut, "/api/groups/" + group.ID},
 		{http.MethodPost, "/api/groups/" + group.ID + "/members"},
 		{http.MethodPost, "/api/groups/" + group.ID + "/unavailability"},
-		{http.MethodPost, "/api/allocations"},
+		{http.MethodPost, routeAllocations},
 		{http.MethodPut, "/api/allocations/" + allocation.ID},
-		{http.MethodPost, "/api/reports/availability-load"},
+		{http.MethodPost, routeAvailabilityLoad},
 	}
 
 	for _, entry := range paths {
@@ -792,11 +803,11 @@ func TestResourceNotFoundAndTenantRequiredResponses(t *testing.T) {
 
 	personID := createPerson(t, router, orgID, "Missing Paths Person", 100)
 	projectID := createProject(t, router, orgID, "Missing Paths Project")
-	groupResp := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Missing Group", "member_ids": []string{personID}}, headers)
+	groupResp := doJSONRequest(t, router, http.MethodPost, routeGroups, map[string]any{"name": "Missing Group", "member_ids": []string{personID}}, headers)
 	if groupResp.Code != http.StatusCreated {
 		t.Fatalf("setup group failed: %d body=%s", groupResp.Code, groupResp.Body.String())
 	}
-	allocResp := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 10), headers)
+	allocResp := doJSONRequest(t, router, http.MethodPost, routeAllocations, personAllocationPayload(personID, projectID, 10), headers)
 	if allocResp.Code != http.StatusCreated {
 		t.Fatalf("setup allocation failed: %d body=%s", allocResp.Code, allocResp.Body.String())
 	}
@@ -829,7 +840,7 @@ func TestResourceNotFoundAndTenantRequiredResponses(t *testing.T) {
 		}
 	}
 
-	tenantRequiredHits := []string{"/api/persons", "/api/projects", "/api/groups", "/api/allocations"}
+	tenantRequiredHits := []string{routePersons, routeProjects, routeGroups, routeAllocations}
 	for _, path := range tenantRequiredHits {
 		rec := doJSONRequest(t, router, http.MethodGet, path, nil, map[string]string{"X-Role": "org_admin"})
 		if rec.Code != http.StatusForbidden {
@@ -864,17 +875,17 @@ func TestPathHelpers(t *testing.T) {
 	if values := splitPath(""); len(values) != 0 {
 		t.Fatalf("expected empty split path, got %v", values)
 	}
-	if values := splitPath("/api/projects"); len(values) != 2 {
+	if values := splitPath(routeProjects); len(values) != 2 {
 		t.Fatalf("expected two split path entries, got %v", values)
 	}
 
-	if err := enforcePathTenant(ports.AuthContext{OrganisationID: ""}, "org_1"); err != nil {
+	if err := enforcePathTenant(ports.AuthContext{OrganisationID: ""}, testOrgIDOne); err != nil {
 		t.Fatalf("expected no tenant enforcement when auth tenant is empty, got %v", err)
 	}
-	if err := enforcePathTenant(ports.AuthContext{OrganisationID: "org_1"}, "org_1"); err != nil {
+	if err := enforcePathTenant(ports.AuthContext{OrganisationID: testOrgIDOne}, testOrgIDOne); err != nil {
 		t.Fatalf("expected no tenant mismatch error, got %v", err)
 	}
-	if err := enforcePathTenant(ports.AuthContext{OrganisationID: "org_2"}, "org_1"); !errors.Is(err, domain.ErrForbidden) {
+	if err := enforcePathTenant(ports.AuthContext{OrganisationID: "org_2"}, testOrgIDOne); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("expected tenant mismatch forbidden, got %v", err)
 	}
 }
@@ -912,13 +923,13 @@ func TestOrganisationAndReportExtraBranches(t *testing.T) {
 			t.Fatalf("expected %d for %s %s got %d body=%s", hit.code, hit.method, hit.path, response.Code, response.Body.String())
 		}
 		if hit.code == http.StatusMethodNotAllowed {
-			if got := response.Header().Get("Allow"); got != hit.allow {
+			if got := response.Header().Get(headerAllow); got != hit.allow {
 				t.Fatalf("expected allow header %q for %s %s got %q", hit.allow, hit.method, hit.path, got)
 			}
 		}
 	}
 
-	reportBadScope := doJSONRequest(t, router, http.MethodPost, "/api/reports/availability-load", map[string]any{
+	reportBadScope := doJSONRequest(t, router, http.MethodPost, routeAvailabilityLoad, map[string]any{
 		"scope":       "unknown",
 		"from_date":   "2026-01-01",
 		"to_date":     "2026-01-02",
@@ -937,7 +948,7 @@ func TestDeletePersonUnavailabilityByPersonError(t *testing.T) {
 
 	svc, err := service.New(personUnavailabilityDeleteErrorRepository{Repository: repo}, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
 	if err != nil {
-		t.Fatalf("create service: %v", err)
+		t.Fatalf(errCreateServiceFmt, err)
 	}
 	router := NewRouterWithDependencies(auth.NewDevAuthProvider(), svc)
 
@@ -955,7 +966,7 @@ func TestDecodeJSONRequestBodyTooLarge(t *testing.T) {
 	router := newTestRouter(t)
 	oversizedName := strings.Repeat("a", int(maxJSONBodyBytes))
 	body := []byte(fmt.Sprintf(`{"name":%q,"hours_per_day":8,"hours_per_week":40,"hours_per_year":2080}`, oversizedName))
-	response := doRawRequest(t, router, http.MethodPost, "/api/organisations", body, map[string]string{"X-Role": "org_admin"})
+	response := doRawRequest(t, router, http.MethodPost, testOrganisationsPath, body, map[string]string{"X-Role": "org_admin"})
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d for oversized request body, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
 	}
@@ -973,14 +984,14 @@ func newTestRouter(t *testing.T) http.Handler {
 
 	svc, err := service.New(repo, telemetry.NewNoopTelemetry(), impexp.NewNoopImportExport())
 	if err != nil {
-		t.Fatalf("create service: %v", err)
+		t.Fatalf(errCreateServiceFmt, err)
 	}
 	return NewRouterWithDependencies(auth.NewDevAuthProvider(), svc)
 }
 
 func createOrganisation(t *testing.T, router http.Handler, headers map[string]string) string {
 	t.Helper()
-	response := doJSONRequest(t, router, http.MethodPost, "/api/organisations", map[string]any{
+	response := doJSONRequest(t, router, http.MethodPost, testOrganisationsPath, map[string]any{
 		"name":           fmt.Sprintf("Org-%s", t.Name()),
 		"hours_per_day":  8,
 		"hours_per_week": 40,
@@ -999,7 +1010,7 @@ func createOrganisation(t *testing.T, router http.Handler, headers map[string]st
 
 func createPerson(t *testing.T, router http.Handler, organisationID, name string, employmentPct float64) string {
 	t.Helper()
-	response := doJSONRequest(t, router, http.MethodPost, "/api/persons", map[string]any{
+	response := doJSONRequest(t, router, http.MethodPost, routePersons, map[string]any{
 		"name":           name,
 		"employment_pct": employmentPct,
 	}, map[string]string{"X-Role": "org_admin", "X-Org-ID": organisationID})
@@ -1036,7 +1047,7 @@ func personAllocationPayload(personID, projectID string, percent float64) map[st
 
 func createProject(t *testing.T, router http.Handler, organisationID, name string) string {
 	t.Helper()
-	response := doJSONRequest(t, router, http.MethodPost, "/api/projects", projectPayload(name), map[string]string{"X-Role": "org_admin", "X-Org-ID": organisationID})
+	response := doJSONRequest(t, router, http.MethodPost, routeProjects, projectPayload(name), map[string]string{"X-Role": "org_admin", "X-Org-ID": organisationID})
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create project failed: %d body=%s", response.Code, response.Body.String())
 	}

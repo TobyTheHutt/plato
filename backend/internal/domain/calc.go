@@ -370,7 +370,7 @@ func allocationPercentForPersonOnDate(
 	targetProjectIDs map[string]bool,
 ) float64 {
 	isProjectScope := scope == ScopeProject
-	total := 0.0
+	var total float64
 	for _, allocation := range allocations {
 		if isProjectScope && !targetProjectIDs[allocation.ProjectID] {
 			continue
@@ -392,7 +392,7 @@ func summarizeBuckets(buckets map[string]ReportBucket, scope string) []ReportBuc
 	sort.Strings(sortedKeys)
 
 	result := make([]ReportBucket, 0, len(sortedKeys))
-	cumulativeProjectLoad := 0.0
+	var cumulativeProjectLoad float64
 	for _, key := range sortedKeys {
 		bucket := buckets[key]
 		if bucket.AvailabilityHours > 0 {
@@ -581,7 +581,7 @@ func projectEstimationForScope(scope string, projects []Project, targetProjectID
 		return 0
 	}
 
-	total := 0.0
+	var total float64
 	for _, project := range projects {
 		if targetProjectIDs[project.ID] {
 			total += project.EstimatedEffortHours

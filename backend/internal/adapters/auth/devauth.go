@@ -10,9 +10,14 @@ import (
 )
 
 const (
-	headerUserID = "X-User-ID"
-	headerOrgID  = "X-Org-ID"
-	headerRoles  = "X-Role"
+	headerUserID        = "X-User-ID"
+	headerOrgID         = "X-Org-ID"
+	headerRoles         = "X-Role"
+	devUserIDEnvVar     = "PLATO_DEV_USER_ID"
+	devOrgIDEnvVar      = "PLATO_DEV_ORG_ID"
+	devRolesEnvVar      = "PLATO_DEV_ROLES"
+	defaultDevUserID    = "dev-user"
+	defaultDevAdminRole = "org_admin"
 )
 
 type DevAuthProvider struct {
@@ -22,11 +27,11 @@ type DevAuthProvider struct {
 }
 
 func NewDevAuthProvider() *DevAuthProvider {
-	userID := getenv("PLATO_DEV_USER_ID", "dev-user")
-	orgID := getenv("PLATO_DEV_ORG_ID", "")
-	roles := parseRoles(getenv("PLATO_DEV_ROLES", "org_admin"))
+	userID := getenv(devUserIDEnvVar, defaultDevUserID)
+	orgID := getenv(devOrgIDEnvVar, "")
+	roles := parseRoles(getenv(devRolesEnvVar, ""))
 	if len(roles) == 0 {
-		roles = []string{"org_admin"}
+		roles = []string{defaultDevAdminRole}
 	}
 
 	return &DevAuthProvider{

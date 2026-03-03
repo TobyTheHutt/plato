@@ -16,21 +16,26 @@ import (
 	"plato/backend/internal/httpapi"
 )
 
+const (
+	testFallbackListenAddr = ":8070"
+	testEphemeralAddr      = "127.0.0.1:0"
+)
+
 func TestGetenv(t *testing.T) {
-	t.Setenv("PLATO_ADDR", ":9000")
-	if got := getenv("PLATO_ADDR", ":8070"); got != ":9000" {
+	t.Setenv(listenAddrEnv, ":9000")
+	if got := getenv(listenAddrEnv, testFallbackListenAddr); got != ":9000" {
 		t.Fatalf("expected :9000 got %s", got)
 	}
 
-	t.Setenv("PLATO_ADDR", "")
-	if got := getenv("PLATO_ADDR", ":8070"); got != ":8070" {
+	t.Setenv(listenAddrEnv, "")
+	if got := getenv(listenAddrEnv, testFallbackListenAddr); got != testFallbackListenAddr {
 		t.Fatalf("expected fallback got %s", got)
 	}
 }
 
 func TestRun(t *testing.T) {
 	handler := http.NewServeMux()
-	addr := "127.0.0.1:0"
+	addr := testEphemeralAddr
 
 	assertRunInitializesConfiguredServer(t, handler, addr)
 	assertRunAcceptsServerClosed(t, handler, addr)
@@ -121,7 +126,7 @@ func TestRunGracefulShutdownCallsCleanup(t *testing.T) {
 
 	runErrors := make(chan error, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", handler, func(_ *http.Server, _ net.Listener) error {
+		runErrors <- run(testEphemeralAddr, handler, func(_ *http.Server, _ net.Listener) error {
 			<-startRelease
 			return http.ErrServerClosed
 		}, func(format string, args ...any) {
@@ -173,7 +178,7 @@ func TestRunLogsTimeoutWaitingForServerGoroutine(t *testing.T) {
 	logs := make(chan string, 16)
 	runErrors := make(chan error, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
+		runErrors <- run(testEphemeralAddr, http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
 			<-startRelease
 			return nil
 		}, func(format string, args ...any) {
@@ -230,7 +235,7 @@ func TestRunLogsForcedShutdownWhenSlowRequestExceedsGracePeriod(t *testing.T) {
 	runErrors := make(chan error, 1)
 	listenAddr := make(chan string, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", router, func(server *http.Server, listener net.Listener) error {
+		runErrors <- run(testEphemeralAddr, router, func(server *http.Server, listener net.Listener) error {
 			listenAddr <- listener.Addr().String()
 			return server.Serve(listener)
 		}, func(format string, args ...any) {
@@ -277,7 +282,7 @@ func TestRunReturnsServeErrorAfterShutdownSignal(t *testing.T) {
 	expected := errors.New("serve failure")
 	runErrors := make(chan error, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
+		runErrors <- run(testEphemeralAddr, http.NewServeMux(), func(_ *http.Server, _ net.Listener) error {
 			<-startRelease
 			return expected
 		}, nil)
@@ -325,7 +330,7 @@ func TestRunAllowsInFlightRequestAndRejectsNewRequestsOnShutdown(t *testing.T) {
 	runErrors := make(chan error, 1)
 	listenAddr := make(chan string, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", router, func(server *http.Server, listener net.Listener) error {
+		runErrors <- run(testEphemeralAddr, router, func(server *http.Server, listener net.Listener) error {
 			listenAddr <- listener.Addr().String()
 			return server.Serve(listener)
 		}, func(format string, args ...any) {
@@ -418,7 +423,7 @@ func TestRunLogsCleanupFailure(t *testing.T) {
 	}
 	runErrors := make(chan error, 1)
 	go func() {
-		runErrors <- run("127.0.0.1:0", handler, func(_ *http.Server, _ net.Listener) error {
+		runErrors <- run(testEphemeralAddr, handler, func(_ *http.Server, _ net.Listener) error {
 			<-startRelease
 			return nil
 		}, func(format string, args ...any) {
@@ -456,7 +461,7 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
 		return httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeProduction}, nil
 	}
-	t.Setenv("PLATO_ADDR", ":8123")
+	t.Setenv(listenAddrEnv, ":8123")
 	makeRouter = func(httpapi.RuntimeConfig) (http.Handler, error) {
 		return http.NewServeMux(), nil
 	}
@@ -487,7 +492,7 @@ func assertMainUsesRunServerWithExplicitAddr(t *testing.T, exitCode *int) {
 		if logger == nil {
 			t.Fatal("expected logger function")
 		}
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		listener, err := net.Listen("tcp", testEphemeralAddr)
 		if err != nil {
 			t.Fatalf("create listener for main callback: %v", err)
 		}
@@ -515,7 +520,7 @@ func assertMainUsesRunServerWithExplicitAddr(t *testing.T, exitCode *int) {
 func assertMainUsesFallbackAddr(t *testing.T) {
 	t.Helper()
 
-	t.Setenv("PLATO_ADDR", "")
+	t.Setenv(listenAddrEnv, "")
 	runServer = func(addr string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
 		if addr != ":8070" {
 			t.Fatalf("expected fallback addr in main, got %s", addr)
@@ -581,7 +586,7 @@ func TestMainUsesModeDefaultsAndHandlesBootstrapErrors(t *testing.T) {
 	loadRuntimeConfig = func() (httpapi.RuntimeConfig, error) {
 		return httpapi.RuntimeConfig{Mode: httpapi.RuntimeModeDevelopment}, nil
 	}
-	t.Setenv("PLATO_ADDR", "")
+	t.Setenv(listenAddrEnv, "")
 	main()
 	if exitCode != -1 {
 		t.Fatalf("expected no exit during successful startup, got %d", exitCode)

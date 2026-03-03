@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const errLoadRuntimeConfigFmt = "load runtime config: %v"
+
 func TestLoadRuntimeConfigFromEnvDefaultsToProductionMode(t *testing.T) {
 	t.Setenv(envDevMode, "")
 	t.Setenv(envProductionMode, "")
@@ -12,7 +14,7 @@ func TestLoadRuntimeConfigFromEnvDefaultsToProductionMode(t *testing.T) {
 
 	config, err := LoadRuntimeConfigFromEnv()
 	if err != nil {
-		t.Fatalf("load runtime config: %v", err)
+		t.Fatalf(errLoadRuntimeConfigFmt, err)
 	}
 	if !config.Mode.IsProduction() {
 		t.Fatalf("expected production mode, got %s", config.Mode)
@@ -26,13 +28,13 @@ func TestLoadRuntimeConfigFromEnvDefaultsToProductionMode(t *testing.T) {
 }
 
 func TestLoadRuntimeConfigFromEnvDevelopmentModeEnablesWildcardCORS(t *testing.T) {
-	t.Setenv(envDevMode, "true")
+	t.Setenv(envDevMode, envBoolTrue)
 	t.Setenv(envProductionMode, "")
 	t.Setenv(envCORSAllowedOrigins, "")
 
 	config, err := LoadRuntimeConfigFromEnv()
 	if err != nil {
-		t.Fatalf("load runtime config: %v", err)
+		t.Fatalf(errLoadRuntimeConfigFmt, err)
 	}
 	if !config.Mode.IsDevelopment() {
 		t.Fatalf("expected development mode, got %s", config.Mode)
@@ -44,12 +46,12 @@ func TestLoadRuntimeConfigFromEnvDevelopmentModeEnablesWildcardCORS(t *testing.T
 
 func TestLoadRuntimeConfigFromEnvProductionModeParsesAllowlist(t *testing.T) {
 	t.Setenv(envDevMode, "")
-	t.Setenv(envProductionMode, "true")
+	t.Setenv(envProductionMode, envBoolTrue)
 	t.Setenv(envCORSAllowedOrigins, "https://app.example.com, https://admin.example.com, https://app.example.com")
 
 	config, err := LoadRuntimeConfigFromEnv()
 	if err != nil {
-		t.Fatalf("load runtime config: %v", err)
+		t.Fatalf(errLoadRuntimeConfigFmt, err)
 	}
 	if !config.Mode.IsProduction() {
 		t.Fatalf("expected production mode, got %s", config.Mode)
@@ -68,7 +70,7 @@ func TestLoadRuntimeConfigFromEnvProductionModeParsesAllowlist(t *testing.T) {
 
 func TestLoadRuntimeConfigFromEnvProductionModeRejectsWildcardOrigin(t *testing.T) {
 	t.Setenv(envDevMode, "")
-	t.Setenv(envProductionMode, "true")
+	t.Setenv(envProductionMode, envBoolTrue)
 	t.Setenv(envCORSAllowedOrigins, "*")
 
 	if _, err := LoadRuntimeConfigFromEnv(); err == nil {
@@ -87,8 +89,8 @@ func TestLoadRuntimeConfigFromEnvRejectsInvalidBooleanValues(t *testing.T) {
 }
 
 func TestLoadRuntimeConfigFromEnvRejectsConflictingModeBooleans(t *testing.T) {
-	t.Setenv(envDevMode, "true")
-	t.Setenv(envProductionMode, "true")
+	t.Setenv(envDevMode, envBoolTrue)
+	t.Setenv(envProductionMode, envBoolTrue)
 	t.Setenv(envCORSAllowedOrigins, "")
 
 	if _, err := LoadRuntimeConfigFromEnv(); err == nil {

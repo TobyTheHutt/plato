@@ -10,15 +10,21 @@ import (
 	"time"
 )
 
+const (
+	testJWTSecret          = "test-secret"
+	errCreateProviderFmt   = "create provider: %v"
+	errExpectedTwoRolesFmt = "expected two roles, got %v"
+)
+
 func TestNewJWTAuthProviderFromEnv(t *testing.T) {
-	t.Setenv("DEV_MODE", "")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SECRET", "")
+	t.Setenv(devModeEnvVar, "")
+	t.Setenv(jwtSigningKeyEnvVar, "")
+	t.Setenv(jwtLegacySecretEnvVar, "")
 	if _, err := NewJWTAuthProviderFromEnv(); err == nil {
 		t.Fatal("expected missing secret error")
 	}
 
-	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "dev-secret")
+	t.Setenv(jwtSigningKeyEnvVar, "dev-secret")
 	provider, err := NewJWTAuthProviderFromEnv()
 	if err != nil {
 		t.Fatalf("create provider from env: %v", err)
@@ -34,9 +40,9 @@ func TestNewJWTAuthProviderFromEnv(t *testing.T) {
 }
 
 func TestNewJWTAuthProviderFromEnvGeneratesSecretInDevelopmentMode(t *testing.T) {
-	t.Setenv("DEV_MODE", "true")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SECRET", "")
+	t.Setenv(devModeEnvVar, "true")
+	t.Setenv(jwtSigningKeyEnvVar, "")
+	t.Setenv(jwtLegacySecretEnvVar, "")
 
 	firstProvider, err := NewJWTAuthProviderFromEnv()
 	if err != nil {
@@ -59,9 +65,9 @@ func TestNewJWTAuthProviderFromEnvGeneratesSecretInDevelopmentMode(t *testing.T)
 }
 
 func TestNewJWTAuthProviderFromEnvUsesLegacySigningKey(t *testing.T) {
-	t.Setenv("DEV_MODE", "")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "")
-	t.Setenv("PLATO_AUTH_JWT_HS256_SECRET", "legacy-secret")
+	t.Setenv(devModeEnvVar, "")
+	t.Setenv(jwtSigningKeyEnvVar, "")
+	t.Setenv(jwtLegacySecretEnvVar, "legacy-secret")
 
 	provider, err := NewJWTAuthProviderFromEnv()
 	if err != nil {
@@ -77,15 +83,15 @@ func TestNewJWTAuthProviderFromEnvUsesLegacySigningKey(t *testing.T) {
 
 func TestJWTAuthProviderFromRequest(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
-	provider, err := NewJWTAuthProvider("test-secret")
+	provider, err := NewJWTAuthProvider(testJWTSecret)
 	if err != nil {
-		t.Fatalf("create provider: %v", err)
+		t.Fatalf(errCreateProviderFmt, err)
 	}
 	provider.now = func() time.Time {
 		return now
 	}
 
-	token := makeTestJWT(t, "test-secret", map[string]any{
+	token := makeTestJWT(t, testJWTSecret, map[string]any{
 		"sub":    "user_1",
 		"org_id": "org_1",
 		"roles":  []string{"org_admin", "org_user"},
@@ -106,7 +112,7 @@ func TestJWTAuthProviderFromRequest(t *testing.T) {
 		t.Fatalf("expected org_1, got %s", context.OrganisationID)
 	}
 	if len(context.Roles) != 2 {
-		t.Fatalf("expected two roles, got %v", context.Roles)
+		t.Fatalf(errExpectedTwoRolesFmt, context.Roles)
 	}
 }
 
@@ -114,7 +120,7 @@ func TestJWTAuthProviderFromRequestClaimFallbacks(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	provider, err := NewJWTAuthProvider("fallback-secret")
 	if err != nil {
-		t.Fatalf("create provider: %v", err)
+		t.Fatalf(errCreateProviderFmt, err)
 	}
 	provider.now = func() time.Time {
 		return now
@@ -141,15 +147,15 @@ func TestJWTAuthProviderFromRequestClaimFallbacks(t *testing.T) {
 		t.Fatalf("expected org_2, got %s", context.OrganisationID)
 	}
 	if len(context.Roles) != 2 {
-		t.Fatalf("expected two roles, got %v", context.Roles)
+		t.Fatalf(errExpectedTwoRolesFmt, context.Roles)
 	}
 }
 
 func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
-	provider, err := NewJWTAuthProvider("test-secret")
+	provider, err := NewJWTAuthProvider(testJWTSecret)
 	if err != nil {
-		t.Fatalf("create provider: %v", err)
+		t.Fatalf(errCreateProviderFmt, err)
 	}
 	provider.now = func() time.Time {
 		return now
@@ -181,14 +187,14 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 		},
 		{
 			name: "missing subject",
-			headerValue: bearerPrefix + makeTestJWT(t, "test-secret", map[string]any{
+			headerValue: bearerPrefix + makeTestJWT(t, testJWTSecret, map[string]any{
 				"roles": []string{"org_admin"},
 				"exp":   now.Add(time.Hour).Unix(),
 			}),
 		},
 		{
 			name: "expired token",
-			headerValue: bearerPrefix + makeTestJWT(t, "test-secret", map[string]any{
+			headerValue: bearerPrefix + makeTestJWT(t, testJWTSecret, map[string]any{
 				"sub":   "user_1",
 				"roles": []string{"org_admin"},
 				"exp":   now.Add(-time.Minute).Unix(),
@@ -196,7 +202,7 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 		},
 		{
 			name: "not before in the future",
-			headerValue: bearerPrefix + makeTestJWT(t, "test-secret", map[string]any{
+			headerValue: bearerPrefix + makeTestJWT(t, testJWTSecret, map[string]any{
 				"sub":   "user_1",
 				"roles": []string{"org_admin"},
 				"nbf":   now.Add(time.Hour).Unix(),
@@ -205,14 +211,14 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 		},
 		{
 			name: "missing roles",
-			headerValue: bearerPrefix + makeTestJWT(t, "test-secret", map[string]any{
+			headerValue: bearerPrefix + makeTestJWT(t, testJWTSecret, map[string]any{
 				"sub": "user_1",
 				"exp": now.Add(time.Hour).Unix(),
 			}),
 		},
 		{
 			name: "unsupported algorithm",
-			headerValue: bearerPrefix + makeTestJWTWithHeader(t, "test-secret", map[string]any{
+			headerValue: bearerPrefix + makeTestJWTWithHeader(t, testJWTSecret, map[string]any{
 				"alg": "HS384",
 				"typ": "JWT",
 			}, map[string]any{
@@ -293,7 +299,7 @@ func TestParseRolesClaim(t *testing.T) {
 		t.Fatalf("parse roles array claim: %v", err)
 	}
 	if len(roles) != 2 {
-		t.Fatalf("expected two roles, got %v", roles)
+		t.Fatalf(errExpectedTwoRolesFmt, roles)
 	}
 
 	_, err = parseRolesClaim([]any{"org_admin", 123})
@@ -326,12 +332,12 @@ func TestValidateClaimHelpers(t *testing.T) {
 }
 
 func TestDevelopmentModeAndSecretHelpers(t *testing.T) {
-	t.Setenv("DEV_MODE", "true")
+	t.Setenv(devModeEnvVar, "true")
 	if !isDevModeEnabled() {
 		t.Fatal("expected development mode enabled")
 	}
 
-	t.Setenv("DEV_MODE", "invalid")
+	t.Setenv(devModeEnvVar, "invalid")
 	if isDevModeEnabled() {
 		t.Fatal("expected invalid dev mode value to be treated as disabled")
 	}

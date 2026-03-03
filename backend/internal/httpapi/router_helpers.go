@@ -18,6 +18,14 @@ type corsPolicy struct {
 	allowMethods   string
 }
 
+const (
+	headerAllow                    = "Allow"
+	headerContentType              = "Content-Type"
+	contentTypeJSON                = "application/json"
+	headerOrigin                   = "Origin"
+	headerAccessControlAllowOrigin = "Access-Control-Allow-Origin"
+)
+
 func newCORSPolicy(config RuntimeConfig) corsPolicy {
 	policy := corsPolicy{
 		allowAnyOrigin: config.AllowAnyCORSOrigin,
@@ -86,7 +94,7 @@ func isSubresourceRoute(segments []string, subresource string) bool {
 }
 
 func methodNotAllowed(w http.ResponseWriter, methods ...string) {
-	w.Header().Set("Allow", strings.Join(methods, ", "))
+	w.Header().Set(headerAllow, strings.Join(methods, ", "))
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
 
@@ -102,7 +110,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, contentTypeJSON)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		log.Printf("write json failed: status=%d body_type=%T err=%v", status, body, err)
@@ -147,11 +155,11 @@ func setCORS(w http.ResponseWriter, r *http.Request, policy corsPolicy) {
 	if policy.allowAnyOrigin {
 		w.Header().Set("Access-Control-Allow-Headers", policy.allowHeaders)
 		w.Header().Set("Access-Control-Allow-Methods", policy.allowMethods)
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set(headerAccessControlAllowOrigin, "*")
 		return
 	}
 
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	origin := strings.TrimSpace(r.Header.Get(headerOrigin))
 	if origin == "" {
 		return
 	}
@@ -161,8 +169,8 @@ func setCORS(w http.ResponseWriter, r *http.Request, policy corsPolicy) {
 
 	w.Header().Set("Access-Control-Allow-Headers", policy.allowHeaders)
 	w.Header().Set("Access-Control-Allow-Methods", policy.allowMethods)
-	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Set("Vary", "Origin")
+	w.Header().Set(headerAccessControlAllowOrigin, origin)
+	w.Header().Set("Vary", headerOrigin)
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {

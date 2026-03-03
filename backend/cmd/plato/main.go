@@ -26,7 +26,10 @@ var (
 	newShutdownContext = context.WithTimeout
 )
 
-const shutdownTimeout = 30 * time.Second
+const (
+	shutdownTimeout = 30 * time.Second
+	listenAddrEnv   = "PLATO_ADDR"
+)
 
 func main() {
 	runtimeConfig, err := loadRuntimeConfig()
@@ -37,7 +40,7 @@ func main() {
 	}
 
 	logStartupWarnings(runtimeConfig, logPrintf)
-	addr := getenv("PLATO_ADDR", httpapi.DefaultListenAddr(runtimeConfig.Mode))
+	addr := getenv(listenAddrEnv, httpapi.DefaultListenAddr(runtimeConfig.Mode))
 
 	router, err := makeRouter(runtimeConfig)
 	if err != nil {
