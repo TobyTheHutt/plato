@@ -317,6 +317,49 @@ type reportTruncationBucket struct {
 }
 
 func main() {
+	config, err := parseCLIConfig()
+	if err != nil {
+		exitf("error: %v", err)
+	}
+
+	outcome, err := runPolicyEvaluation(config)
+	if err != nil {
+		exitf("error: %v", err)
+	}
+
+	printResult(config.scanMode, outcome.result)
+	if err = writeScanReportIfConfigured(config, outcome); err != nil {
+		exitf("error: %v", err)
+	}
+
+	if hasBlockingFindings(outcome.result) {
+		os.Exit(1)
+	}
+}
+
+type cliConfig struct {
+	inputPath        string
+	overridesPath    string
+	scanMode         string
+	excludeInput     string
+	nvdAPIBaseURL    string
+	nvdAPIKeyFile    string
+	ghsaAPIBaseURL   string
+	ghsaTokenFile    string
+	severitySnapshot string
+	offlineMode      bool
+	nvdTimeout       time.Duration
+	reportFile       string
+}
+
+type policyEvaluationOutcome struct {
+	result       evaluationResult
+	runTime      time.Time
+	apiKeySet    bool
+	ghsaTokenSet bool
+}
+
+func parseCLIConfig() (cliConfig, error) {
 	inputPath := flag.String("input", "", "path to govulncheck JSON output")
 	overridesPath := flag.String("overrides", "", "path to vulnerability override config")
 	scanMode := flag.String("scan-mode", scanModeSource, "govulncheck scan mode used by the input: source or binary")
@@ -331,101 +374,154 @@ func main() {
 	reportFile := flag.String("report-file", "", "optional path to write full vulnerability scan report JSON")
 	flag.Parse()
 
-	if strings.TrimSpace(*inputPath) == "" {
-		exitf("error: -input is required")
+	trimmedInputPath := strings.TrimSpace(*inputPath)
+	if trimmedInputPath == "" {
+		return cliConfig{}, errors.New("-input is required")
 	}
-	if strings.TrimSpace(*overridesPath) == "" {
-		exitf("error: -overrides is required")
+	trimmedOverridesPath := strings.TrimSpace(*overridesPath)
+	if trimmedOverridesPath == "" {
+		return cliConfig{}, errors.New("-overrides is required")
 	}
 	normalizedScanMode, err := normalizeScanMode(*scanMode)
 	if err != nil {
-		exitf("error: %v", err)
+		return cliConfig{}, err
 	}
 
-	inputFile, err := os.Open(*inputPath)
+	return cliConfig{
+		inputPath:        trimmedInputPath,
+		overridesPath:    trimmedOverridesPath,
+		scanMode:         normalizedScanMode,
+		excludeInput:     strings.TrimSpace(*excludeInput),
+		nvdAPIBaseURL:    strings.TrimSpace(*nvdAPIBaseURL),
+		nvdAPIKeyFile:    strings.TrimSpace(*nvdAPIKeyFile),
+		ghsaAPIBaseURL:   strings.TrimSpace(*ghsaAPIBaseURL),
+		ghsaTokenFile:    strings.TrimSpace(*ghsaTokenFile),
+		severitySnapshot: strings.TrimSpace(*severitySnapshot),
+		offlineMode:      *offlineMode,
+		nvdTimeout:       *nvdTimeout,
+		reportFile:       strings.TrimSpace(*reportFile),
+	}, nil
+}
+
+func runPolicyEvaluation(config cliConfig) (policyEvaluationOutcome, error) {
+	vulns, err := loadInputVulnerabilities(config)
 	if err != nil {
-		exitf("error: open govulncheck output: %v", err)
+		return policyEvaluationOutcome{}, err
 	}
 
-	vulns, err := parseGovulncheckOutputWithMode(inputFile, normalizedScanMode)
+	overrides, err := loadOverrides(config.overridesPath)
+	if err != nil {
+		return policyEvaluationOutcome{}, fmt.Errorf("load overrides: %w", err)
+	}
+
+	resolver, apiKey, ghsaToken, err := buildSeverityResolver(config)
+	if err != nil {
+		return policyEvaluationOutcome{}, err
+	}
+
+	runTime := time.Now().UTC()
+	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, runTime)
+	return policyEvaluationOutcome{
+		result:       result,
+		runTime:      runTime,
+		apiKeySet:    apiKey != "",
+		ghsaTokenSet: ghsaToken != "",
+	}, nil
+}
+
+func loadInputVulnerabilities(config cliConfig) ([]vulnAssessment, error) {
+	vulns, err := parseVulnerabilityInput(config.inputPath, config.scanMode)
+	if err != nil {
+		return nil, err
+	}
+	if config.excludeInput == "" {
+		return vulns, nil
+	}
+
+	excludedIDs, excludeErr := collectExcludedIDs(config.excludeInput)
+	if excludeErr != nil {
+		return nil, fmt.Errorf("load exclude-input: %w", excludeErr)
+	}
+	return filterExcludedVulnerabilities(vulns, excludedIDs), nil
+}
+
+func parseVulnerabilityInput(inputPath, scanMode string) ([]vulnAssessment, error) {
+	inputFile, err := os.Open(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("open govulncheck output: %w", err)
+	}
+
+	vulns, parseErr := parseGovulncheckOutputWithMode(inputFile, scanMode)
 	closeErr := inputFile.Close()
-	if err != nil {
-		exitf("error: parse govulncheck output: %v", err)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parse govulncheck output: %w", parseErr)
 	}
 	if closeErr != nil {
-		exitf("error: close govulncheck output: %v", closeErr)
+		return nil, fmt.Errorf("close govulncheck output: %w", closeErr)
 	}
+	return vulns, nil
+}
 
-	if strings.TrimSpace(*excludeInput) != "" {
-		excludedIDs, excludeErr := collectExcludedIDs(*excludeInput)
-		if excludeErr != nil {
-			exitf("error: load exclude-input: %v", excludeErr)
-		}
-		vulns = filterExcludedVulnerabilities(vulns, excludedIDs)
-	}
-
-	overrides, err := loadOverrides(*overridesPath)
+func buildSeverityResolver(config cliConfig) (*nvdSeverityResolver, string, string, error) {
+	apiKey, err := resolveNVDAPIKey(config.nvdAPIKeyFile)
 	if err != nil {
-		exitf("error: load overrides: %v", err)
+		return nil, "", "", fmt.Errorf("resolve NVD API key: %w", err)
 	}
 
-	apiKey, err := resolveNVDAPIKey(*nvdAPIKeyFile)
+	ghsaToken, err := resolveGHSAToken(config.ghsaTokenFile)
 	if err != nil {
-		exitf("error: resolve NVD API key: %v", err)
+		return nil, "", "", fmt.Errorf("resolve GHSA token: %w", err)
 	}
 
-	ghsaToken, err := resolveGHSAToken(*ghsaTokenFile)
+	snapshot, err := loadSeveritySnapshot(config.severitySnapshot)
 	if err != nil {
-		exitf("error: resolve GHSA token: %v", err)
+		return nil, "", "", fmt.Errorf("load severity snapshot: %w", err)
 	}
-
-	snapshot, err := loadSeveritySnapshot(*severitySnapshot)
-	if err != nil {
-		exitf("error: load severity snapshot: %v", err)
-	}
-
-	if *offlineMode && strings.TrimSpace(*severitySnapshot) == "" {
-		exitf("error: -offline requires -severity-snapshot")
+	if config.offlineMode && config.severitySnapshot == "" {
+		return nil, "", "", errors.New("-offline requires -severity-snapshot")
 	}
 
 	resolver := &nvdSeverityResolver{
 		client: &http.Client{
-			Timeout: *nvdTimeout,
+			Timeout: config.nvdTimeout,
 		},
-		baseURL:     *nvdAPIBaseURL,
+		baseURL:     config.nvdAPIBaseURL,
 		apiKey:      apiKey,
-		ghsaBaseURL: *ghsaAPIBaseURL,
+		ghsaBaseURL: config.ghsaAPIBaseURL,
 		ghsaToken:   ghsaToken,
-		offline:     *offlineMode,
+		offline:     config.offlineMode,
 		snapshot:    snapshot,
 		cache:       make(map[string]severityAssessment),
 		errorMap:    make(map[string]error),
 	}
+	return resolver, apiKey, ghsaToken, nil
+}
 
-	runTimestamp := time.Now().UTC()
-	result := evaluateVulnerabilities(context.Background(), vulns, overrides, resolver, runTimestamp)
-	printResult(normalizedScanMode, result)
-	if strings.TrimSpace(*reportFile) != "" {
-		report := buildScanReport(normalizedScanMode, runTimestamp, result, reportConfiguration{
-			InputPath:            strings.TrimSpace(*inputPath),
-			OverridesPath:        strings.TrimSpace(*overridesPath),
-			ExcludeInputPath:     strings.TrimSpace(*excludeInput),
-			SeveritySnapshotPath: strings.TrimSpace(*severitySnapshot),
-			NVDAPIBaseURL:        strings.TrimSpace(*nvdAPIBaseURL),
-			GHSAAPIBaseURL:       strings.TrimSpace(*ghsaAPIBaseURL),
-			NVDTimeout:           nvdTimeout.String(),
-			Offline:              *offlineMode,
-			NVDAPIKeyConfigured:  apiKey != "",
-			GHSATokenConfigured:  ghsaToken != "",
-		})
-		if reportErr := writeScanReport(*reportFile, report); reportErr != nil {
-			exitf("error: write report file: %v", reportErr)
-		}
+func writeScanReportIfConfigured(config cliConfig, outcome policyEvaluationOutcome) error {
+	if config.reportFile == "" {
+		return nil
 	}
 
-	if len(result.Fail) > 0 || len(result.Expired) > 0 {
-		os.Exit(1)
+	report := buildScanReport(config.scanMode, outcome.runTime, outcome.result, reportConfiguration{
+		InputPath:            config.inputPath,
+		OverridesPath:        config.overridesPath,
+		ExcludeInputPath:     config.excludeInput,
+		SeveritySnapshotPath: config.severitySnapshot,
+		NVDAPIBaseURL:        config.nvdAPIBaseURL,
+		GHSAAPIBaseURL:       config.ghsaAPIBaseURL,
+		NVDTimeout:           config.nvdTimeout.String(),
+		Offline:              config.offlineMode,
+		NVDAPIKeyConfigured:  outcome.apiKeySet,
+		GHSATokenConfigured:  outcome.ghsaTokenSet,
+	})
+	if err := writeScanReport(config.reportFile, report); err != nil {
+		return fmt.Errorf("write report file: %w", err)
 	}
+	return nil
+}
+
+func hasBlockingFindings(result evaluationResult) bool {
+	return len(result.Fail) > 0 || len(result.Expired) > 0
 }
 
 func exitf(format string, args ...any) {
@@ -1122,24 +1218,20 @@ func (resolver *nvdSeverityResolver) resolveCVEWithRetry(ctx context.Context, no
 		}
 		response, err := resolver.client.Do(request)
 		if err != nil {
-			if attempt < maxAttempts {
-				if sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured); sleepErr != nil {
-					return unknownSeverityAssessment(normalizedCVE), sleepErr
-				}
+			retry, retryAssessment, retryErr := resolver.retryOrCacheUnknown(ctx, attempt, maxAttempts, apiKeyConfigured, normalizedCVE, err)
+			if retry {
 				continue
 			}
-			return resolver.cacheUnknownWithError(normalizedCVE, err)
+			return retryAssessment, retryErr
 		}
 
 		assessment, shouldRetry, responseErr := resolver.handleNVDResponse(response, normalizedCVE)
 		if shouldRetry {
-			if attempt < maxAttempts {
-				if sleepErr := sleepWithBackoff(ctx, attempt, apiKeyConfigured); sleepErr != nil {
-					return unknownSeverityAssessment(normalizedCVE), sleepErr
-				}
+			retry, retryAssessment, retryErr := resolver.retryOrCacheUnknown(ctx, attempt, maxAttempts, apiKeyConfigured, normalizedCVE, responseErr)
+			if retry {
 				continue
 			}
-			return resolver.cacheUnknownWithError(normalizedCVE, responseErr)
+			return retryAssessment, retryErr
 		}
 
 		resolver.writeCache(normalizedCVE, assessment, responseErr)
@@ -1147,6 +1239,24 @@ func (resolver *nvdSeverityResolver) resolveCVEWithRetry(ctx context.Context, no
 	}
 
 	return resolver.cacheUnknownWithError(normalizedCVE, fmt.Errorf("exhausted NVD resolution attempts for %s", normalizedCVE))
+}
+
+func (resolver *nvdSeverityResolver) retryOrCacheUnknown(
+	ctx context.Context,
+	attempt int,
+	maxAttempts int,
+	credentialConfigured bool,
+	id string,
+	err error,
+) (bool, severityAssessment, error) {
+	if attempt < maxAttempts {
+		if sleepErr := sleepWithBackoff(ctx, attempt, credentialConfigured); sleepErr != nil {
+			return false, unknownSeverityAssessment(id), sleepErr
+		}
+		return true, severityAssessment{}, nil
+	}
+	assessment, cachedErr := resolver.cacheUnknownWithError(id, err)
+	return false, assessment, cachedErr
 }
 
 func (resolver *nvdSeverityResolver) newNVDRequest(ctx context.Context, requestURL string) (*http.Request, bool, error) {
@@ -1209,24 +1319,20 @@ func (resolver *nvdSeverityResolver) resolveGHSAWithRetry(ctx context.Context, n
 		}
 		response, err := resolver.client.Do(request)
 		if err != nil {
-			if attempt < maxAttempts {
-				if sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured); sleepErr != nil {
-					return unknownSeverityAssessment(normalizedGHSA), sleepErr
-				}
+			retry, retryAssessment, retryErr := resolver.retryOrCacheUnknown(ctx, attempt, maxAttempts, tokenConfigured, normalizedGHSA, err)
+			if retry {
 				continue
 			}
-			return resolver.cacheUnknownWithError(normalizedGHSA, err)
+			return retryAssessment, retryErr
 		}
 
 		assessment, shouldRetry, responseErr := resolver.handleGHSAResponse(response, normalizedGHSA)
 		if shouldRetry {
-			if attempt < maxAttempts {
-				if sleepErr := sleepWithBackoff(ctx, attempt, tokenConfigured); sleepErr != nil {
-					return unknownSeverityAssessment(normalizedGHSA), sleepErr
-				}
+			retry, retryAssessment, retryErr := resolver.retryOrCacheUnknown(ctx, attempt, maxAttempts, tokenConfigured, normalizedGHSA, responseErr)
+			if retry {
 				continue
 			}
-			return resolver.cacheUnknownWithError(normalizedGHSA, responseErr)
+			return retryAssessment, retryErr
 		}
 
 		resolver.writeCache(normalizedGHSA, assessment, responseErr)
@@ -1860,58 +1966,73 @@ func printResult(scanMode string, result evaluationResult) {
 	fmt.Printf("  accepted: %d\n", len(result.Accepted))
 	fmt.Printf("  info: %d\n", len(result.Info))
 
-	if len(result.Expired) > 0 {
-		fmt.Println("")
-		fmt.Println("Expired overrides")
-		for _, item := range result.Expired {
-			fmt.Printf("  - %s override %s expired on %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
-			fmt.Printf("    reason: %s\n", item.Override.Reason)
-		}
+	printExpiredOverrides(result.Expired)
+	printEvaluatedVulnerabilitySection("Failing vulnerabilities", result.Fail)
+	printEvaluatedVulnerabilitySection("Warning vulnerabilities", result.Warn)
+	printAcceptedOverrides(result.Accepted)
+	printInformationalFindings(scanMode, result.Info)
+}
+
+func printExpiredOverrides(items []evaluatedVuln) {
+	if len(items) == 0 {
+		return
 	}
 
-	if len(result.Fail) > 0 {
-		fmt.Println("")
-		fmt.Println("Failing vulnerabilities")
-		for _, item := range result.Fail {
-			printEvaluated(item)
-		}
+	fmt.Println("")
+	fmt.Println("Expired overrides")
+	for _, item := range items {
+		fmt.Printf("  - %s override %s expired on %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
+		fmt.Printf("    reason: %s\n", item.Override.Reason)
+	}
+}
+
+func printEvaluatedVulnerabilitySection(title string, items []evaluatedVuln) {
+	if len(items) == 0 {
+		return
 	}
 
-	if len(result.Warn) > 0 {
-		fmt.Println("")
-		fmt.Println("Warning vulnerabilities")
-		for _, item := range result.Warn {
-			printEvaluated(item)
-		}
+	fmt.Println("")
+	fmt.Println(title)
+	for _, item := range items {
+		printEvaluated(item)
+	}
+}
+
+func printAcceptedOverrides(items []evaluatedVuln) {
+	if len(items) == 0 {
+		return
 	}
 
-	if len(result.Accepted) > 0 {
-		fmt.Println("")
-		fmt.Println("Accepted risk overrides")
-		for _, item := range result.Accepted {
-			fmt.Printf("  - %s accepted by %s until %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
-			fmt.Printf("    reason: %s\n", item.Override.Reason)
-		}
+	fmt.Println("")
+	fmt.Println("Accepted risk overrides")
+	for _, item := range items {
+		fmt.Printf("  - %s accepted by %s until %s\n", item.Vuln.ID, item.MatchedByID, item.Override.ExpiresOn.Format("2006-01-02"))
+		fmt.Printf("    reason: %s\n", item.Override.Reason)
+	}
+}
+
+func printInformationalFindings(scanMode string, items []evaluatedVuln) {
+	if len(items) == 0 {
+		return
 	}
 
-	if len(result.Info) > 0 {
-		fmt.Println("")
-		infoLabel := infoHeading(scanMode)
-		fmt.Println(infoLabel)
-		limit := len(result.Info)
-		if limit > consoleInfoDisplayCap {
-			limit = consoleInfoDisplayCap
+	fmt.Println("")
+	infoLabel := infoHeading(scanMode)
+	fmt.Println(infoLabel)
+
+	limit := len(items)
+	if limit > consoleInfoDisplayCap {
+		limit = consoleInfoDisplayCap
+	}
+	for index := 0; index < limit; index++ {
+		item := items[index]
+		fmt.Printf("  - %s %s\n", item.Vuln.ID, item.Vuln.Summary)
+		if item.Vuln.URL != "" {
+			fmt.Printf("    more info: %s\n", item.Vuln.URL)
 		}
-		for index := 0; index < limit; index++ {
-			item := result.Info[index]
-			fmt.Printf("  - %s %s\n", item.Vuln.ID, item.Vuln.Summary)
-			if item.Vuln.URL != "" {
-				fmt.Printf("    more info: %s\n", item.Vuln.URL)
-			}
-		}
-		if len(result.Info) > limit {
-			fmt.Printf("  ... and %d more %s\n", len(result.Info)-limit, strings.ToLower(infoLabel))
-		}
+	}
+	if len(items) > limit {
+		fmt.Printf("  ... and %d more %s\n", len(items)-limit, strings.ToLower(infoLabel))
 	}
 }
 

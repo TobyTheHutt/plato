@@ -30,9 +30,18 @@ func TestGetenv(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	handler := http.NewServeMux()
-	loggerCalled := false
 	addr := "127.0.0.1:0"
 
+	assertRunInitializesConfiguredServer(t, handler, addr)
+	assertRunAcceptsServerClosed(t, handler, addr)
+	assertRunPropagatesStartError(t, handler, addr)
+	assertRunRejectsNilStart(t, handler, addr)
+}
+
+func assertRunInitializesConfiguredServer(t *testing.T, handler http.Handler, addr string) {
+	t.Helper()
+
+	loggerCalled := false
 	if err := run(addr, handler, func(server *http.Server, _ net.Listener) error {
 		if server.Addr != addr {
 			t.Fatalf("unexpected server addr %s", server.Addr)
@@ -61,12 +70,20 @@ func TestRun(t *testing.T) {
 	if !loggerCalled {
 		t.Fatal("expected logger callback to be called")
 	}
+}
+
+func assertRunAcceptsServerClosed(t *testing.T, handler http.Handler, addr string) {
+	t.Helper()
 
 	if err := run(addr, handler, func(_ *http.Server, _ net.Listener) error {
 		return http.ErrServerClosed
 	}, nil); err != nil {
 		t.Fatalf("expected nil on server closed, got %v", err)
 	}
+}
+
+func assertRunPropagatesStartError(t *testing.T, handler http.Handler, addr string) {
+	t.Helper()
 
 	expected := errors.New("boom")
 	if err := run(addr, handler, func(_ *http.Server, _ net.Listener) error {
@@ -74,6 +91,10 @@ func TestRun(t *testing.T) {
 	}, nil); !errors.Is(err, expected) {
 		t.Fatalf("expected propagated error, got %v", err)
 	}
+}
+
+func assertRunRejectsNilStart(t *testing.T, handler http.Handler, addr string) {
+	t.Helper()
 
 	if err := run(addr, handler, nil, nil); err == nil {
 		t.Fatal("expected error for nil start function")
@@ -440,6 +461,20 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 		return http.NewServeMux(), nil
 	}
 
+	exitCode := -1
+	exitProcess = func(code int) {
+		exitCode = code
+	}
+	assertMainUsesRunServerWithExplicitAddr(t, &exitCode)
+	exitCode = -1
+	assertMainUsesFallbackAddr(t)
+	exitCode = -1
+	assertMainExitsOnRunServerError(t, &exitCode)
+}
+
+func assertMainUsesRunServerWithExplicitAddr(t *testing.T, exitCode *int) {
+	t.Helper()
+
 	runCalled := false
 	runServer = func(addr string, handler http.Handler, start func(*http.Server, net.Listener) error, logger func(string, ...any)) error {
 		runCalled = true
@@ -466,20 +501,19 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 		}
 		return nil
 	}
-
-	exitCode := -1
-	exitProcess = func(code int) {
-		exitCode = code
-	}
 	logPrintf = func(_ string, _ ...any) {}
 
 	main()
 	if !runCalled {
 		t.Fatal("expected main to call runServer")
 	}
-	if exitCode != -1 {
-		t.Fatalf("expected no exit on success, got %d", exitCode)
+	if *exitCode != -1 {
+		t.Fatalf("expected no exit on success, got %d", *exitCode)
 	}
+}
+
+func assertMainUsesFallbackAddr(t *testing.T) {
+	t.Helper()
 
 	t.Setenv("PLATO_ADDR", "")
 	runServer = func(addr string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
@@ -489,6 +523,10 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 		return nil
 	}
 	main()
+}
+
+func assertMainExitsOnRunServerError(t *testing.T, exitCode *int) {
+	t.Helper()
 
 	runServer = func(_ string, _ http.Handler, _ func(*http.Server, net.Listener) error, _ func(string, ...any)) error {
 		return errors.New("boom")
@@ -498,8 +536,8 @@ func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 		logMessages = append(logMessages, fmt.Sprintf(format, args...))
 	}
 	main()
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1 when runServer fails, got %d", exitCode)
+	if *exitCode != 1 {
+		t.Fatalf("expected exit code 1 when runServer fails, got %d", *exitCode)
 	}
 	if !logsContain(logMessages, "server failed") {
 		t.Fatalf("expected log message to include server failed, got %v", logMessages)

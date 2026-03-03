@@ -342,6 +342,14 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	t.Helper()
 	ctx := context.Background()
 
+	deleteRepositoryCascadeCalendarAndPerson(t, state, ctx)
+	verifyRepositoryCascadeGroupMemberRemoval(t, state, ctx)
+	deleteRepositoryCascadeRemainingResources(t, state, ctx)
+}
+
+func deleteRepositoryCascadeCalendarAndPerson(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
+
 	if err := state.repo.DeleteAllocation(ctx, state.orgA.ID, state.allocationA2.ID); err != nil {
 		t.Fatalf("delete allocation A2: %v", err)
 	}
@@ -363,6 +371,10 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	if err := state.repo.DeletePerson(ctx, state.orgA.ID, state.personA1.ID); err != nil {
 		t.Fatalf("delete person A1: %v", err)
 	}
+}
+
+func verifyRepositoryCascadeGroupMemberRemoval(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
 
 	groupAfterDelete, err := state.repo.GetGroup(ctx, state.orgA.ID, state.groupA.ID)
 	if err != nil {
@@ -371,6 +383,10 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	if len(groupAfterDelete.MemberIDs) != 1 || groupAfterDelete.MemberIDs[0] != state.personA2.ID {
 		t.Fatalf("expected remaining member Bob, got %v", groupAfterDelete.MemberIDs)
 	}
+}
+
+func deleteRepositoryCascadeRemainingResources(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+	t.Helper()
 
 	projectWithAllocation, err := state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project With Allocation"})
 	if err != nil {
@@ -379,24 +395,19 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	if _, err = state.repo.CreateAllocation(ctx, domain.Allocation{OrganisationID: state.orgA.ID, PersonID: state.personA2.ID, ProjectID: projectWithAllocation.ID, Percent: 20}); err != nil {
 		t.Fatalf("create project allocation: %v", err)
 	}
-	err = state.repo.DeleteProject(ctx, state.orgA.ID, projectWithAllocation.ID)
-	if err != nil {
+	if err = state.repo.DeleteProject(ctx, state.orgA.ID, projectWithAllocation.ID); err != nil {
 		t.Fatalf("delete project with allocations: %v", err)
 	}
-	err = state.repo.DeleteProject(ctx, state.orgA.ID, state.projectA2.ID)
-	if err != nil {
+	if err = state.repo.DeleteProject(ctx, state.orgA.ID, state.projectA2.ID); err != nil {
 		t.Fatalf("delete project A2: %v", err)
 	}
-	err = state.repo.DeleteGroup(ctx, state.orgA.ID, state.groupA.ID)
-	if err != nil {
+	if err = state.repo.DeleteGroup(ctx, state.orgA.ID, state.groupA.ID); err != nil {
 		t.Fatalf("delete group: %v", err)
 	}
-	_, err = state.repo.GetAllocation(ctx, state.orgA.ID, state.groupAllocation.ID)
-	if !errors.Is(err, domain.ErrNotFound) {
+	if _, err = state.repo.GetAllocation(ctx, state.orgA.ID, state.groupAllocation.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected group allocation to be deleted with group, got %v", err)
 	}
-	err = state.repo.DeleteOrganisation(ctx, state.orgA.ID)
-	if err != nil {
+	if err = state.repo.DeleteOrganisation(ctx, state.orgA.ID); err != nil {
 		t.Fatalf("delete organisation A: %v", err)
 	}
 }
@@ -637,6 +648,19 @@ func TestFileRepositoryRollsBackStateOnPersistFailure(t *testing.T) {
 }
 
 func TestSortingHelpers(t *testing.T) {
+	verifySortedOrganisations(t)
+	verifySortedPersons(t)
+	verifySortedProjects(t)
+	verifySortedGroups(t)
+	verifySortedAllocations(t)
+	verifySortedOrgHolidays(t)
+	verifySortedGroupUnavailability(t)
+	verifySortedPersonUnavailability(t)
+}
+
+func verifySortedOrganisations(t *testing.T) {
+	t.Helper()
+
 	organisations := []domain.Organisation{
 		{ID: "org_2", Name: "Z"},
 		{ID: "org_1", Name: "A"},
@@ -646,42 +670,70 @@ func TestSortingHelpers(t *testing.T) {
 	if organisations[0].ID != "org_1" || organisations[1].ID != "org_3" {
 		t.Fatalf("unexpected organisation sort order: %+v", organisations)
 	}
+}
+
+func verifySortedPersons(t *testing.T) {
+	t.Helper()
 
 	persons := []domain.Person{{ID: "person_2", Name: "Bob"}, {ID: "person_1", Name: "Bob"}, {ID: "person_3", Name: "Alice"}}
 	sortedPersons(persons)
 	if persons[0].ID != "person_3" || persons[1].ID != "person_1" {
 		t.Fatalf("unexpected person sort order: %+v", persons)
 	}
+}
+
+func verifySortedProjects(t *testing.T) {
+	t.Helper()
 
 	projects := []domain.Project{{ID: "project_2", Name: "Core"}, {ID: "project_1", Name: "Core"}, {ID: "project_3", Name: "Alpha"}}
 	sortedProjects(projects)
 	if projects[0].ID != "project_3" || projects[1].ID != "project_1" {
 		t.Fatalf("unexpected project sort order: %+v", projects)
 	}
+}
+
+func verifySortedGroups(t *testing.T) {
+	t.Helper()
 
 	groups := []domain.Group{{ID: "group_2", Name: "Team"}, {ID: "group_1", Name: "Team"}, {ID: "group_3", Name: "Alpha"}}
 	sortedGroups(groups)
 	if groups[0].ID != "group_3" || groups[1].ID != "group_1" {
 		t.Fatalf("unexpected group sort order: %+v", groups)
 	}
+}
+
+func verifySortedAllocations(t *testing.T) {
+	t.Helper()
 
 	allocations := []domain.Allocation{{ID: "a3", PersonID: "p1", ProjectID: "pr1"}, {ID: "a1", PersonID: "p1", ProjectID: "pr1"}, {ID: "a2", PersonID: "p2", ProjectID: "pr2"}}
 	sortedAllocations(allocations)
 	if allocations[0].ID != "a1" || allocations[1].ID != "a3" {
 		t.Fatalf("unexpected allocation sort order: %+v", allocations)
 	}
+}
+
+func verifySortedOrgHolidays(t *testing.T) {
+	t.Helper()
 
 	holidays := []domain.OrgHoliday{{ID: "h2", Date: "2026-01-01"}, {ID: "h1", Date: "2026-01-01"}, {ID: "h3", Date: "2026-01-02"}}
 	sortedOrgHolidays(holidays)
 	if holidays[0].ID != "h1" || holidays[1].ID != "h2" {
 		t.Fatalf("unexpected holiday sort order: %+v", holidays)
 	}
+}
+
+func verifySortedGroupUnavailability(t *testing.T) {
+	t.Helper()
 
 	groupUnavailable := []domain.GroupUnavailability{{ID: "gu2", Date: "2026-01-01"}, {ID: "gu1", Date: "2026-01-01"}, {ID: "gu3", Date: "2026-01-03"}}
 	sortedGroupUnavailability(groupUnavailable)
 	if groupUnavailable[0].ID != "gu1" || groupUnavailable[1].ID != "gu2" {
 		t.Fatalf("unexpected group unavailability sort order: %+v", groupUnavailable)
 	}
+}
+
+func verifySortedPersonUnavailability(t *testing.T) {
+	t.Helper()
 
 	personUnavailable := []domain.PersonUnavailability{{ID: "pu2", Date: "2026-01-01"}, {ID: "pu1", Date: "2026-01-01"}, {ID: "pu3", Date: "2026-01-03"}}
 	sortedPersonUnavailability(personUnavailable)

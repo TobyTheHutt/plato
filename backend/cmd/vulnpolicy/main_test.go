@@ -528,57 +528,62 @@ func TestResolveNVDAPIKey(t *testing.T) {
 }
 
 func TestResolveGHSAToken(t *testing.T) {
-	t.Run("from file", func(t *testing.T) {
-		t.Setenv("GHSA_TOKEN", "from-env")
-		tempDir := t.TempDir()
-		tokenPath := filepath.Join(tempDir, "ghsa.token")
-		if err := os.WriteFile(tokenPath, []byte("from-file\n"), 0o600); err != nil {
-			t.Fatalf("write token file: %v", err)
-		}
+	t.Run("from file", testResolveGHSATokenFromFile)
+	t.Run("empty file fails", testResolveGHSATokenEmptyFileFails)
+	t.Run("fallback to GHSA_TOKEN env", testResolveGHSATokenFallsBackToGHSATokenEnv)
+	t.Run("fallback to GITHUB_TOKEN env", testResolveGHSATokenFallsBackToGitHubTokenEnv)
+}
 
-		resolved, err := resolveGHSAToken(tokenPath)
-		if err != nil {
-			t.Fatalf("resolveGHSAToken returned error: %v", err)
-		}
-		if resolved != "from-file" {
-			t.Fatalf("unexpected token: %q", resolved)
-		}
-	})
+func testResolveGHSATokenFromFile(t *testing.T) {
+	t.Setenv("GHSA_TOKEN", "from-env")
+	tempDir := t.TempDir()
+	tokenPath := filepath.Join(tempDir, "ghsa.token")
+	if err := os.WriteFile(tokenPath, []byte("from-file\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
 
-	t.Run("empty file fails", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tokenPath := filepath.Join(tempDir, "empty.token")
-		if err := os.WriteFile(tokenPath, []byte("\n"), 0o600); err != nil {
-			t.Fatalf("write token file: %v", err)
-		}
-		if _, err := resolveGHSAToken(tokenPath); err == nil {
-			t.Fatal("expected error for empty token file")
-		}
-	})
+	resolved, err := resolveGHSAToken(tokenPath)
+	if err != nil {
+		t.Fatalf("resolveGHSAToken returned error: %v", err)
+	}
+	if resolved != "from-file" {
+		t.Fatalf("unexpected token: %q", resolved)
+	}
+}
 
-	t.Run("fallback to GHSA_TOKEN env", func(t *testing.T) {
-		t.Setenv("GHSA_TOKEN", "ghsa-env")
-		t.Setenv("GITHUB_TOKEN", "github-env")
-		resolved, err := resolveGHSAToken("")
-		if err != nil {
-			t.Fatalf("resolveGHSAToken returned error: %v", err)
-		}
-		if resolved != "ghsa-env" {
-			t.Fatalf("unexpected token: %q", resolved)
-		}
-	})
+func testResolveGHSATokenEmptyFileFails(t *testing.T) {
+	tempDir := t.TempDir()
+	tokenPath := filepath.Join(tempDir, "empty.token")
+	if err := os.WriteFile(tokenPath, []byte("\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	if _, err := resolveGHSAToken(tokenPath); err == nil {
+		t.Fatal("expected error for empty token file")
+	}
+}
 
-	t.Run("fallback to GITHUB_TOKEN env", func(t *testing.T) {
-		t.Setenv("GHSA_TOKEN", "")
-		t.Setenv("GITHUB_TOKEN", "github-env")
-		resolved, err := resolveGHSAToken("")
-		if err != nil {
-			t.Fatalf("resolveGHSAToken returned error: %v", err)
-		}
-		if resolved != "github-env" {
-			t.Fatalf("unexpected token: %q", resolved)
-		}
-	})
+func testResolveGHSATokenFallsBackToGHSATokenEnv(t *testing.T) {
+	t.Setenv("GHSA_TOKEN", "ghsa-env")
+	t.Setenv("GITHUB_TOKEN", "github-env")
+	resolved, err := resolveGHSAToken("")
+	if err != nil {
+		t.Fatalf("resolveGHSAToken returned error: %v", err)
+	}
+	if resolved != "ghsa-env" {
+		t.Fatalf("unexpected token: %q", resolved)
+	}
+}
+
+func testResolveGHSATokenFallsBackToGitHubTokenEnv(t *testing.T) {
+	t.Setenv("GHSA_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "github-env")
+	resolved, err := resolveGHSAToken("")
+	if err != nil {
+		t.Fatalf("resolveGHSAToken returned error: %v", err)
+	}
+	if resolved != "github-env" {
+		t.Fatalf("unexpected token: %q", resolved)
+	}
 }
 
 func TestLoadSeveritySnapshot(t *testing.T) {
@@ -2062,6 +2067,22 @@ func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.February, 28, 15, 0, 0, 0, time.UTC)
+	result := buildScanReportFixtureResult()
+	report := buildScanReport(scanModeSource, now, result, reportConfiguration{
+		InputPath:           "input.json",
+		OverridesPath:       "overrides.json",
+		NVDAPIBaseURL:       defaultNVDAPIBaseURL,
+		GHSAAPIBaseURL:      defaultGHSAAPIBaseURL,
+		NVDTimeout:          "15s",
+		Offline:             false,
+		NVDAPIKeyConfigured: true,
+	})
+
+	assertBuildScanReportMetadata(t, report, now)
+	assertBuildScanReportFindingsAndTruncation(t, report)
+}
+
+func buildScanReportFixtureResult() evaluationResult {
 	result := evaluationResult{
 		Fail: []evaluatedVuln{
 			{
@@ -2105,7 +2126,6 @@ func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
 			},
 		},
 	}
-
 	for index := 0; index < 12; index++ {
 		result.Info = append(result.Info, evaluatedVuln{
 			Vuln: vulnAssessment{
@@ -2114,16 +2134,11 @@ func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
 			},
 		})
 	}
+	return result
+}
 
-	report := buildScanReport(scanModeSource, now, result, reportConfiguration{
-		InputPath:           "input.json",
-		OverridesPath:       "overrides.json",
-		NVDAPIBaseURL:       defaultNVDAPIBaseURL,
-		GHSAAPIBaseURL:      defaultGHSAAPIBaseURL,
-		NVDTimeout:          "15s",
-		Offline:             false,
-		NVDAPIKeyConfigured: true,
-	})
+func assertBuildScanReportMetadata(t *testing.T, report scanReport, now time.Time) {
+	t.Helper()
 
 	if report.ReportVersion != reportFormatVersion {
 		t.Fatalf("unexpected report format version: %s", report.ReportVersion)
@@ -2143,10 +2158,14 @@ func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
 	if len(report.Findings.Info) != 12 {
 		t.Fatalf("expected untruncated info findings in report, got %d", len(report.Findings.Info))
 	}
+}
+
+func assertBuildScanReportFindingsAndTruncation(t *testing.T, report scanReport) {
+	t.Helper()
+
 	if len(report.Findings.Fail) != 1 {
 		t.Fatalf("expected fail findings, got %d", len(report.Findings.Fail))
 	}
-
 	failSeverity := report.Findings.Fail[0].Severity
 	if failSeverity == nil {
 		t.Fatal("expected fail severity in report finding")
@@ -2244,66 +2263,70 @@ func TestHasReportSeverity(t *testing.T) {
 func TestReportSeverityFromEvaluated(t *testing.T) {
 	t.Parallel()
 
-	t.Run("fills defaults for unreachable finding", func(t *testing.T) {
-		t.Parallel()
+	t.Run("fills defaults for unreachable finding", testReportSeverityFromEvaluatedUnreachable)
+	t.Run("keeps explicit severity details", testReportSeverityFromEvaluatedExplicit)
+	t.Run("sets override reason for unknown accepted finding", testReportSeverityFromEvaluatedOverride)
+}
 
-		assessment := reportSeverityFromEvaluated(evaluatedVuln{
-			Vuln: vulnAssessment{ID: "go-unreach", Reachable: false},
-		})
+func testReportSeverityFromEvaluatedUnreachable(t *testing.T) {
+	t.Parallel()
 
-		if assessment.Severity != severityUnknown {
-			t.Fatalf("expected UNKNOWN severity, got %#v", assessment)
-		}
-		if assessment.Source != "GO-UNREACH" {
-			t.Fatalf("expected normalized source fallback, got %#v", assessment)
-		}
-		if assessment.Method != severityMethodUnknown {
-			t.Fatalf("expected unknown method fallback, got %#v", assessment)
-		}
-		if assessment.Reason != unknownUnreachableReason {
-			t.Fatalf("expected unreachable reason fallback, got %#v", assessment)
-		}
+	assessment := reportSeverityFromEvaluated(evaluatedVuln{
+		Vuln: vulnAssessment{ID: "go-unreach", Reachable: false},
 	})
 
-	t.Run("keeps explicit severity details", func(t *testing.T) {
-		t.Parallel()
+	if assessment.Severity != severityUnknown {
+		t.Fatalf("expected UNKNOWN severity, got %#v", assessment)
+	}
+	if assessment.Source != "GO-UNREACH" {
+		t.Fatalf("expected normalized source fallback, got %#v", assessment)
+	}
+	if assessment.Method != severityMethodUnknown {
+		t.Fatalf("expected unknown method fallback, got %#v", assessment)
+	}
+	if assessment.Reason != unknownUnreachableReason {
+		t.Fatalf("expected unreachable reason fallback, got %#v", assessment)
+	}
+}
 
-		assessment := reportSeverityFromEvaluated(evaluatedVuln{
-			Vuln: vulnAssessment{ID: "GO-1", Reachable: true},
-			Severity: severityAssessment{
-				Severity: severityHigh,
-				Score:    8.4,
-				Source:   "CVE-2026-1000",
-				Method:   severityMethodNVD,
-			},
-		})
+func testReportSeverityFromEvaluatedExplicit(t *testing.T) {
+	t.Parallel()
 
-		if assessment.Severity != severityHigh || assessment.Score != 8.4 {
-			t.Fatalf("expected explicit severity to be preserved, got %#v", assessment)
-		}
-		if assessment.Source != "CVE-2026-1000" || assessment.Method != severityMethodNVD {
-			t.Fatalf("expected explicit source and method to be preserved, got %#v", assessment)
-		}
-		if assessment.Reason != "" {
-			t.Fatalf("expected no reason for explicit known severity, got %#v", assessment)
-		}
+	assessment := reportSeverityFromEvaluated(evaluatedVuln{
+		Vuln: vulnAssessment{ID: "GO-1", Reachable: true},
+		Severity: severityAssessment{
+			Severity: severityHigh,
+			Score:    8.4,
+			Source:   "CVE-2026-1000",
+			Method:   severityMethodNVD,
+		},
 	})
 
-	t.Run("sets override reason for unknown accepted finding", func(t *testing.T) {
-		t.Parallel()
+	if assessment.Severity != severityHigh || assessment.Score != 8.4 {
+		t.Fatalf("expected explicit severity to be preserved, got %#v", assessment)
+	}
+	if assessment.Source != "CVE-2026-1000" || assessment.Method != severityMethodNVD {
+		t.Fatalf("expected explicit source and method to be preserved, got %#v", assessment)
+	}
+	if assessment.Reason != "" {
+		t.Fatalf("expected no reason for explicit known severity, got %#v", assessment)
+	}
+}
 
-		assessment := reportSeverityFromEvaluated(evaluatedVuln{
-			Vuln:     vulnAssessment{ID: "GO-2", Reachable: true},
-			Override: &riskOverride{ID: "GO-2", Reason: "accepted", ExpiresOn: time.Now().UTC()},
-		})
+func testReportSeverityFromEvaluatedOverride(t *testing.T) {
+	t.Parallel()
 
-		if assessment.Reason != unknownOverrideReason {
-			t.Fatalf("expected override unknown reason, got %#v", assessment)
-		}
-		if assessment.Source != "GO-2" {
-			t.Fatalf("expected source fallback to vuln ID, got %#v", assessment)
-		}
+	assessment := reportSeverityFromEvaluated(evaluatedVuln{
+		Vuln:     vulnAssessment{ID: "GO-2", Reachable: true},
+		Override: &riskOverride{ID: "GO-2", Reason: "accepted", ExpiresOn: time.Now().UTC()},
 	})
+
+	if assessment.Reason != unknownOverrideReason {
+		t.Fatalf("expected override unknown reason, got %#v", assessment)
+	}
+	if assessment.Source != "GO-2" {
+		t.Fatalf("expected source fallback to vuln ID, got %#v", assessment)
+	}
 }
 
 func TestReportFindingFromEvaluatedAlwaysIncludesSeverity(t *testing.T) {
@@ -2364,65 +2387,106 @@ func TestMainMissingInputFlag(t *testing.T) {
 }
 
 func TestMainOfflineSnapshotFlow(t *testing.T) {
-	if os.Getenv("PLATO_TEST_MAIN_OFFLINE_FLOW") == "1" {
-		inputPath := os.Getenv("PLATO_TEST_MAIN_INPUT_PATH")
-		overridesPath := os.Getenv("PLATO_TEST_MAIN_OVERRIDES_PATH")
-		snapshotPath := os.Getenv("PLATO_TEST_MAIN_SNAPSHOT_PATH")
-		reportPath := os.Getenv("PLATO_TEST_MAIN_REPORT_PATH")
-		os.Args = []string{
-			"vulnpolicy",
-			"-input", inputPath,
-			"-overrides", overridesPath,
-			"-scan-mode", "source",
-			"-severity-snapshot", snapshotPath,
-			"-offline",
-		}
-		if strings.TrimSpace(reportPath) != "" {
-			os.Args = append(os.Args, "-report-file", reportPath)
-		}
-		main()
+	if runMainOfflineSnapshotChildFlowIfRequested() {
 		return
 	}
 
+	paths := setupMainOfflineSnapshotFlowFiles(t)
+	output := runMainOfflineSnapshotFlowSubprocess(t, paths)
+	assertMainOfflineSnapshotFlowOutput(t, output)
+	assertMainOfflineSnapshotFlowReport(t, paths.reportPath)
+}
+
+type mainOfflineSnapshotFlowPaths struct {
+	inputPath     string
+	overridesPath string
+	snapshotPath  string
+	reportPath    string
+}
+
+func runMainOfflineSnapshotChildFlowIfRequested() bool {
+	if os.Getenv("PLATO_TEST_MAIN_OFFLINE_FLOW") != "1" {
+		return false
+	}
+
+	inputPath := os.Getenv("PLATO_TEST_MAIN_INPUT_PATH")
+	overridesPath := os.Getenv("PLATO_TEST_MAIN_OVERRIDES_PATH")
+	snapshotPath := os.Getenv("PLATO_TEST_MAIN_SNAPSHOT_PATH")
+	reportPath := os.Getenv("PLATO_TEST_MAIN_REPORT_PATH")
+	os.Args = []string{
+		"vulnpolicy",
+		"-input", inputPath,
+		"-overrides", overridesPath,
+		"-scan-mode", "source",
+		"-severity-snapshot", snapshotPath,
+		"-offline",
+	}
+	if strings.TrimSpace(reportPath) != "" {
+		os.Args = append(os.Args, "-report-file", reportPath)
+	}
+	main()
+	return true
+}
+
+func setupMainOfflineSnapshotFlowFiles(t *testing.T) mainOfflineSnapshotFlowPaths {
+	t.Helper()
+
 	tempDir := t.TempDir()
-	inputPath := filepath.Join(tempDir, "govuln.json")
-	overridesPath := filepath.Join(tempDir, "overrides.json")
-	snapshotPath := filepath.Join(tempDir, "snapshot.json")
-	reportPath := filepath.Join(tempDir, "reports", "offline-report.json")
+	paths := mainOfflineSnapshotFlowPaths{
+		inputPath:     filepath.Join(tempDir, "govuln.json"),
+		overridesPath: filepath.Join(tempDir, "overrides.json"),
+		snapshotPath:  filepath.Join(tempDir, "snapshot.json"),
+		reportPath:    filepath.Join(tempDir, "reports", "offline-report.json"),
+	}
 
 	inputContent := `{"osv":{"id":"GO-TEST-1","aliases":["CVE-2026-1234"],"summary":"snapshot test","database_specific":{"url":"https://example.test/GO-TEST-1"}}}` + "\n" +
 		`{"finding":{"osv":"GO-TEST-1","trace":[{"package":"pkg","function":"f"}]}}`
-	if err := os.WriteFile(inputPath, []byte(inputContent), 0o600); err != nil {
+	if err := os.WriteFile(paths.inputPath, []byte(inputContent), 0o600); err != nil {
 		t.Fatalf("write input file: %v", err)
 	}
-	if err := os.WriteFile(overridesPath, []byte(`{"overrides":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(paths.overridesPath, []byte(`{"overrides":[]}`), 0o600); err != nil {
 		t.Fatalf("write overrides file: %v", err)
 	}
 	snapshotContent := `{"cves":{"CVE-2026-1234":{"severity":"LOW","score":1.1}}}`
-	if err := os.WriteFile(snapshotPath, []byte(snapshotContent), 0o600); err != nil {
+	if err := os.WriteFile(paths.snapshotPath, []byte(snapshotContent), 0o600); err != nil {
 		t.Fatalf("write snapshot file: %v", err)
 	}
+	return paths
+}
+
+func runMainOfflineSnapshotFlowSubprocess(t *testing.T, paths mainOfflineSnapshotFlowPaths) string {
+	t.Helper()
 
 	// #nosec G204 -- test intentionally re-executes the current test binary.
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainOfflineSnapshotFlow")
 	cmd.Env = append(
 		os.Environ(),
 		"PLATO_TEST_MAIN_OFFLINE_FLOW=1",
-		"PLATO_TEST_MAIN_INPUT_PATH="+inputPath,
-		"PLATO_TEST_MAIN_OVERRIDES_PATH="+overridesPath,
-		"PLATO_TEST_MAIN_SNAPSHOT_PATH="+snapshotPath,
-		"PLATO_TEST_MAIN_REPORT_PATH="+reportPath,
+		"PLATO_TEST_MAIN_INPUT_PATH="+paths.inputPath,
+		"PLATO_TEST_MAIN_OVERRIDES_PATH="+paths.overridesPath,
+		"PLATO_TEST_MAIN_SNAPSHOT_PATH="+paths.snapshotPath,
+		"PLATO_TEST_MAIN_REPORT_PATH="+paths.reportPath,
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected main offline flow to succeed, got error: %v, output:\n%s", err, string(output))
 	}
-	if !strings.Contains(string(output), "govulncheck policy results (source)") {
-		t.Fatalf("expected policy output header, got:\n%s", string(output))
+	return string(output)
+}
+
+func assertMainOfflineSnapshotFlowOutput(t *testing.T, output string) {
+	t.Helper()
+
+	if !strings.Contains(output, "govulncheck policy results (source)") {
+		t.Fatalf("expected policy output header, got:\n%s", output)
 	}
-	if !strings.Contains(string(output), "severity method: nvd") {
-		t.Fatalf("expected severity method output, got:\n%s", string(output))
+	if !strings.Contains(output, "severity method: nvd") {
+		t.Fatalf("expected severity method output, got:\n%s", output)
 	}
+}
+
+func assertMainOfflineSnapshotFlowReport(t *testing.T, reportPath string) {
+	t.Helper()
 
 	reportContent, readErr := os.ReadFile(reportPath)
 	if readErr != nil {

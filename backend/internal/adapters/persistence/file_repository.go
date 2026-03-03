@@ -416,43 +416,75 @@ func (r *FileRepository) DeleteOrganisation(ctx context.Context, id string) erro
 	}
 
 	delete(r.state.Organisations, id)
+	r.deleteOrganisationResourcesLocked(id)
+
+	return r.persistLockedWithContext(ctx)
+}
+
+func (r *FileRepository) deleteOrganisationResourcesLocked(organisationID string) {
+	r.deletePersonsByOrganisationLocked(organisationID)
+	r.deleteProjectsByOrganisationLocked(organisationID)
+	r.deleteGroupsByOrganisationLocked(organisationID)
+	r.deleteAllocationsByOrganisationLocked(organisationID)
+	r.deleteOrgHolidaysByOrganisationLocked(organisationID)
+	r.deleteGroupUnavailabilityByOrganisationLocked(organisationID)
+	r.deletePersonUnavailabilityByOrganisationLocked(organisationID)
+}
+
+func (r *FileRepository) deletePersonsByOrganisationLocked(organisationID string) {
 	for personID, person := range r.state.Persons {
-		if person.OrganisationID == id {
+		if person.OrganisationID == organisationID {
 			delete(r.state.Persons, personID)
 		}
 	}
+}
+
+func (r *FileRepository) deleteProjectsByOrganisationLocked(organisationID string) {
 	for projectID, project := range r.state.Projects {
-		if project.OrganisationID == id {
+		if project.OrganisationID == organisationID {
 			delete(r.state.Projects, projectID)
 		}
 	}
+}
+
+func (r *FileRepository) deleteGroupsByOrganisationLocked(organisationID string) {
 	for groupID, group := range r.state.Groups {
-		if group.OrganisationID == id {
+		if group.OrganisationID == organisationID {
 			delete(r.state.Groups, groupID)
 		}
 	}
+}
+
+func (r *FileRepository) deleteAllocationsByOrganisationLocked(organisationID string) {
 	for allocationID, allocation := range r.state.Allocations {
-		if allocation.OrganisationID == id {
+		if allocation.OrganisationID == organisationID {
 			delete(r.state.Allocations, allocationID)
 		}
 	}
-	for holidayID, entry := range r.state.OrgHolidays {
-		if entry.OrganisationID == id {
+}
+
+func (r *FileRepository) deleteOrgHolidaysByOrganisationLocked(organisationID string) {
+	for holidayID, holiday := range r.state.OrgHolidays {
+		if holiday.OrganisationID == organisationID {
 			delete(r.state.OrgHolidays, holidayID)
 		}
 	}
+}
+
+func (r *FileRepository) deleteGroupUnavailabilityByOrganisationLocked(organisationID string) {
 	for entryID, entry := range r.state.GroupUnavailability {
-		if entry.OrganisationID == id {
+		if entry.OrganisationID == organisationID {
 			delete(r.state.GroupUnavailability, entryID)
 		}
 	}
+}
+
+func (r *FileRepository) deletePersonUnavailabilityByOrganisationLocked(organisationID string) {
 	for entryID, entry := range r.state.PersonUnavailability {
-		if entry.OrganisationID == id {
+		if entry.OrganisationID == organisationID {
 			delete(r.state.PersonUnavailability, entryID)
 		}
 	}
-
-	return r.persistLockedWithContext(ctx)
 }
 
 func (r *FileRepository) ListPersons(ctx context.Context, organisationID string) ([]domain.Person, error) {
@@ -547,34 +579,49 @@ func (r *FileRepository) DeletePerson(ctx context.Context, organisationID, id st
 	}
 	delete(r.state.Persons, id)
 
+	r.removePersonFromOrganisationGroupsLocked(organisationID, id)
+	r.deletePersonAllocationsLocked(organisationID, id)
+	r.deletePersonUnavailabilityLocked(organisationID, id)
+
+	return r.persistLockedWithContext(ctx)
+}
+
+func (r *FileRepository) removePersonFromOrganisationGroupsLocked(organisationID, personID string) {
 	for groupID, group := range r.state.Groups {
 		if group.OrganisationID != organisationID {
 			continue
 		}
-		members := make([]string, 0, len(group.MemberIDs))
-		for _, memberID := range group.MemberIDs {
-			if memberID != id {
-				members = append(members, memberID)
-			}
-		}
-		group.MemberIDs = members
+		group.MemberIDs = removePersonFromMemberList(group.MemberIDs, personID)
 		group.UpdatedAt = time.Now().UTC()
 		r.state.Groups[groupID] = group
 	}
+}
 
+func removePersonFromMemberList(memberIDs []string, personID string) []string {
+	members := make([]string, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		if memberID != personID {
+			members = append(members, memberID)
+		}
+	}
+	return members
+}
+
+func (r *FileRepository) deletePersonAllocationsLocked(organisationID, personID string) {
 	for allocationID, allocation := range r.state.Allocations {
 		targetType, targetID := normalizedAllocationTarget(allocation)
-		if allocation.OrganisationID == organisationID && targetType == domain.AllocationTargetPerson && targetID == id {
+		if allocation.OrganisationID == organisationID && targetType == domain.AllocationTargetPerson && targetID == personID {
 			delete(r.state.Allocations, allocationID)
 		}
 	}
+}
+
+func (r *FileRepository) deletePersonUnavailabilityLocked(organisationID, personID string) {
 	for entryID, entry := range r.state.PersonUnavailability {
-		if entry.OrganisationID == organisationID && entry.PersonID == id {
+		if entry.OrganisationID == organisationID && entry.PersonID == personID {
 			delete(r.state.PersonUnavailability, entryID)
 		}
 	}
-
-	return r.persistLockedWithContext(ctx)
 }
 
 func (r *FileRepository) ListProjects(ctx context.Context, organisationID string) ([]domain.Project, error) {

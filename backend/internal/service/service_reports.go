@@ -17,65 +17,83 @@ func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.Auth
 	if err != nil {
 		return nil, err
 	}
-	err = domain.ValidateScope(request.Scope)
+	if validationErr := validateReportRequest(request); validationErr != nil {
+		return nil, validationErr
+	}
+
+	calculationInput, err := s.loadReportCalculationInput(ctx, organisationID, request)
 	if err != nil {
 		return nil, err
 	}
-	err = domain.ValidateGranularity(request.Granularity)
+
+	result, err := domain.CalculateAvailabilityLoad(calculationInput)
 	if err != nil {
 		return nil, err
+	}
+
+	s.telemetry.Record("report.generated", map[string]string{"scope": request.Scope})
+	return result, nil
+}
+
+func validateReportRequest(request domain.ReportRequest) error {
+	if err := domain.ValidateScope(request.Scope); err != nil {
+		return err
+	}
+	if err := domain.ValidateGranularity(request.Granularity); err != nil {
+		return err
 	}
 	fromDate, err := domain.ValidateDate(request.FromDate)
 	if err != nil {
-		return nil, errors.Join(domain.ErrValidation, fmt.Errorf("from date: %w", err))
+		return errors.Join(domain.ErrValidation, fmt.Errorf("from date: %w", err))
 	}
 	toDate, err := domain.ValidateDate(request.ToDate)
 	if err != nil {
-		return nil, errors.Join(domain.ErrValidation, fmt.Errorf("to date: %w", err))
+		return errors.Join(domain.ErrValidation, fmt.Errorf("to date: %w", err))
 	}
 	if fromDate > toDate {
-		return nil, domain.ErrValidation
+		return errors.Join(domain.ErrValidation, fmt.Errorf("invalid date range: from %s is after to %s", fromDate, toDate))
 	}
+	return nil
+}
 
+func (s *Service) loadReportCalculationInput(ctx context.Context, organisationID string, request domain.ReportRequest) (domain.CalculationInput, error) {
 	organisation, err := s.repo.GetOrganisation(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("get organisation %s: %w", organisationID, err)
 	}
 	persons, err := s.repo.ListPersons(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list persons for organisation %s: %w", organisationID, err)
 	}
 	projects, err := s.repo.ListProjects(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list projects for organisation %s: %w", organisationID, err)
 	}
 	groups, err := s.repo.ListGroups(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list groups for organisation %s: %w", organisationID, err)
 	}
 	allocations, err := s.repo.ListAllocations(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list allocations for organisation %s: %w", organisationID, err)
 	}
 	orgHolidays, err := s.repo.ListOrgHolidays(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list organisation holidays for organisation %s: %w", organisationID, err)
 	}
 	groupUnavailability, err := s.repo.ListGroupUnavailability(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list group unavailability for organisation %s: %w", organisationID, err)
 	}
 	personUnavailability, err := s.repo.ListPersonUnavailability(ctx, organisationID)
 	if err != nil {
-		return nil, err
+		return domain.CalculationInput{}, fmt.Errorf("list person unavailability for organisation %s: %w", organisationID, err)
+	}
+	if scopeErr := validateScopeIDs(request, persons, groups, projects); scopeErr != nil {
+		return domain.CalculationInput{}, scopeErr
 	}
 
-	err = validateScopeIDs(request, persons, groups, projects)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := domain.CalculateAvailabilityLoad(domain.CalculationInput{
+	return domain.CalculationInput{
 		Organisation:         organisation,
 		Persons:              persons,
 		Projects:             projects,
@@ -85,13 +103,7 @@ func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.Auth
 		GroupUnavailability:  groupUnavailability,
 		PersonUnavailability: personUnavailability,
 		Request:              request,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	s.telemetry.Record("report.generated", map[string]string{"scope": request.Scope})
-	return result, nil
+	}, nil
 }
 
 func validateScopeIDs(request domain.ReportRequest, persons []domain.Person, groups []domain.Group, projects []domain.Project) error {

@@ -425,6 +425,13 @@ func validateServiceResourceFlowReportsAndCleanup(t *testing.T, state *serviceRe
 	t.Helper()
 	ctx := context.Background()
 
+	validateServiceResourceFlowReports(t, state, ctx)
+	validateServiceResourceFlowCleanup(t, state, ctx)
+}
+
+func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
 	report, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
 		Scope:       domain.ScopePerson,
 		IDs:         []string{state.person1.ID},
@@ -457,8 +464,12 @@ func validateServiceResourceFlowReportsAndCleanup(t *testing.T, state *serviceRe
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected not found for missing report scope id, got %v", err)
 	}
+}
 
-	err = state.svc.DeleteOrgHoliday(ctx, state.admin, state.holiday.ID)
+func validateServiceResourceFlowCleanup(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+	t.Helper()
+
+	err := state.svc.DeleteOrgHoliday(ctx, state.admin, state.holiday.ID)
 	if err != nil {
 		t.Fatalf("delete holiday: %v", err)
 	}
@@ -766,65 +777,183 @@ func validateServiceRemainingErrorBranchesDeleteAndCreate(t *testing.T, state *s
 	t.Helper()
 	ctx := context.Background()
 
-	if err := state.svc.DeletePerson(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing person not found, got %v", err)
-	}
-	if err := state.svc.DeleteProject(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing project not found, got %v", err)
-	}
-	if err := state.svc.DeleteGroup(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing group not found, got %v", err)
-	}
-	if err := state.svc.DeleteAllocation(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing allocation not found, got %v", err)
-	}
-	if err := state.svc.DeleteOrgHoliday(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing holiday not found, got %v", err)
-	}
-	if err := state.svc.DeleteGroupUnavailability(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing group unavailability not found, got %v", err)
-	}
-	if err := state.svc.DeletePersonUnavailability(ctx, state.admin, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing person unavailability not found, got %v", err)
-	}
-	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected delete missing person-scoped unavailability not found, got %v", err)
-	}
+	assertServiceRemainingDeleteMissingEntities(t, state, ctx)
+	assertServiceRemainingCreateAndMembershipErrors(t, state, ctx)
+}
 
-	if _, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput("", state.project.ID, 10)); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected validation for missing person id in allocation, got %v", err)
-	}
-	if _, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput(state.person.ID, "", 10)); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected validation for missing project id in allocation, got %v", err)
-	}
+type serviceErrorCase struct {
+	name string
+	run  func() error
+	want error
+}
 
-	if _, err := state.svc.AddGroupMember(ctx, state.admin, state.group.ID, "missing"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected add missing member not found, got %v", err)
+func assertServiceErrorCases(t *testing.T, cases []serviceErrorCase) {
+	t.Helper()
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := testCase.run(); !errors.Is(err, testCase.want) {
+				t.Fatalf("expected %v, got %v", testCase.want, err)
+			}
+		})
 	}
-	if _, err := state.svc.RemoveGroupMember(ctx, state.admin, "missing", state.person.ID); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected remove member from missing group not found, got %v", err)
-	}
-	if _, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected group unavailability missing group not found, got %v", err)
-	}
-	if _, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected group unavailability hours validation failure, got %v", err)
-	}
-	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: "missing", Date: "2026-01-01", Hours: 2}); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected person unavailability missing person not found, got %v", err)
-	}
-	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "bad", Hours: 2}); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected person unavailability bad date validation failure, got %v", err)
-	}
-	if _, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected person unavailability hours validation failure, got %v", err)
-	}
-	if err := state.svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, state.person.ID, "missing"); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("expected delete person-scoped unavailability without tenant to fail, got %v", err)
-	}
-	if _, err := state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 99}); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("expected org holiday hours validation failure, got %v", err)
-	}
+}
+
+func assertServiceRemainingDeleteMissingEntities(t *testing.T, state *serviceRemainingErrorBranchesState, ctx context.Context) {
+	t.Helper()
+
+	assertServiceErrorCases(t, []serviceErrorCase{
+		{
+			name: "delete missing person",
+			run: func() error {
+				return state.svc.DeletePerson(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing project",
+			run: func() error {
+				return state.svc.DeleteProject(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing group",
+			run: func() error {
+				return state.svc.DeleteGroup(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing allocation",
+			run: func() error {
+				return state.svc.DeleteAllocation(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing holiday",
+			run: func() error {
+				return state.svc.DeleteOrgHoliday(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing group unavailability",
+			run: func() error {
+				return state.svc.DeleteGroupUnavailability(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing person unavailability",
+			run: func() error {
+				return state.svc.DeletePersonUnavailability(ctx, state.admin, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "delete missing person-scoped unavailability",
+			run: func() error {
+				return state.svc.DeletePersonUnavailabilityByPerson(ctx, state.admin, state.person.ID, "missing")
+			},
+			want: domain.ErrNotFound,
+		},
+	})
+}
+
+func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *serviceRemainingErrorBranchesState, ctx context.Context) {
+	t.Helper()
+
+	assertServiceErrorCases(t, []serviceErrorCase{
+		{
+			name: "create allocation missing person id",
+			run: func() error {
+				_, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput("", state.project.ID, 10))
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+		{
+			name: "create allocation missing project id",
+			run: func() error {
+				_, err := state.svc.CreateAllocation(ctx, state.admin, testPersonAllocationInput(state.person.ID, "", 10))
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+		{
+			name: "add missing group member",
+			run: func() error {
+				_, err := state.svc.AddGroupMember(ctx, state.admin, state.group.ID, "missing")
+				return err
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "remove member from missing group",
+			run: func() error {
+				_, err := state.svc.RemoveGroupMember(ctx, state.admin, "missing", state.person.ID)
+				return err
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "create group unavailability missing group",
+			run: func() error {
+				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: "missing", Date: "2026-01-01", Hours: 2})
+				return err
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "create group unavailability invalid hours",
+			run: func() error {
+				_, err := state.svc.CreateGroupUnavailability(ctx, state.admin, domain.GroupUnavailability{GroupID: state.group.ID, Date: "2026-01-01", Hours: 99})
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+		{
+			name: "create person unavailability missing person",
+			run: func() error {
+				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: "missing", Date: "2026-01-01", Hours: 2})
+				return err
+			},
+			want: domain.ErrNotFound,
+		},
+		{
+			name: "create person unavailability invalid date",
+			run: func() error {
+				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "bad", Hours: 2})
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+		{
+			name: "create person unavailability invalid hours",
+			run: func() error {
+				_, err := state.svc.CreatePersonUnavailability(ctx, state.admin, domain.PersonUnavailability{PersonID: state.person.ID, Date: "2026-01-01", Hours: 99})
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+		{
+			name: "delete person-scoped unavailability without tenant",
+			run: func() error {
+				return state.svc.DeletePersonUnavailabilityByPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, state.person.ID, "missing")
+			},
+			want: domain.ErrForbidden,
+		},
+		{
+			name: "create org holiday invalid hours",
+			run: func() error {
+				_, err := state.svc.CreateOrgHoliday(ctx, state.admin, domain.OrgHoliday{Date: "2026-01-01", Hours: 99})
+				return err
+			},
+			want: domain.ErrValidation,
+		},
+	})
 }
 
 func validateServiceRemainingErrorBranchesReports(t *testing.T, state *serviceRemainingErrorBranchesState) {
@@ -1206,6 +1335,15 @@ func assertServiceAdditionalReportAndHelperValidation(t *testing.T, svc *Service
 }
 
 func TestAllocationValidationHelpers(t *testing.T) {
+	assertProjectValidationHelpers(t)
+	assertAllocationValidationHelpers(t)
+	assertDateRangeValidationHelpers(t)
+	assertAllocationWithinProjectRangeHelpers(t)
+}
+
+func assertProjectValidationHelpers(t *testing.T) {
+	t.Helper()
+
 	validProject := testProjectInput("Helper Project")
 	if err := validateProject(validProject); err != nil {
 		t.Fatalf("expected valid project, got %v", err)
@@ -1229,6 +1367,10 @@ func TestAllocationValidationHelpers(t *testing.T) {
 	if err := validateProject(reversedDateProject); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected reversed date validation error, got %v", err)
 	}
+}
+
+func assertAllocationValidationHelpers(t *testing.T) {
+	t.Helper()
 
 	validAllocation := testPersonAllocationInput("person_1", "project_1", 10)
 	if err := validateAllocation(validAllocation); err != nil {
@@ -1266,6 +1408,10 @@ func TestAllocationValidationHelpers(t *testing.T) {
 	if normalized.TargetType != domain.AllocationTargetPerson || normalized.TargetID != "person_legacy" {
 		t.Fatalf("expected legacy person id normalization, got %+v", normalized)
 	}
+}
+
+func assertDateRangeValidationHelpers(t *testing.T) {
+	t.Helper()
 
 	openStart, openEnd, err := parseDateRange("", "")
 	if err != nil {
@@ -1278,10 +1424,14 @@ func TestAllocationValidationHelpers(t *testing.T) {
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected parseDateRange reversed date error, got %v", err)
 	}
+}
+
+func assertAllocationWithinProjectRangeHelpers(t *testing.T) {
+	t.Helper()
 
 	project := testProjectInput("Project Range")
 	allocationWithin := testPersonAllocationInput("person_1", "project_1", 10)
-	err = validateAllocationWithinProjectRange(allocationWithin, project)
+	err := validateAllocationWithinProjectRange(allocationWithin, project)
 	if err != nil {
 		t.Fatalf("expected allocation inside project range, got %v", err)
 	}
@@ -1480,6 +1630,24 @@ func TestBuildAllocationEvents(t *testing.T) {
 func TestAllocationTargetResolutionAndLimitRangeChecks(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
+	state := setupAllocationTargetResolutionState(t, svc, ctx)
+	assertAllocationTargetResolution(t, svc, ctx, state)
+	assertAllocationTargetsPersonChecks(t, state)
+	assertAllocationLimitRangeChecks(t, svc, ctx, state)
+}
+
+type allocationTargetResolutionState struct {
+	organisationID string
+	admin          ports.AuthContext
+	person         domain.Person
+	project        domain.Project
+	group          domain.Group
+	emptyGroup     domain.Group
+}
+
+func setupAllocationTargetResolutionState(t *testing.T, svc *Service, ctx context.Context) allocationTargetResolutionState {
+	t.Helper()
+
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
 	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Limits")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
@@ -1501,52 +1669,73 @@ func TestAllocationTargetResolutionAndLimitRangeChecks(t *testing.T) {
 		t.Fatalf("create empty group: %v", err)
 	}
 
-	personIDs, err := svc.resolveAllocationTargetPersons(ctx, organisation.ID, domain.AllocationTargetPerson, person.ID)
-	if err != nil || len(personIDs) != 1 || personIDs[0] != person.ID {
+	return allocationTargetResolutionState{
+		organisationID: organisation.ID,
+		admin:          admin,
+		person:         person,
+		project:        project,
+		group:          group,
+		emptyGroup:     emptyGroup,
+	}
+}
+
+func assertAllocationTargetResolution(t *testing.T, svc *Service, ctx context.Context, state allocationTargetResolutionState) {
+	t.Helper()
+
+	personIDs, err := svc.resolveAllocationTargetPersons(ctx, state.organisationID, domain.AllocationTargetPerson, state.person.ID)
+	if err != nil || len(personIDs) != 1 || personIDs[0] != state.person.ID {
 		t.Fatalf("unexpected person target resolution result %v err=%v", personIDs, err)
 	}
 
-	groupPersonIDs, err := svc.resolveAllocationTargetPersons(ctx, organisation.ID, domain.AllocationTargetGroup, group.ID)
-	if err != nil || len(groupPersonIDs) != 1 || groupPersonIDs[0] != person.ID {
+	groupPersonIDs, err := svc.resolveAllocationTargetPersons(ctx, state.organisationID, domain.AllocationTargetGroup, state.group.ID)
+	if err != nil || len(groupPersonIDs) != 1 || groupPersonIDs[0] != state.person.ID {
 		t.Fatalf("unexpected group target resolution result %v err=%v", groupPersonIDs, err)
 	}
-	_, err = svc.resolveAllocationTargetPersons(ctx, organisation.ID, "invalid", group.ID)
+	_, err = svc.resolveAllocationTargetPersons(ctx, state.organisationID, "invalid", state.group.ID)
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected invalid target type error, got %v", err)
 	}
-	_, err = svc.resolveAllocationTargetPersons(ctx, organisation.ID, domain.AllocationTargetGroup, emptyGroup.ID)
+	_, err = svc.resolveAllocationTargetPersons(ctx, state.organisationID, domain.AllocationTargetGroup, state.emptyGroup.ID)
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected empty group validation error, got %v", err)
 	}
+}
 
-	groupsByID := map[string]domain.Group{group.ID: group}
-	if !allocationTargetsPerson(testGroupAllocationInput(group.ID, project.ID, 10), person.ID, groupsByID) {
+func assertAllocationTargetsPersonChecks(t *testing.T, state allocationTargetResolutionState) {
+	t.Helper()
+
+	groupsByID := map[string]domain.Group{state.group.ID: state.group}
+	if !allocationTargetsPerson(testGroupAllocationInput(state.group.ID, state.project.ID, 10), state.person.ID, groupsByID) {
 		t.Fatalf("expected group allocation to target member")
 	}
-	if allocationTargetsPerson(testGroupAllocationInput(group.ID, project.ID, 10), "other", groupsByID) {
+	if allocationTargetsPerson(testGroupAllocationInput(state.group.ID, state.project.ID, 10), "other", groupsByID) {
 		t.Fatalf("expected group allocation not to target non-member")
 	}
-	if !allocationTargetsPerson(testPersonAllocationInput(person.ID, project.ID, 10), person.ID, groupsByID) {
+	if !allocationTargetsPerson(testPersonAllocationInput(state.person.ID, state.project.ID, 10), state.person.ID, groupsByID) {
 		t.Fatalf("expected person allocation to target person")
 	}
-	legacy := domain.Allocation{PersonID: person.ID}
-	if !allocationTargetsPerson(legacy, person.ID, groupsByID) {
+	legacy := domain.Allocation{PersonID: state.person.ID}
+	if !allocationTargetsPerson(legacy, state.person.ID, groupsByID) {
 		t.Fatalf("expected legacy person allocation to target person")
 	}
+}
 
-	_, err = svc.CreateAllocation(ctx, admin, testPersonAllocationInputForRange(person.ID, project.ID, 280, "2026-01-01", "2026-01-10"))
+func assertAllocationLimitRangeChecks(t *testing.T, svc *Service, ctx context.Context, state allocationTargetResolutionState) {
+	t.Helper()
+
+	_, err := svc.CreateAllocation(ctx, state.admin, testPersonAllocationInputForRange(state.person.ID, state.project.ID, 280, "2026-01-01", "2026-01-10"))
 	if err != nil {
 		t.Fatalf("create baseline allocation: %v", err)
 	}
 
-	nonOverlapping := testPersonAllocationInputForRange(person.ID, project.ID, 30, "2026-01-11", "2026-01-20")
-	err = svc.validateAllocationLimit(ctx, organisation.ID, nonOverlapping, []string{person.ID}, "")
+	nonOverlapping := testPersonAllocationInputForRange(state.person.ID, state.project.ID, 30, "2026-01-11", "2026-01-20")
+	err = svc.validateAllocationLimit(ctx, state.organisationID, nonOverlapping, []string{state.person.ID}, "")
 	if err != nil {
 		t.Fatalf("expected non-overlapping allocation to pass limit, got %v", err)
 	}
 
-	overlapping := testPersonAllocationInputForRange(person.ID, project.ID, 30, "2026-01-05", "2026-01-15")
-	err = svc.validateAllocationLimit(ctx, organisation.ID, overlapping, []string{person.ID}, "")
+	overlapping := testPersonAllocationInputForRange(state.person.ID, state.project.ID, 30, "2026-01-05", "2026-01-15")
+	err = svc.validateAllocationLimit(ctx, state.organisationID, overlapping, []string{state.person.ID}, "")
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("expected overlapping allocation to fail limit, got %v", err)
 	}

@@ -88,7 +88,7 @@ linters-settings:
     min-complexity: 20
 
   gocognit:
-    min-complexity: 25
+    min-complexity: 15
 
   nolintlint:
     require-explanation: true

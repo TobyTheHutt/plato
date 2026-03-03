@@ -80,7 +80,41 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 		return fmt.Errorf("start function is required")
 	}
 
-	server := &http.Server{
+	server := newHTTPServer(addr, handler)
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = listener.Close()
+	}()
+
+	logWith(logger, "plato backend listening on %s", addr)
+
+	serveErr := startServerAsync(server, listener, start)
+
+	quit := make(chan os.Signal, 1)
+	signalNotify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signalStop(quit)
+
+	shouldShutdown, err := waitForServeResultOrShutdownSignal(serveErr, quit, logger)
+	if err != nil || !shouldShutdown {
+		return err
+	}
+
+	ctx, cancel := newShutdownContext(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	logServerShutdown(server.Shutdown(ctx), logger)
+
+	logResourceCleanup(closeResources(handler), logger)
+
+	return waitForServeDrain(serveErr, ctx, logger)
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:    addr,
 		Handler: handler,
 		// Limits time to read request headers and reduces slowloris risk.
@@ -92,19 +126,15 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 		// Limits idle keep-alive duration to prevent connection exhaustion.
 		IdleTimeout: 60 * time.Second,
 	}
+}
 
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = listener.Close()
-	}()
-
+func logWith(logger func(string, ...any), format string, args ...any) {
 	if logger != nil {
-		logger("plato backend listening on %s", addr)
+		logger(format, args...)
 	}
+}
 
+func startServerAsync(server *http.Server, listener net.Listener, start func(*http.Server, net.Listener) error) <-chan error {
 	serveErr := make(chan error, 1)
 	go func() {
 		if startErr := start(server, listener); startErr != nil && !errors.Is(startErr, http.ErrServerClosed) {
@@ -113,53 +143,43 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 		}
 		serveErr <- nil
 	}()
+	return serveErr
+}
 
-	quit := make(chan os.Signal, 1)
-	signalNotify(quit, syscall.SIGINT, syscall.SIGTERM)
-	defer signalStop(quit)
-
+func waitForServeResultOrShutdownSignal(serveErr <-chan error, quit <-chan os.Signal, logger func(string, ...any)) (bool, error) {
 	select {
-	case err = <-serveErr:
-		return err
+	case err := <-serveErr:
+		return false, err
 	case shutdownSignal := <-quit:
-		if logger != nil {
-			logger("shutdown signal received (%s), draining in-flight requests", shutdownSignal)
-		}
+		logWith(logger, "shutdown signal received (%s), draining in-flight requests", shutdownSignal)
+		return true, nil
 	}
+}
 
-	ctx, cancel := newShutdownContext(context.Background(), shutdownTimeout)
-	defer cancel()
-
-	err = server.Shutdown(ctx)
+func logServerShutdown(err error, logger func(string, ...any)) {
 	if err != nil {
-		if logger != nil {
-			logger("server forced to shutdown: %v", err)
-		}
-	} else if logger != nil {
-		logger("server exited gracefully")
+		logWith(logger, "server forced to shutdown: %v", err)
+		return
 	}
+	logWith(logger, "server exited gracefully")
+}
 
-	err = closeResources(handler)
+func logResourceCleanup(err error, logger func(string, ...any)) {
 	if err != nil {
-		if logger != nil {
-			logger("resource cleanup failed: %v", err)
-		}
-	} else if logger != nil {
-		logger("resource cleanup completed")
+		logWith(logger, "resource cleanup failed: %v", err)
+		return
 	}
+	logWith(logger, "resource cleanup completed")
+}
 
+func waitForServeDrain(serveErr <-chan error, ctx context.Context, logger func(string, ...any)) error {
 	select {
-	case err = <-serveErr:
-		if err != nil {
-			return err
-		}
+	case err := <-serveErr:
+		return err
 	case <-ctx.Done():
-		if logger != nil {
-			logger("timed out waiting for server goroutine to exit: %v", ctx.Err())
-		}
+		logWith(logger, "timed out waiting for server goroutine to exit: %v", ctx.Err())
+		return nil
 	}
-
-	return nil
 }
 
 type closer interface {

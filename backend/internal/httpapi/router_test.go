@@ -552,12 +552,54 @@ func TestRouterNewRouterProductionModeCORSAllowlistAndAuth(t *testing.T) {
 
 func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	router := newTestRouter(t)
+	state := setupMethodNotAllowedState(t, router)
+	verifyMethodNotAllowedHits(t, router, state)
+	verifyMethodNotAllowedInternalErrorBranch(t)
+}
+
+type methodNotAllowedState struct {
+	orgID                  string
+	adminHeaders           map[string]string
+	personID               string
+	projectID              string
+	groupID                string
+	allocationID           string
+	holidayID              string
+	personUnavailabilityID string
+	groupUnavailabilityID  string
+}
+
+func setupMethodNotAllowedState(t *testing.T, router http.Handler) methodNotAllowedState {
+	t.Helper()
+
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
 	adminHeaders := map[string]string{"X-Role": "org_admin", "X-Org-ID": orgID}
 	personID := createPerson(t, router, orgID, "Method Tester", 100)
 	projectID := createProject(t, router, orgID, "Method Project")
 
-	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Method Group", "member_ids": []string{personID}}, adminHeaders)
+	group := decodeCreatedGroupForMethodNotAllowed(t, router, personID, adminHeaders)
+	allocation := decodeCreatedAllocationForMethodNotAllowed(t, router, personID, projectID, adminHeaders)
+	holiday := decodeCreatedHolidayForMethodNotAllowed(t, router, orgID, adminHeaders)
+	personUnavailability := decodeCreatedPersonUnavailabilityForMethodNotAllowed(t, router, personID, adminHeaders)
+	groupUnavailability := decodeCreatedGroupUnavailabilityForMethodNotAllowed(t, router, group.ID, adminHeaders)
+
+	return methodNotAllowedState{
+		orgID:                  orgID,
+		adminHeaders:           adminHeaders,
+		personID:               personID,
+		projectID:              projectID,
+		groupID:                group.ID,
+		allocationID:           allocation.ID,
+		holidayID:              holiday.ID,
+		personUnavailabilityID: personUnavailability.ID,
+		groupUnavailabilityID:  groupUnavailability.ID,
+	}
+}
+
+func decodeCreatedGroupForMethodNotAllowed(t *testing.T, router http.Handler, personID string, headers map[string]string) domain.Group {
+	t.Helper()
+
+	createGroup := doJSONRequest(t, router, http.MethodPost, "/api/groups", map[string]any{"name": "Method Group", "member_ids": []string{personID}}, headers)
 	if createGroup.Code != http.StatusCreated {
 		t.Fatalf("setup group failed: %d body=%s", createGroup.Code, createGroup.Body.String())
 	}
@@ -565,8 +607,13 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(createGroup.Body.Bytes(), &group); err != nil {
 		t.Fatalf("decode setup group: %v", err)
 	}
+	return group
+}
 
-	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 20), adminHeaders)
+func decodeCreatedAllocationForMethodNotAllowed(t *testing.T, router http.Handler, personID, projectID string, headers map[string]string) domain.Allocation {
+	t.Helper()
+
+	createAllocation := doJSONRequest(t, router, http.MethodPost, "/api/allocations", personAllocationPayload(personID, projectID, 20), headers)
 	if createAllocation.Code != http.StatusCreated {
 		t.Fatalf("setup allocation failed: %d body=%s", createAllocation.Code, createAllocation.Body.String())
 	}
@@ -574,8 +621,13 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(createAllocation.Body.Bytes(), &allocation); err != nil {
 		t.Fatalf("decode setup allocation: %v", err)
 	}
+	return allocation
+}
 
-	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+orgID+"/holidays", map[string]any{"date": "2026-05-01", "hours": 8}, adminHeaders)
+func decodeCreatedHolidayForMethodNotAllowed(t *testing.T, router http.Handler, orgID string, headers map[string]string) domain.OrgHoliday {
+	t.Helper()
+
+	createHoliday := doJSONRequest(t, router, http.MethodPost, "/api/organisations/"+orgID+"/holidays", map[string]any{"date": "2026-05-01", "hours": 8}, headers)
 	if createHoliday.Code != http.StatusCreated {
 		t.Fatalf("setup holiday failed: %d body=%s", createHoliday.Code, createHoliday.Body.String())
 	}
@@ -583,8 +635,13 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(createHoliday.Body.Bytes(), &holiday); err != nil {
 		t.Fatalf("decode setup holiday: %v", err)
 	}
+	return holiday
+}
 
-	createPersonUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/persons/"+personID+"/unavailability", map[string]any{"date": "2026-05-02", "hours": 4}, adminHeaders)
+func decodeCreatedPersonUnavailabilityForMethodNotAllowed(t *testing.T, router http.Handler, personID string, headers map[string]string) domain.PersonUnavailability {
+	t.Helper()
+
+	createPersonUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/persons/"+personID+"/unavailability", map[string]any{"date": "2026-05-02", "hours": 4}, headers)
 	if createPersonUnavailability.Code != http.StatusCreated {
 		t.Fatalf("setup person unavailability failed: %d body=%s", createPersonUnavailability.Code, createPersonUnavailability.Body.String())
 	}
@@ -592,8 +649,13 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(createPersonUnavailability.Body.Bytes(), &personUnavailability); err != nil {
 		t.Fatalf("decode setup person unavailability: %v", err)
 	}
+	return personUnavailability
+}
 
-	createGroupUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+group.ID+"/unavailability", map[string]any{"date": "2026-05-03", "hours": 6}, adminHeaders)
+func decodeCreatedGroupUnavailabilityForMethodNotAllowed(t *testing.T, router http.Handler, groupID string, headers map[string]string) domain.GroupUnavailability {
+	t.Helper()
+
+	createGroupUnavailability := doJSONRequest(t, router, http.MethodPost, "/api/groups/"+groupID+"/unavailability", map[string]any{"date": "2026-05-03", "hours": 6}, headers)
 	if createGroupUnavailability.Code != http.StatusCreated {
 		t.Fatalf("setup group unavailability failed: %d body=%s", createGroupUnavailability.Code, createGroupUnavailability.Body.String())
 	}
@@ -601,6 +663,11 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(createGroupUnavailability.Body.Bytes(), &groupUnavailability); err != nil {
 		t.Fatalf("decode setup group unavailability: %v", err)
 	}
+	return groupUnavailability
+}
+
+func verifyMethodNotAllowedHits(t *testing.T, router http.Handler, state methodNotAllowedState) {
+	t.Helper()
 
 	hits := []struct {
 		method     string
@@ -609,30 +676,30 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		allow      string
 	}{
 		{http.MethodPatch, "/api/organisations", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPost, "/api/organisations/" + orgID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPost, "/api/organisations/" + state.orgID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/organisations/" + state.orgID + "/holidays", http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/persons", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPost, "/api/persons/" + personID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
-		{http.MethodPatch, "/api/persons/" + personID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPost, "/api/persons/" + state.personID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/persons/" + state.personID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/projects", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/projects/" + projectID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/projects/" + state.projectID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
 		{http.MethodPatch, "/api/groups", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/groups/" + group.ID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
-		{http.MethodGet, "/api/groups/" + group.ID + "/members", http.StatusMethodNotAllowed, "POST"},
-		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/groups/" + state.groupID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodGet, "/api/groups/" + state.groupID + "/members", http.StatusMethodNotAllowed, "POST"},
+		{http.MethodPatch, "/api/groups/" + state.groupID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
 		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed, "GET, POST"},
-		{http.MethodPatch, "/api/allocations/" + allocation.ID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/allocations/" + state.allocationID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
 		{http.MethodGet, "/api/reports/availability-load", http.StatusMethodNotAllowed, "POST"},
-		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
-		{http.MethodGet, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
-		{http.MethodPatch, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
-		{http.MethodGet, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
-		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodGet, "/api/organisations/" + state.orgID + "/holidays/" + state.holidayID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/organisations/" + state.orgID + "/holidays/" + state.holidayID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodGet, "/api/persons/" + state.personID + "/unavailability/" + state.personUnavailabilityID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/persons/" + state.personID + "/unavailability/" + state.personUnavailabilityID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodGet, "/api/groups/" + state.groupID + "/unavailability/" + state.groupUnavailabilityID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/groups/" + state.groupID + "/unavailability/" + state.groupUnavailabilityID, http.StatusMethodNotAllowed, "DELETE"},
 	}
 
 	for _, hit := range hits {
-		rec := doJSONRequest(t, router, hit.method, hit.path, nil, adminHeaders)
+		rec := doJSONRequest(t, router, hit.method, hit.path, nil, state.adminHeaders)
 		if rec.Code != hit.statusCode {
 			t.Fatalf("expected %d for %s %s got %d body=%s", hit.statusCode, hit.method, hit.path, rec.Code, rec.Body.String())
 		}
@@ -641,10 +708,14 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		}
 	}
 
-	notFound := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+group.ID+"/members/"+personID+"/extra", nil, adminHeaders)
+	notFound := doJSONRequest(t, router, http.MethodDelete, "/api/groups/"+state.groupID+"/members/"+state.personID+"/extra", nil, state.adminHeaders)
 	if notFound.Code != http.StatusNotFound {
 		t.Fatalf("expected nested path not found, got %d", notFound.Code)
 	}
+}
+
+func verifyMethodNotAllowedInternalErrorBranch(t *testing.T) {
+	t.Helper()
 
 	repo, err := persistence.NewFileRepository(filepath.Join(t.TempDir(), "error-repo.json"))
 	if err != nil {
