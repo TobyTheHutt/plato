@@ -29,7 +29,7 @@ func (a *API) handlePersons(w http.ResponseWriter, r *http.Request, authCtx port
 		}
 		writeJSON(w, http.StatusCreated, created)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -62,7 +62,7 @@ func (a *API) dispatchPersonByIDMethod(w http.ResponseWriter, r *http.Request, a
 	case http.MethodDelete:
 		a.deletePersonByID(w, r, authCtx, personID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }
 
@@ -104,7 +104,7 @@ func (a *API) handlePersonUnavailabilityRoute(w http.ResponseWriter, r *http.Req
 		a.dispatchPersonUnavailabilityMethod(w, r, authCtx, personID)
 	case 5:
 		if r.Method != http.MethodDelete {
-			methodNotAllowed(w)
+			methodNotAllowed(w, http.MethodDelete)
 			return
 		}
 		a.deletePersonUnavailabilityEntry(w, r, authCtx, personID, segments)
@@ -120,7 +120,7 @@ func (a *API) dispatchPersonUnavailabilityMethod(w http.ResponseWriter, r *http.
 	case http.MethodPost:
 		a.createPersonUnavailability(w, r, authCtx, personID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 

@@ -85,7 +85,8 @@ func isSubresourceRoute(segments []string, subresource string) bool {
 	return ok && value == subresource
 }
 
-func methodNotAllowed(w http.ResponseWriter) {
+func methodNotAllowed(w http.ResponseWriter, methods ...string) {
+	w.Header().Set("Allow", strings.Join(methods, ", "))
 	writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 }
 

@@ -29,7 +29,7 @@ func (a *API) handleProjects(w http.ResponseWriter, r *http.Request, authCtx por
 		}
 		writeJSON(w, http.StatusCreated, created)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -62,6 +62,6 @@ func (a *API) handleProjectByID(w http.ResponseWriter, r *http.Request, authCtx 
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }

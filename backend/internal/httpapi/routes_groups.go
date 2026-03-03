@@ -29,7 +29,7 @@ func (a *API) handleGroups(w http.ResponseWriter, r *http.Request, authCtx ports
 		}
 		writeJSON(w, http.StatusCreated, created)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -67,7 +67,7 @@ func (a *API) dispatchGroupByIDMethod(w http.ResponseWriter, r *http.Request, au
 	case http.MethodDelete:
 		a.deleteGroupByID(w, r, authCtx, groupID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }
 
@@ -116,8 +116,7 @@ func (a *API) handleGroupMembersRoute(w http.ResponseWriter, r *http.Request, au
 
 func (a *API) addGroupMember(w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, groupID string) {
 	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodPost)
 		return
 	}
 
@@ -139,8 +138,7 @@ func (a *API) addGroupMember(w http.ResponseWriter, r *http.Request, authCtx por
 
 func (a *API) removeGroupMember(w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext, groupID string, segments []string) {
 	if r.Method != http.MethodDelete {
-		w.Header().Set("Allow", http.MethodDelete)
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodDelete)
 		return
 	}
 
@@ -163,7 +161,7 @@ func (a *API) handleGroupUnavailabilityRoute(w http.ResponseWriter, r *http.Requ
 		a.dispatchGroupUnavailabilityMethod(w, r, authCtx, groupID)
 	case 5:
 		if r.Method != http.MethodDelete {
-			methodNotAllowed(w)
+			methodNotAllowed(w, http.MethodDelete)
 			return
 		}
 		a.deleteGroupUnavailabilityEntry(w, r, authCtx, segments)
@@ -179,7 +177,7 @@ func (a *API) dispatchGroupUnavailabilityMethod(w http.ResponseWriter, r *http.R
 	case http.MethodPost:
 		a.createGroupUnavailability(w, r, authCtx, groupID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 

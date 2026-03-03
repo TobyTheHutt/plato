@@ -31,7 +31,7 @@ func (a *API) handleOrganisations(w http.ResponseWriter, r *http.Request, authCt
 		}
 		writeJSON(w, http.StatusCreated, created)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -64,7 +64,7 @@ func (a *API) dispatchOrganisationByIDMethod(w http.ResponseWriter, r *http.Requ
 	case http.MethodDelete:
 		a.deleteOrganisationByID(w, r, authCtx, organisationID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }
 
@@ -111,7 +111,7 @@ func (a *API) handleOrganisationHolidaysRoute(w http.ResponseWriter, r *http.Req
 		a.dispatchOrganisationHolidaysMethod(w, r, authCtx, organisationID)
 	case 5:
 		if r.Method != http.MethodDelete {
-			methodNotAllowed(w)
+			methodNotAllowed(w, http.MethodDelete)
 			return
 		}
 		a.deleteOrganisationHolidayByID(w, r, authCtx, segments)
@@ -127,7 +127,7 @@ func (a *API) dispatchOrganisationHolidaysMethod(w http.ResponseWriter, r *http.
 	case http.MethodPost:
 		a.createOrganisationHoliday(w, r, authCtx, organisationID)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 

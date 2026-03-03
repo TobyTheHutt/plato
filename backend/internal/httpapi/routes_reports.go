@@ -9,7 +9,7 @@ import (
 
 func (a *API) handleReportAvailabilityLoad(w http.ResponseWriter, r *http.Request, authCtx ports.AuthContext) {
 	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodPost)
 		return
 	}
 

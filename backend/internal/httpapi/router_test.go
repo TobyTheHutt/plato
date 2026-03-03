@@ -129,6 +129,9 @@ func TestMethodAndJSONErrors(t *testing.T) {
 	if badMethod.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", badMethod.Code)
 	}
+	if got := badMethod.Header().Get("Allow"); got != "GET, POST" {
+		t.Fatalf("expected allow header GET, POST for /api/persons method error, got %q", got)
+	}
 
 	badJSON := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/organisations", bytes.NewBufferString("{"))
@@ -432,8 +435,12 @@ func verifyEndToEndRouterMetaEndpoints(t *testing.T, router http.Handler, state 
 	if code := doJSONRequest(t, router, http.MethodGet, "/api/missing", nil, state.adminHeaders).Code; code != http.StatusNotFound {
 		t.Fatalf("expected not found status, got %d", code)
 	}
-	if code := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, state.adminHeaders).Code; code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected report wrong method 405, got %d", code)
+	reportMethodNotAllowed := doJSONRequest(t, router, http.MethodGet, "/api/reports/availability-load", nil, state.adminHeaders)
+	if reportMethodNotAllowed.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected report wrong method 405, got %d", reportMethodNotAllowed.Code)
+	}
+	if got := reportMethodNotAllowed.Header().Get("Allow"); got != "POST" {
+		t.Fatalf("expected allow header POST for report endpoint, got %q", got)
 	}
 }
 
@@ -599,34 +606,38 @@ func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 		method     string
 		path       string
 		statusCode int
+		allow      string
 	}{
-		{http.MethodPatch, "/api/organisations", http.StatusMethodNotAllowed},
-		{http.MethodPost, "/api/organisations/" + orgID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/persons", http.StatusMethodNotAllowed},
-		{http.MethodPost, "/api/persons/" + personID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/persons/" + personID + "/unavailability", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/projects", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/projects/" + projectID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/groups", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/groups/" + group.ID, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/groups/" + group.ID + "/members", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/allocations/" + allocation.ID, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/reports/availability-load", http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed},
-		{http.MethodGet, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed},
+		{http.MethodPatch, "/api/organisations", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPost, "/api/organisations/" + orgID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/persons", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPost, "/api/persons/" + personID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/persons/" + personID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/projects", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/projects/" + projectID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodPatch, "/api/groups", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/groups/" + group.ID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodGet, "/api/groups/" + group.ID + "/members", http.StatusMethodNotAllowed, "POST"},
+		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/allocations", http.StatusMethodNotAllowed, "GET, POST"},
+		{http.MethodPatch, "/api/allocations/" + allocation.ID, http.StatusMethodNotAllowed, "GET, PUT, DELETE"},
+		{http.MethodGet, "/api/reports/availability-load", http.StatusMethodNotAllowed, "POST"},
+		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodGet, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/persons/" + personID + "/unavailability/" + personUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodGet, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/groups/" + group.ID + "/unavailability/" + groupUnavailability.ID, http.StatusMethodNotAllowed, "DELETE"},
 	}
 
 	for _, hit := range hits {
 		rec := doJSONRequest(t, router, hit.method, hit.path, nil, adminHeaders)
 		if rec.Code != hit.statusCode {
 			t.Fatalf("expected %d for %s %s got %d body=%s", hit.statusCode, hit.method, hit.path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Header().Get("Allow"); got != hit.allow {
+			t.Fatalf("expected allow header %q for %s %s got %q", hit.allow, hit.method, hit.path, got)
 		}
 	}
 
@@ -815,18 +826,24 @@ func TestOrganisationAndReportExtraBranches(t *testing.T) {
 		method string
 		path   string
 		code   int
+		allow  string
 	}{
-		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
-		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed},
-		{http.MethodDelete, "/api/organisations/" + orgID + "/holidays/missing", http.StatusNotFound},
-		{http.MethodGet, "/api/organisations/" + orgID + "/unknown", http.StatusNotFound},
-		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/extra/path", http.StatusNotFound},
+		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodPatch, "/api/organisations/" + orgID + "/holidays/" + holiday.ID, http.StatusMethodNotAllowed, "DELETE"},
+		{http.MethodDelete, "/api/organisations/" + orgID + "/holidays/missing", http.StatusNotFound, ""},
+		{http.MethodGet, "/api/organisations/" + orgID + "/unknown", http.StatusNotFound, ""},
+		{http.MethodGet, "/api/organisations/" + orgID + "/holidays/extra/path", http.StatusNotFound, ""},
 	}
 
 	for _, hit := range hits {
 		response := doJSONRequest(t, router, hit.method, hit.path, nil, headers)
 		if response.Code != hit.code {
 			t.Fatalf("expected %d for %s %s got %d body=%s", hit.code, hit.method, hit.path, response.Code, response.Body.String())
+		}
+		if hit.code == http.StatusMethodNotAllowed {
+			if got := response.Header().Get("Allow"); got != hit.allow {
+				t.Fatalf("expected allow header %q for %s %s got %q", hit.allow, hit.method, hit.path, got)
+			}
 		}
 	}
 

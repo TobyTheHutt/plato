@@ -29,7 +29,7 @@ func (a *API) handleAllocations(w http.ResponseWriter, r *http.Request, authCtx 
 		}
 		writeJSON(w, http.StatusCreated, created)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -62,6 +62,6 @@ func (a *API) handleAllocationByID(w http.ResponseWriter, r *http.Request, authC
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		methodNotAllowed(w)
+		methodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }
