@@ -60,6 +60,10 @@ linters-settings:
       - diagnostic
       - performance
       - style
+    enabled-checks:
+      - commentedOutCode
+      - commentedOutImport
+      - commentFormatting
     disabled-checks:
       - hugeParam
       - rangeValCopy
