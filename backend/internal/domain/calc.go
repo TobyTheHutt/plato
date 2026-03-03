@@ -437,7 +437,7 @@ func selectedPeopleForScope(
 	case ScopePerson:
 		return selectPeopleForPersonScope(request.IDs, allPersonIDs, personsByID)
 	case ScopeGroup:
-		return selectPeopleForGroupScope(request.IDs, allGroupIDs, groupsByID)
+		return selectPeopleForGroupScope(request.IDs, allGroupIDs, groupsByID, personsByID)
 	case ScopeProject:
 		return selectPeopleForProjectScope(request.IDs, allProjectIDs, personsByID, groupsByID, allocations)
 	default:
@@ -473,6 +473,7 @@ func selectPeopleForGroupScope(
 	ids []string,
 	allGroupIDs []string,
 	groupsByID map[string]Group,
+	personsByID map[string]Person,
 ) ([]string, map[string]bool, error) {
 	if len(ids) == 0 {
 		ids = allGroupIDs
@@ -484,7 +485,12 @@ func selectPeopleForGroupScope(
 		if !ok {
 			return nil, nil, ErrNotFound
 		}
-		selected = append(selected, group.MemberIDs...)
+		for _, memberID := range group.MemberIDs {
+			if _, exists := personsByID[memberID]; !exists {
+				continue
+			}
+			selected = append(selected, memberID)
+		}
 	}
 
 	return uniqueStrings(selected), map[string]bool{}, nil

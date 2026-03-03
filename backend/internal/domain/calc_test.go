@@ -517,19 +517,19 @@ func TestScopeSelectionHelperFunctions(t *testing.T) {
 		t.Fatalf("expected person helper to fail for missing person, got %v", err)
 	}
 
-	selected, _, err = selectPeopleForGroupScope(nil, allGroupIDs, groupsByID)
+	selected, _, err = selectPeopleForGroupScope(nil, allGroupIDs, groupsByID, personsByID)
 	if err != nil {
 		t.Fatalf("unexpected group helper all selection error: %v", err)
 	}
-	assertStringSetEqual(t, selected, []string{"p1", "p2", "p3"})
+	assertStringSetEqual(t, selected, []string{"p1", "p2"})
 
-	selected, _, err = selectPeopleForGroupScope([]string{"g2"}, allGroupIDs, groupsByID)
+	selected, _, err = selectPeopleForGroupScope([]string{"g2"}, allGroupIDs, groupsByID, personsByID)
 	if err != nil {
 		t.Fatalf("unexpected group helper single selection error: %v", err)
 	}
-	assertStringSetEqual(t, selected, []string{"p3"})
+	assertStringSetEqual(t, selected, []string{})
 
-	_, _, err = selectPeopleForGroupScope([]string{"missing"}, allGroupIDs, groupsByID)
+	_, _, err = selectPeopleForGroupScope([]string{"missing"}, allGroupIDs, groupsByID, personsByID)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected group helper to fail for missing group, got %v", err)
 	}
