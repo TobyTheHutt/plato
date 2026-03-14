@@ -249,7 +249,7 @@ func createRepositoryCascadeAllocations(ctx context.Context, t *testing.T, state
 		t.Fatalf("update allocation: %v", err)
 	}
 	if state.allocationA1.Percent != 45 {
-		t.Fatalf("expected allocation update")
+		t.Fatal("expected allocation update")
 	}
 	allocationRead, err := state.repo.GetAllocation(ctx, state.orgA.ID, state.allocationA1.ID)
 	if err != nil {

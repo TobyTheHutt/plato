@@ -131,7 +131,7 @@ func validateDateHours(date string, hours float64, maxHours float64) error {
 	return nil
 }
 
-func parseDateRange(startDate, endDate string) (time.Time, time.Time, error) {
+func parseDateRange(startDate, endDate string) (startParsed time.Time, endParsed time.Time, err error) {
 	startDate = strings.TrimSpace(startDate)
 	endDate = strings.TrimSpace(endDate)
 
@@ -151,11 +151,11 @@ func parseDateRange(startDate, endDate string) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, err
 	}
 
-	startParsed, err := time.Parse(domain.DateLayout, start)
+	startParsed, err = time.Parse(domain.DateLayout, start)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	endParsed, err := time.Parse(domain.DateLayout, end)
+	endParsed, err = time.Parse(domain.DateLayout, end)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}

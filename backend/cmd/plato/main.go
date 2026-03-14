@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -80,7 +79,7 @@ func getenv(key, fallback string) string {
 
 func run(addr string, handler http.Handler, start func(*http.Server, net.Listener) error, logger func(string, ...any)) error {
 	if start == nil {
-		return fmt.Errorf("start function is required")
+		return errors.New("start function is required")
 	}
 
 	server := newHTTPServer(addr, handler)

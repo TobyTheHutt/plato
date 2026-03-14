@@ -117,6 +117,9 @@ linters:
         - name: defer
         - name: duplicated-imports
         - name: empty-block
+        - name: confusing-results
+        - name: unnecessary-format
+        - name: unused-parameter
         - name: error-return
         - name: errorf
         - name: import-shadowing

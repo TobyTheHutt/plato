@@ -102,13 +102,13 @@ func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 	return summarizeBuckets(buckets, input.Request.Scope), nil
 }
 
-func parseReportDateRange(fromDate, toDate string) (time.Time, time.Time, error) {
-	start, err := time.Parse(DateLayout, fromDate)
+func parseReportDateRange(fromDate, toDate string) (start time.Time, end time.Time, err error) {
+	start, err = time.Parse(DateLayout, fromDate)
 	if err != nil {
 		return time.Time{}, time.Time{}, ErrValidation
 	}
 
-	end, err := time.Parse(DateLayout, toDate)
+	end, err = time.Parse(DateLayout, toDate)
 	if err != nil {
 		return time.Time{}, time.Time{}, ErrValidation
 	}
@@ -673,9 +673,9 @@ func resolveAllocation(
 	}
 }
 
-func normalizedAllocationTarget(allocation Allocation) (string, string) {
-	targetType := strings.TrimSpace(allocation.TargetType)
-	targetID := strings.TrimSpace(allocation.TargetID)
+func normalizedAllocationTarget(allocation Allocation) (targetType string, targetID string) {
+	targetType = strings.TrimSpace(allocation.TargetType)
+	targetID = strings.TrimSpace(allocation.TargetID)
 	if targetType == "" && strings.TrimSpace(allocation.PersonID) != "" {
 		targetType = AllocationTargetPerson
 		targetID = strings.TrimSpace(allocation.PersonID)
@@ -683,13 +683,9 @@ func normalizedAllocationTarget(allocation Allocation) (string, string) {
 	return targetType, targetID
 }
 
-func parseAllocationDateRange(startDate, endDate string) (time.Time, time.Time, error) {
+func parseAllocationDateRange(startDate, endDate string) (start time.Time, end time.Time, err error) {
 	startDate = strings.TrimSpace(startDate)
 	endDate = strings.TrimSpace(endDate)
-
-	var start time.Time
-	var end time.Time
-	var err error
 
 	if startDate == "" {
 		start = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC)

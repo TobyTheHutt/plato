@@ -308,12 +308,12 @@ func overlapDateRanges(
 	rangeEndA time.Time,
 	rangeStartB time.Time,
 	rangeEndB time.Time,
-) (time.Time, time.Time, bool) {
-	overlapStart := rangeStartA
+) (overlapStart time.Time, overlapEnd time.Time, overlaps bool) {
+	overlapStart = rangeStartA
 	if rangeStartB.After(overlapStart) {
 		overlapStart = rangeStartB
 	}
-	overlapEnd := rangeEndA
+	overlapEnd = rangeEndA
 	if rangeEndB.Before(overlapEnd) {
 		overlapEnd = rangeEndB
 	}
@@ -410,9 +410,9 @@ func allocationTargetsPerson(allocation domain.Allocation, personID string, grou
 	}
 }
 
-func normalizedAllocationTarget(allocation domain.Allocation) (string, string) {
-	targetType := strings.TrimSpace(allocation.TargetType)
-	targetID := strings.TrimSpace(allocation.TargetID)
+func normalizedAllocationTarget(allocation domain.Allocation) (targetType string, targetID string) {
+	targetType = strings.TrimSpace(allocation.TargetType)
+	targetID = strings.TrimSpace(allocation.TargetID)
 	if targetType == "" && strings.TrimSpace(allocation.PersonID) != "" {
 		return domain.AllocationTargetPerson, strings.TrimSpace(allocation.PersonID)
 	}

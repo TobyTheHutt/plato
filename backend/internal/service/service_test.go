@@ -1717,17 +1717,17 @@ func assertAllocationTargetsPersonChecks(t *testing.T, state allocationTargetRes
 
 	groupsByID := map[string]domain.Group{state.group.ID: state.group}
 	if !allocationTargetsPerson(testGroupAllocationInput(state.group.ID, state.project.ID, 10), state.person.ID, groupsByID) {
-		t.Fatalf("expected group allocation to target member")
+		t.Fatal("expected group allocation to target member")
 	}
 	if allocationTargetsPerson(testGroupAllocationInput(state.group.ID, state.project.ID, 10), "other", groupsByID) {
-		t.Fatalf("expected group allocation not to target non-member")
+		t.Fatal("expected group allocation not to target non-member")
 	}
 	if !allocationTargetsPerson(testPersonAllocationInput(state.person.ID, state.project.ID, 10), state.person.ID, groupsByID) {
-		t.Fatalf("expected person allocation to target person")
+		t.Fatal("expected person allocation to target person")
 	}
 	legacy := domain.Allocation{PersonID: state.person.ID}
 	if !allocationTargetsPerson(legacy, state.person.ID, groupsByID) {
-		t.Fatalf("expected legacy person allocation to target person")
+		t.Fatal("expected legacy person allocation to target person")
 	}
 }
 

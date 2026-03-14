@@ -78,7 +78,7 @@ func TestNewJWTAuthProviderFromEnvUsesLegacySigningKey(t *testing.T) {
 		t.Fatal("expected provider")
 	}
 	if !bytes.Equal(provider.signingKey, []byte("legacy-secret")) {
-		t.Fatalf("expected signing key to come from legacy env var")
+		t.Fatal("expected signing key to come from legacy env var")
 	}
 }
 

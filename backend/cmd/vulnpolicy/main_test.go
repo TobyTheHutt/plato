@@ -1459,7 +1459,7 @@ func TestResolveCVEInvalidBaseURL(t *testing.T) {
 func TestResolveCVENon200Status(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusTeapot)
 	}))
 	t.Cleanup(server.Close)
@@ -1481,7 +1481,7 @@ func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -1507,7 +1507,7 @@ func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusForbidden)
 	}))
@@ -1532,7 +1532,7 @@ func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 func TestResolveCVEDecodeError(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set(testHeaderContentType, contentTypeJSON)
 		_, writeErr := writer.Write([]byte("{not-json"))
 		if writeErr != nil {
@@ -1555,7 +1555,7 @@ func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		response := nvdResponse{
 			Vulnerabilities: []struct {
@@ -1610,7 +1610,7 @@ func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -1636,7 +1636,7 @@ func TestResolveCVERateLimitStatusEventuallyFails(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusTooManyRequests)
 	}))
@@ -1676,7 +1676,7 @@ func TestResolveCVERetryableStatusReturnsContextCancellation(t *testing.T) {
 	var calls atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
 
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		writer.WriteHeader(http.StatusTooManyRequests)
 		cancel()

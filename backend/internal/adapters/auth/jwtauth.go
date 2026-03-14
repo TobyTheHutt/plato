@@ -292,8 +292,8 @@ func isDevModeEnabled() bool {
 	return devModeEnabled
 }
 
-func jwtSigningKeyFromEnv() (string, string) {
-	signingKey := strings.TrimSpace(os.Getenv(jwtSigningKeyEnvVar))
+func jwtSigningKeyFromEnv() (configuredEnvKey string, signingKey string) {
+	signingKey = strings.TrimSpace(os.Getenv(jwtSigningKeyEnvVar))
 	if signingKey != "" {
 		return jwtSigningKeyEnvVar, signingKey
 	}

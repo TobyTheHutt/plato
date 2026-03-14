@@ -289,9 +289,9 @@ func sortedAllocations(items []domain.Allocation) {
 	})
 }
 
-func normalizedAllocationTarget(allocation domain.Allocation) (string, string) {
-	targetType := strings.TrimSpace(allocation.TargetType)
-	targetID := strings.TrimSpace(allocation.TargetID)
+func normalizedAllocationTarget(allocation domain.Allocation) (targetType string, targetID string) {
+	targetType = strings.TrimSpace(allocation.TargetType)
+	targetID = strings.TrimSpace(allocation.TargetID)
 	if targetType == "" && strings.TrimSpace(allocation.PersonID) != "" {
 		targetType = domain.AllocationTargetPerson
 		targetID = strings.TrimSpace(allocation.PersonID)

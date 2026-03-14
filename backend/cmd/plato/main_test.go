@@ -52,7 +52,7 @@ func assertRunInitializesConfiguredServer(t *testing.T, handler http.Handler, ad
 			t.Fatalf("unexpected server addr %s", server.Addr)
 		}
 		if server.Handler != handler {
-			t.Fatalf("unexpected server handler")
+			t.Fatal("unexpected server handler")
 		}
 		if server.ReadHeaderTimeout != 10*time.Second {
 			t.Fatalf("expected read header timeout 10s, got %v", server.ReadHeaderTimeout)

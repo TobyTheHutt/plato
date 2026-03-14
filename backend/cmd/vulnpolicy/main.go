@@ -503,13 +503,13 @@ func parseVulnerabilityInput(inputPath, scanMode string) ([]vulnAssessment, erro
 	return vulns, nil
 }
 
-func buildSeverityResolver(config cliConfig) (*nvdSeverityResolver, string, string, error) {
-	apiKey, err := resolveNVDAPIKey(config.nvdAPIKeyFile)
+func buildSeverityResolver(config cliConfig) (resolver *nvdSeverityResolver, apiKey string, ghsaToken string, err error) {
+	apiKey, err = resolveNVDAPIKey(config.nvdAPIKeyFile)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("resolve NVD API key: %w", err)
 	}
 
-	ghsaToken, err := resolveGHSAToken(config.ghsaTokenFile)
+	ghsaToken, err = resolveGHSAToken(config.ghsaTokenFile)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("resolve GHSA token: %w", err)
 	}
@@ -522,7 +522,7 @@ func buildSeverityResolver(config cliConfig) (*nvdSeverityResolver, string, stri
 		return nil, "", "", errors.New("-offline requires -severity-snapshot")
 	}
 
-	resolver := &nvdSeverityResolver{
+	resolver = &nvdSeverityResolver{
 		client: &http.Client{
 			Timeout: config.nvdTimeout,
 		},
@@ -701,10 +701,7 @@ func filterExcludedVulnerabilities(vulns []vulnAssessment, excludedIDs excludedV
 	return result
 }
 
-func matchesExcludedIDs(vuln vulnAssessment, excludedIDs excludedVulnerabilityIDs) (bool, bool) {
-	matchedAll := false
-	matchedReachable := false
-
+func matchesExcludedIDs(vuln vulnAssessment, excludedIDs excludedVulnerabilityIDs) (matchedAll bool, matchedReachable bool) {
 	candidateIDs := append([]string{vuln.ID}, vuln.Aliases...)
 	for _, candidateID := range candidateIDs {
 		normalizedID := normalizeID(candidateID)
@@ -793,7 +790,7 @@ func loadOverrides(path string) (map[string]riskOverride, error) {
 func parseOverrideInput(item overrideInput) (riskOverride, error) {
 	id := normalizeID(item.ID)
 	if id == "" {
-		return riskOverride{}, fmt.Errorf("override id is required")
+		return riskOverride{}, errors.New("override id is required")
 	}
 
 	reason, err := requiredOverrideField(id, "reason", item.Reason)
@@ -900,7 +897,7 @@ func parseOverrideSeverity(raw string) (severity, error) {
 	case string(severityCritical):
 		return severityCritical, nil
 	default:
-		return "", fmt.Errorf("must be one of LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN")
+		return "", errors.New("must be one of LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN")
 	}
 }
 
@@ -1470,7 +1467,7 @@ func unknownSeverityAssessmentWithReason(source, reason string, method severityM
 func advisoryLookupURL(baseURL, advisoryID string) (string, error) {
 	trimmedBase := strings.TrimSpace(baseURL)
 	if trimmedBase == "" {
-		return "", fmt.Errorf("advisory base URL is required")
+		return "", errors.New("advisory base URL is required")
 	}
 
 	parsedURL, err := url.Parse(trimmedBase)
