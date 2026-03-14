@@ -102,6 +102,38 @@ linters:
       allow-unused: false
     revive:
       confidence: 0.8
+      severity: warning
+      enable-all-rules: false
+      enable-default-rules: false
+      directives:
+        - name: specify-disable-reason
+          severity: error
+      rules:
+        - name: blank-imports
+        - name: constant-logical-expr
+        - name: context-keys-type
+        - name: deep-exit
+        - name: defer
+        - name: duplicated-imports
+        - name: empty-block
+        - name: error-return
+        - name: errorf
+        - name: import-shadowing
+        - name: modifies-value-receiver
+        - name: range-val-address
+        - name: time-equal
+        # Covered by govet.
+        - name: atomic
+          disabled: true
+        # Covered by errcheck.
+        - name: unchecked-type-assertion
+          disabled: true
+        # Covered by staticcheck.
+        - name: unreachable-code
+          disabled: true
+        # Covered by staticcheck.
+        - name: error-strings
+          disabled: true
     staticcheck:
       checks:
         - all

@@ -330,7 +330,13 @@ type reportTruncationBucket struct {
 }
 
 func main() {
-	config, err := parseCLIConfig()
+	flags := registerCLIFlags(flag.CommandLine)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		exitf(errorMessageFormat, err)
+		return
+	}
+
+	config, err := flags.config()
 	if err != nil {
 		exitf(errorMessageFormat, err)
 		return
@@ -376,30 +382,48 @@ type policyEvaluationOutcome struct {
 	ghsaTokenSet bool
 }
 
-func parseCLIConfig() (cliConfig, error) {
-	inputPath := flag.String("input", "", "path to govulncheck JSON output")
-	overridesPath := flag.String("overrides", "", "path to vulnerability override config")
-	scanMode := flag.String("scan-mode", scanModeSource, "govulncheck scan mode used by the input: source or binary")
-	excludeInput := flag.String("exclude-input", "", "optional path to govulncheck JSON output whose vulnerabilities should be excluded")
-	nvdAPIBaseURL := flag.String("nvd-api-base-url", defaultNVDAPIBaseURL, "NVD CVE API base URL")
-	nvdAPIKeyFile := flag.String("nvd-api-key-file", "", "path to file containing NVD API key")
-	ghsaAPIBaseURL := flag.String("ghsa-api-base-url", defaultGHSAAPIBaseURL, "GHSA advisory API base URL")
-	ghsaTokenFile := flag.String("ghsa-token-file", "", "path to file containing optional GHSA API token")
-	severitySnapshot := flag.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON")
-	offlineMode := flag.Bool("offline", false, "disable live GHSA and NVD lookups and use pinned snapshot data only")
-	nvdTimeout := flag.Duration("nvd-timeout", 15*time.Second, "timeout per severity API request")
-	reportFile := flag.String("report-file", "", "optional path to write full vulnerability scan report JSON")
-	flag.Parse()
+type cliFlags struct {
+	inputPath        *string
+	overridesPath    *string
+	scanMode         *string
+	excludeInput     *string
+	nvdAPIBaseURL    *string
+	nvdAPIKeyFile    *string
+	ghsaAPIBaseURL   *string
+	ghsaTokenFile    *string
+	severitySnapshot *string
+	offlineMode      *bool
+	nvdTimeout       *time.Duration
+	reportFile       *string
+}
 
-	trimmedInputPath := strings.TrimSpace(*inputPath)
+func registerCLIFlags(flagSet *flag.FlagSet) cliFlags {
+	return cliFlags{
+		inputPath:        flagSet.String("input", "", "path to govulncheck JSON output"),
+		overridesPath:    flagSet.String("overrides", "", "path to vulnerability override config"),
+		scanMode:         flagSet.String("scan-mode", scanModeSource, "govulncheck scan mode used by the input: source or binary"),
+		excludeInput:     flagSet.String("exclude-input", "", "optional path to govulncheck JSON output whose vulnerabilities should be excluded"),
+		nvdAPIBaseURL:    flagSet.String("nvd-api-base-url", defaultNVDAPIBaseURL, "NVD CVE API base URL"),
+		nvdAPIKeyFile:    flagSet.String("nvd-api-key-file", "", "path to file containing NVD API key"),
+		ghsaAPIBaseURL:   flagSet.String("ghsa-api-base-url", defaultGHSAAPIBaseURL, "GHSA advisory API base URL"),
+		ghsaTokenFile:    flagSet.String("ghsa-token-file", "", "path to file containing optional GHSA API token"),
+		severitySnapshot: flagSet.String("severity-snapshot", "", "path to pinned NVD severity snapshot JSON"),
+		offlineMode:      flagSet.Bool("offline", false, "disable live GHSA and NVD lookups and use pinned snapshot data only"),
+		nvdTimeout:       flagSet.Duration("nvd-timeout", 15*time.Second, "timeout per severity API request"),
+		reportFile:       flagSet.String("report-file", "", "optional path to write full vulnerability scan report JSON"),
+	}
+}
+
+func (flags cliFlags) config() (cliConfig, error) {
+	trimmedInputPath := strings.TrimSpace(*flags.inputPath)
 	if trimmedInputPath == "" {
 		return cliConfig{}, errors.New("-input is required")
 	}
-	trimmedOverridesPath := strings.TrimSpace(*overridesPath)
+	trimmedOverridesPath := strings.TrimSpace(*flags.overridesPath)
 	if trimmedOverridesPath == "" {
 		return cliConfig{}, errors.New("-overrides is required")
 	}
-	normalizedScanMode, err := normalizeScanMode(*scanMode)
+	normalizedScanMode, err := normalizeScanMode(*flags.scanMode)
 	if err != nil {
 		return cliConfig{}, err
 	}
@@ -408,15 +432,15 @@ func parseCLIConfig() (cliConfig, error) {
 		inputPath:        trimmedInputPath,
 		overridesPath:    trimmedOverridesPath,
 		scanMode:         normalizedScanMode,
-		excludeInput:     strings.TrimSpace(*excludeInput),
-		nvdAPIBaseURL:    strings.TrimSpace(*nvdAPIBaseURL),
-		nvdAPIKeyFile:    strings.TrimSpace(*nvdAPIKeyFile),
-		ghsaAPIBaseURL:   strings.TrimSpace(*ghsaAPIBaseURL),
-		ghsaTokenFile:    strings.TrimSpace(*ghsaTokenFile),
-		severitySnapshot: strings.TrimSpace(*severitySnapshot),
-		offlineMode:      *offlineMode,
-		nvdTimeout:       *nvdTimeout,
-		reportFile:       strings.TrimSpace(*reportFile),
+		excludeInput:     strings.TrimSpace(*flags.excludeInput),
+		nvdAPIBaseURL:    strings.TrimSpace(*flags.nvdAPIBaseURL),
+		nvdAPIKeyFile:    strings.TrimSpace(*flags.nvdAPIKeyFile),
+		ghsaAPIBaseURL:   strings.TrimSpace(*flags.ghsaAPIBaseURL),
+		ghsaTokenFile:    strings.TrimSpace(*flags.ghsaTokenFile),
+		severitySnapshot: strings.TrimSpace(*flags.severitySnapshot),
+		offlineMode:      *flags.offlineMode,
+		nvdTimeout:       *flags.nvdTimeout,
+		reportFile:       strings.TrimSpace(*flags.reportFile),
 	}, nil
 }
 
@@ -1180,7 +1204,7 @@ func resolvedOSVSeverity(vuln vulnAssessment) (severityAssessment, bool) {
 
 func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID string) (severityAssessment, error) {
 	normalizedCVE := normalizeID(cveID)
-	if cached, cachedErr, ok := resolver.readCache(normalizedCVE); ok {
+	if cached, ok, cachedErr := resolver.readCache(normalizedCVE); ok {
 		return cached, cachedErr
 	}
 
@@ -1203,7 +1227,7 @@ func (resolver *nvdSeverityResolver) resolveCVE(ctx context.Context, cveID strin
 
 func (resolver *nvdSeverityResolver) resolveGHSA(ctx context.Context, ghsaID string) (severityAssessment, error) {
 	normalizedGHSA := normalizeID(ghsaID)
-	if cached, cachedErr, ok := resolver.readCache(normalizedGHSA); ok {
+	if cached, ok, cachedErr := resolver.readCache(normalizedGHSA); ok {
 		return cached, cachedErr
 	}
 
@@ -1649,14 +1673,14 @@ func sleepWithBackoff(ctx context.Context, attempt int, apiKeyConfigured bool) e
 	}
 }
 
-func (resolver *nvdSeverityResolver) readCache(cveID string) (severityAssessment, error, bool) {
+func (resolver *nvdSeverityResolver) readCache(cveID string) (severityAssessment, bool, error) {
 	resolver.mu.RLock()
 	defer resolver.mu.RUnlock()
 	cached, ok := resolver.cache[cveID]
 	if !ok {
-		return severityAssessment{}, nil, false
+		return severityAssessment{}, false, nil
 	}
-	return cached, resolver.errorMap[cveID], true
+	return cached, true, resolver.errorMap[cveID]
 }
 
 func (resolver *nvdSeverityResolver) writeCache(cveID string, assessment severityAssessment, lookupErr error) {
