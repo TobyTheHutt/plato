@@ -59,13 +59,13 @@ func createRepositoryCascadeFixtures(t *testing.T, state *repositoryCascadeState
 	t.Helper()
 	ctx := context.Background()
 
-	createRepositoryCascadeOrganisations(t, state, ctx)
-	createRepositoryCascadePersons(t, state, ctx)
-	createRepositoryCascadeProjects(t, state, ctx)
-	createRepositoryCascadeGroups(t, state, ctx)
+	createRepositoryCascadeOrganisations(ctx, t, state)
+	createRepositoryCascadePersons(ctx, t, state)
+	createRepositoryCascadeProjects(ctx, t, state)
+	createRepositoryCascadeGroups(ctx, t, state)
 }
 
-func createRepositoryCascadeOrganisations(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadeOrganisations(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -96,7 +96,7 @@ func createRepositoryCascadeOrganisations(t *testing.T, state *repositoryCascade
 	}
 }
 
-func createRepositoryCascadePersons(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadePersons(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -139,7 +139,7 @@ func createRepositoryCascadePersons(t *testing.T, state *repositoryCascadeState,
 	}
 }
 
-func createRepositoryCascadeProjects(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadeProjects(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -173,7 +173,7 @@ func createRepositoryCascadeProjects(t *testing.T, state *repositoryCascadeState
 	}
 }
 
-func createRepositoryCascadeGroups(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadeGroups(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -210,12 +210,12 @@ func createRepositoryCascadeAllocationsAndCalendar(t *testing.T, state *reposito
 	t.Helper()
 	ctx := context.Background()
 
-	createRepositoryCascadeAllocations(t, state, ctx)
-	createRepositoryCascadeCalendarEntries(t, state, ctx)
-	verifyRepositoryCascadeAllocationAndCalendarLists(t, state, ctx)
+	createRepositoryCascadeAllocations(ctx, t, state)
+	createRepositoryCascadeCalendarEntries(ctx, t, state)
+	verifyRepositoryCascadeAllocationAndCalendarLists(ctx, t, state)
 }
 
-func createRepositoryCascadeAllocations(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadeAllocations(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -260,7 +260,7 @@ func createRepositoryCascadeAllocations(t *testing.T, state *repositoryCascadeSt
 	}
 }
 
-func createRepositoryCascadeCalendarEntries(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func createRepositoryCascadeCalendarEntries(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	var err error
@@ -295,7 +295,7 @@ func createRepositoryCascadeCalendarEntries(t *testing.T, state *repositoryCasca
 	}
 }
 
-func verifyRepositoryCascadeAllocationAndCalendarLists(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func verifyRepositoryCascadeAllocationAndCalendarLists(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	allocations, err := state.repo.ListAllocations(ctx, state.orgA.ID)
@@ -350,12 +350,12 @@ func executeRepositoryCascadeDeletions(t *testing.T, state *repositoryCascadeSta
 	t.Helper()
 	ctx := context.Background()
 
-	deleteRepositoryCascadeCalendarAndPerson(t, state, ctx)
-	verifyRepositoryCascadeGroupMemberRemoval(t, state, ctx)
-	deleteRepositoryCascadeRemainingResources(t, state, ctx)
+	deleteRepositoryCascadeCalendarAndPerson(ctx, t, state)
+	verifyRepositoryCascadeGroupMemberRemoval(ctx, t, state)
+	deleteRepositoryCascadeRemainingResources(ctx, t, state)
 }
 
-func deleteRepositoryCascadeCalendarAndPerson(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func deleteRepositoryCascadeCalendarAndPerson(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	if err := state.repo.DeleteAllocation(ctx, state.orgA.ID, state.allocationA2.ID); err != nil {
@@ -381,7 +381,7 @@ func deleteRepositoryCascadeCalendarAndPerson(t *testing.T, state *repositoryCas
 	}
 }
 
-func verifyRepositoryCascadeGroupMemberRemoval(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func verifyRepositoryCascadeGroupMemberRemoval(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	groupAfterDelete, err := state.repo.GetGroup(ctx, state.orgA.ID, state.groupA.ID)
@@ -393,7 +393,7 @@ func verifyRepositoryCascadeGroupMemberRemoval(t *testing.T, state *repositoryCa
 	}
 }
 
-func deleteRepositoryCascadeRemainingResources(t *testing.T, state *repositoryCascadeState, ctx context.Context) {
+func deleteRepositoryCascadeRemainingResources(ctx context.Context, t *testing.T, state *repositoryCascadeState) {
 	t.Helper()
 
 	projectWithAllocation, err := state.repo.CreateProject(ctx, domain.Project{OrganisationID: state.orgA.ID, Name: "Project With Allocation"})

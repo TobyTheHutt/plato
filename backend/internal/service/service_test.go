@@ -161,7 +161,7 @@ func setupServiceResourceFlowState(t *testing.T) *serviceResourceFlowState {
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Flow")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Flow")
 
 	return &serviceResourceFlowState{
 		svc:   svc,
@@ -174,12 +174,12 @@ func validateServiceResourceFlowPeopleProjectsGroups(t *testing.T, state *servic
 	t.Helper()
 	ctx := context.Background()
 
-	createServiceResourceFlowPeople(t, state, ctx)
-	createServiceResourceFlowProjects(t, state, ctx)
-	createServiceResourceFlowGroupAndLists(t, state, ctx)
+	createServiceResourceFlowPeople(ctx, t, state)
+	createServiceResourceFlowProjects(ctx, t, state)
+	createServiceResourceFlowGroupAndLists(ctx, t, state)
 }
 
-func createServiceResourceFlowPeople(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func createServiceResourceFlowPeople(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -209,7 +209,7 @@ func createServiceResourceFlowPeople(t *testing.T, state *serviceResourceFlowSta
 	}
 }
 
-func createServiceResourceFlowProjects(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func createServiceResourceFlowProjects(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -247,7 +247,7 @@ func createServiceResourceFlowProjects(t *testing.T, state *serviceResourceFlowS
 	}
 }
 
-func createServiceResourceFlowGroupAndLists(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func createServiceResourceFlowGroupAndLists(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -293,13 +293,13 @@ func validateServiceResourceFlowAllocationsAndCalendar(t *testing.T, state *serv
 	t.Helper()
 	ctx := context.Background()
 
-	updateServiceResourceFlowGroupMembership(t, state, ctx)
-	createServiceResourceFlowAllocations(t, state, ctx)
-	createServiceResourceFlowCalendarEntries(t, state, ctx)
-	verifyServiceResourceFlowCalendarLists(t, state, ctx)
+	updateServiceResourceFlowGroupMembership(ctx, t, state)
+	createServiceResourceFlowAllocations(ctx, t, state)
+	createServiceResourceFlowCalendarEntries(ctx, t, state)
+	verifyServiceResourceFlowCalendarLists(ctx, t, state)
 }
 
-func updateServiceResourceFlowGroupMembership(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func updateServiceResourceFlowGroupMembership(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -328,7 +328,7 @@ func updateServiceResourceFlowGroupMembership(t *testing.T, state *serviceResour
 	}
 }
 
-func createServiceResourceFlowAllocations(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func createServiceResourceFlowAllocations(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -374,7 +374,7 @@ func createServiceResourceFlowAllocations(t *testing.T, state *serviceResourceFl
 	}
 }
 
-func createServiceResourceFlowCalendarEntries(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func createServiceResourceFlowCalendarEntries(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	var err error
@@ -396,7 +396,7 @@ func createServiceResourceFlowCalendarEntries(t *testing.T, state *serviceResour
 	}
 }
 
-func verifyServiceResourceFlowCalendarLists(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func verifyServiceResourceFlowCalendarLists(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	holidayList, err := state.svc.ListOrgHolidays(ctx, state.user)
@@ -436,11 +436,11 @@ func validateServiceResourceFlowReportsAndCleanup(t *testing.T, state *serviceRe
 	t.Helper()
 	ctx := context.Background()
 
-	validateServiceResourceFlowReports(t, state, ctx)
-	validateServiceResourceFlowCleanup(t, state, ctx)
+	validateServiceResourceFlowReports(ctx, t, state)
+	validateServiceResourceFlowCleanup(ctx, t, state)
 }
 
-func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func validateServiceResourceFlowReports(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	report, err := state.svc.ReportAvailabilityAndLoad(ctx, state.user, domain.ReportRequest{
@@ -477,7 +477,7 @@ func validateServiceResourceFlowReports(t *testing.T, state *serviceResourceFlow
 	}
 }
 
-func validateServiceResourceFlowCleanup(t *testing.T, state *serviceResourceFlowState, ctx context.Context) {
+func validateServiceResourceFlowCleanup(ctx context.Context, t *testing.T, state *serviceResourceFlowState) {
 	t.Helper()
 
 	err := state.svc.DeleteOrgHoliday(ctx, state.admin, state.holiday.ID)
@@ -538,19 +538,19 @@ func TestServiceValidationAndHelpers(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	assertServiceValidationOrganisationGuards(t, svc, ctx, globalAdmin)
+	assertServiceValidationOrganisationGuards(ctx, t, svc, globalAdmin)
 
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Validate")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Validate")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
 
-	assertServiceValidationPersonGuards(t, svc, ctx, admin, user)
-	assertServiceValidationProjectAndGroupGuards(t, svc, ctx, admin)
-	assertServiceValidationTenantListGuards(t, svc, ctx)
+	assertServiceValidationPersonGuards(ctx, t, svc, admin, user)
+	assertServiceValidationProjectAndGroupGuards(ctx, t, svc, admin)
+	assertServiceValidationTenantListGuards(ctx, t, svc)
 	assertServiceValidationErrorHelpers(t)
 }
 
-func assertServiceValidationOrganisationGuards(t *testing.T, svc *Service, ctx context.Context, globalAdmin ports.AuthContext) {
+func assertServiceValidationOrganisationGuards(ctx context.Context, t *testing.T, svc *Service, globalAdmin ports.AuthContext) {
 	t.Helper()
 
 	if _, err := svc.CreateOrganisation(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgUser}}, domain.Organisation{Name: "Bad", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080}); !errors.Is(err, domain.ErrForbidden) {
@@ -567,7 +567,7 @@ func assertServiceValidationOrganisationGuards(t *testing.T, svc *Service, ctx c
 	}
 }
 
-func assertServiceValidationPersonGuards(t *testing.T, svc *Service, ctx context.Context, admin, user ports.AuthContext) {
+func assertServiceValidationPersonGuards(ctx context.Context, t *testing.T, svc *Service, admin, user ports.AuthContext) {
 	t.Helper()
 
 	if _, err := svc.CreatePerson(ctx, user, domain.Person{Name: "X", EmploymentPct: 50}); !errors.Is(err, domain.ErrForbidden) {
@@ -582,7 +582,7 @@ func assertServiceValidationPersonGuards(t *testing.T, svc *Service, ctx context
 	}
 }
 
-func assertServiceValidationProjectAndGroupGuards(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext) {
+func assertServiceValidationProjectAndGroupGuards(ctx context.Context, t *testing.T, svc *Service, admin ports.AuthContext) {
 	t.Helper()
 
 	if _, err := svc.CreateProject(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, testProjectInput("No Org")); !errors.Is(err, domain.ErrForbidden) {
@@ -605,7 +605,7 @@ func assertServiceValidationProjectAndGroupGuards(t *testing.T, svc *Service, ct
 	}
 }
 
-func assertServiceValidationTenantListGuards(t *testing.T, svc *Service, ctx context.Context) {
+func assertServiceValidationTenantListGuards(ctx context.Context, t *testing.T, svc *Service) {
 	t.Helper()
 
 	if _, err := svc.ListPersons(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}); !errors.Is(err, domain.ErrForbidden) {
@@ -672,7 +672,7 @@ func setupServiceRemainingErrorBranchesState(t *testing.T) *serviceRemainingErro
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Errors")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Errors")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
 
@@ -788,8 +788,8 @@ func validateServiceRemainingErrorBranchesDeleteAndCreate(t *testing.T, state *s
 	t.Helper()
 	ctx := context.Background()
 
-	assertServiceRemainingDeleteMissingEntities(t, state, ctx)
-	assertServiceRemainingCreateAndMembershipErrors(t, state, ctx)
+	assertServiceRemainingDeleteMissingEntities(ctx, t, state)
+	assertServiceRemainingCreateAndMembershipErrors(ctx, t, state)
 }
 
 type serviceErrorCase struct {
@@ -810,7 +810,7 @@ func assertServiceErrorCases(t *testing.T, cases []serviceErrorCase) {
 	}
 }
 
-func assertServiceRemainingDeleteMissingEntities(t *testing.T, state *serviceRemainingErrorBranchesState, ctx context.Context) {
+func assertServiceRemainingDeleteMissingEntities(ctx context.Context, t *testing.T, state *serviceRemainingErrorBranchesState) {
 	t.Helper()
 
 	assertServiceErrorCases(t, []serviceErrorCase{
@@ -873,7 +873,7 @@ func assertServiceRemainingDeleteMissingEntities(t *testing.T, state *serviceRem
 	})
 }
 
-func assertServiceRemainingCreateAndMembershipErrors(t *testing.T, state *serviceRemainingErrorBranchesState, ctx context.Context) {
+func assertServiceRemainingCreateAndMembershipErrors(ctx context.Context, t *testing.T, state *serviceRemainingErrorBranchesState) {
 	t.Helper()
 
 	assertServiceErrorCases(t, []serviceErrorCase{
@@ -996,7 +996,7 @@ func TestServicePersonUnavailabilityEmploymentDailyCap(t *testing.T) {
 	ctx := context.Background()
 
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Capacity")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Capacity")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Part Time", EmploymentPct: 80})
@@ -1028,7 +1028,7 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 	ctx := context.Background()
 
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Employment Timeline")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Employment Timeline")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Timeline Person", EmploymentPct: 80})
@@ -1036,7 +1036,7 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 		t.Fatalf(errSetupPersonFmt, err)
 	}
 
-	person = applyTimelineEmploymentChanges(t, svc, ctx, admin, person)
+	person = applyTimelineEmploymentChanges(ctx, t, svc, admin, person)
 	if len(person.EmploymentChanges) != 2 {
 		t.Fatalf("expected 2 employment changes, got %+v", person.EmploymentChanges)
 	}
@@ -1054,10 +1054,10 @@ func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 	assertEmploymentPctOnDate(t, person, "2026-06-15", 70, "expected june employment percent after baseline change")
 	assertEmploymentPctOnDate(t, person, "2026-09-01", 50, "expected september employment percent after baseline change")
 
-	assertEmploymentTimelineUnavailabilityCaps(t, svc, ctx, admin, person.ID)
+	assertEmploymentTimelineUnavailabilityCaps(ctx, t, svc, admin, person.ID)
 }
 
-func applyTimelineEmploymentChanges(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, person domain.Person) domain.Person {
+func applyTimelineEmploymentChanges(ctx context.Context, t *testing.T, svc *Service, admin ports.AuthContext, person domain.Person) domain.Person {
 	t.Helper()
 
 	if _, err := svc.UpdatePerson(ctx, admin, person.ID, domain.Person{
@@ -1097,7 +1097,7 @@ func assertEmploymentPctOnDate(t *testing.T, person domain.Person, date string, 
 	}
 }
 
-func assertEmploymentTimelineUnavailabilityCaps(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, personID string) {
+func assertEmploymentTimelineUnavailabilityCaps(ctx context.Context, t *testing.T, svc *Service, admin ports.AuthContext, personID string) {
 	t.Helper()
 
 	_, err := svc.CreatePersonUnavailability(ctx, admin, domain.PersonUnavailability{PersonID: personID, Date: "2026-04-07", Hours: 7.2})
@@ -1122,7 +1122,7 @@ func TestServiceForbiddenMutationsForOrgUser(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Forbidden")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Forbidden")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 	user := ports.AuthContext{UserID: "user1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgUser}}
 
@@ -1205,7 +1205,7 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Extra")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Extra")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Extra Person", EmploymentPct: 50})
@@ -1225,14 +1225,14 @@ func TestServiceAdditionalBranchCoverage(t *testing.T) {
 		t.Fatalf(errSetupAllocationFmt, err)
 	}
 
-	assertServiceAdditionalForbiddenReads(t, svc, ctx, person.ID, project.ID, group.ID, allocation.ID)
-	assertServiceAdditionalMissingOrgCreates(t, svc, ctx, group.ID, person.ID)
-	assertServiceAdditionalUpdateScenarios(t, svc, ctx, admin, group.ID, project.ID, person.ID, allocation.ID)
-	assertServiceAdditionalTenantGuards(t, svc, ctx, organisation.ID, group.ID, person.ID)
-	assertServiceAdditionalReportAndHelperValidation(t, svc, ctx, admin, project.ID, person.ID)
+	assertServiceAdditionalForbiddenReads(ctx, t, svc, person.ID, project.ID, group.ID, allocation.ID)
+	assertServiceAdditionalMissingOrgCreates(ctx, t, svc, group.ID, person.ID)
+	assertServiceAdditionalUpdateScenarios(ctx, t, svc, admin, group.ID, project.ID, person.ID, allocation.ID)
+	assertServiceAdditionalTenantGuards(ctx, t, svc, organisation.ID, group.ID, person.ID)
+	assertServiceAdditionalReportAndHelperValidation(ctx, t, svc, admin, project.ID, person.ID)
 }
 
-func assertServiceAdditionalForbiddenReads(t *testing.T, svc *Service, ctx context.Context, personID, projectID, groupID, allocationID string) {
+func assertServiceAdditionalForbiddenReads(ctx context.Context, t *testing.T, svc *Service, personID, projectID, groupID, allocationID string) {
 	t.Helper()
 
 	_, err := svc.GetPerson(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, personID)
@@ -1253,7 +1253,7 @@ func assertServiceAdditionalForbiddenReads(t *testing.T, svc *Service, ctx conte
 	}
 }
 
-func assertServiceAdditionalMissingOrgCreates(t *testing.T, svc *Service, ctx context.Context, groupID, personID string) {
+func assertServiceAdditionalMissingOrgCreates(ctx context.Context, t *testing.T, svc *Service, groupID, personID string) {
 	t.Helper()
 
 	_, err := svc.CreatePerson(ctx, ports.AuthContext{OrganisationID: testMissingID, Roles: []string{domain.RoleOrgAdmin}}, domain.Person{Name: "x", EmploymentPct: 50})
@@ -1274,7 +1274,7 @@ func assertServiceAdditionalMissingOrgCreates(t *testing.T, svc *Service, ctx co
 	}
 }
 
-func assertServiceAdditionalUpdateScenarios(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, groupID, projectID, personID, allocationID string) {
+func assertServiceAdditionalUpdateScenarios(ctx context.Context, t *testing.T, svc *Service, admin ports.AuthContext, groupID, projectID, personID, allocationID string) {
 	t.Helper()
 
 	_, err := svc.UpdateGroup(ctx, admin, groupID, domain.Group{Name: "x", MemberIDs: []string{testMissingID}})
@@ -1298,7 +1298,7 @@ func assertServiceAdditionalUpdateScenarios(t *testing.T, svc *Service, ctx cont
 	}
 }
 
-func assertServiceAdditionalTenantGuards(t *testing.T, svc *Service, ctx context.Context, organisationID, groupID, personID string) {
+func assertServiceAdditionalTenantGuards(ctx context.Context, t *testing.T, svc *Service, organisationID, groupID, personID string) {
 	t.Helper()
 
 	_, err := svc.AddGroupMember(ctx, ports.AuthContext{Roles: []string{domain.RoleOrgAdmin}}, groupID, personID)
@@ -1315,7 +1315,7 @@ func assertServiceAdditionalTenantGuards(t *testing.T, svc *Service, ctx context
 	}
 }
 
-func assertServiceAdditionalReportAndHelperValidation(t *testing.T, svc *Service, ctx context.Context, admin ports.AuthContext, projectID, personID string) {
+func assertServiceAdditionalReportAndHelperValidation(ctx context.Context, t *testing.T, svc *Service, admin ports.AuthContext, projectID, personID string) {
 	t.Helper()
 
 	_, err := svc.ReportAvailabilityAndLoad(ctx, admin, domain.ReportRequest{Scope: domain.ScopePerson, IDs: []string{testMissingID}, FromDate: testDate20260101, ToDate: "2026-01-02", Granularity: domain.GranularityDay})
@@ -1641,10 +1641,10 @@ func TestBuildAllocationEvents(t *testing.T) {
 func TestAllocationTargetResolutionAndLimitRangeChecks(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
-	state := setupAllocationTargetResolutionState(t, svc, ctx)
-	assertAllocationTargetResolution(t, svc, ctx, state)
+	state := setupAllocationTargetResolutionState(ctx, t, svc)
+	assertAllocationTargetResolution(ctx, t, svc, state)
 	assertAllocationTargetsPersonChecks(t, state)
-	assertAllocationLimitRangeChecks(t, svc, ctx, state)
+	assertAllocationLimitRangeChecks(ctx, t, svc, state)
 }
 
 type allocationTargetResolutionState struct {
@@ -1656,11 +1656,11 @@ type allocationTargetResolutionState struct {
 	emptyGroup     domain.Group
 }
 
-func setupAllocationTargetResolutionState(t *testing.T, svc *Service, ctx context.Context) allocationTargetResolutionState {
+func setupAllocationTargetResolutionState(ctx context.Context, t *testing.T, svc *Service) allocationTargetResolutionState {
 	t.Helper()
 
 	globalAdmin := ports.AuthContext{UserID: "admin", Roles: []string{domain.RoleOrgAdmin}}
-	organisation := createOrganisationForService(t, svc, ctx, globalAdmin, "Org Limits")
+	organisation := createOrganisationForService(ctx, t, svc, globalAdmin, "Org Limits")
 	admin := ports.AuthContext{UserID: "admin1", OrganisationID: organisation.ID, Roles: []string{domain.RoleOrgAdmin}}
 
 	person, err := svc.CreatePerson(ctx, admin, domain.Person{Name: "Range Person", EmploymentPct: 50})
@@ -1690,7 +1690,7 @@ func setupAllocationTargetResolutionState(t *testing.T, svc *Service, ctx contex
 	}
 }
 
-func assertAllocationTargetResolution(t *testing.T, svc *Service, ctx context.Context, state allocationTargetResolutionState) {
+func assertAllocationTargetResolution(ctx context.Context, t *testing.T, svc *Service, state allocationTargetResolutionState) {
 	t.Helper()
 
 	personIDs, err := svc.resolveAllocationTargetPersons(ctx, state.organisationID, domain.AllocationTargetPerson, state.person.ID)
@@ -1731,7 +1731,7 @@ func assertAllocationTargetsPersonChecks(t *testing.T, state allocationTargetRes
 	}
 }
 
-func assertAllocationLimitRangeChecks(t *testing.T, svc *Service, ctx context.Context, state allocationTargetResolutionState) {
+func assertAllocationLimitRangeChecks(ctx context.Context, t *testing.T, svc *Service, state allocationTargetResolutionState) {
 	t.Helper()
 
 	_, err := svc.CreateAllocation(ctx, state.admin, testPersonAllocationInputForRange(state.person.ID, state.project.ID, 280, testDate20260101, "2026-01-10"))
@@ -1814,7 +1814,7 @@ func formatEventMapByDate(events map[time.Time]float64) map[string]float64 {
 	return formatted
 }
 
-func createOrganisationForService(t *testing.T, svc *Service, ctx context.Context, auth ports.AuthContext, name string) domain.Organisation {
+func createOrganisationForService(ctx context.Context, t *testing.T, svc *Service, auth ports.AuthContext, name string) domain.Organisation {
 	t.Helper()
 	organisation, err := svc.CreateOrganisation(ctx, auth, domain.Organisation{
 		Name:         name,

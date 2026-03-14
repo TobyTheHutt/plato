@@ -113,7 +113,7 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 
 	logResourceCleanup(closeResources(handler), logger)
 
-	return waitForServeDrain(serveErr, ctx, logger)
+	return waitForServeDrain(ctx, serveErr, logger)
 }
 
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
@@ -175,7 +175,7 @@ func logResourceCleanup(err error, logger func(string, ...any)) {
 	logWith(logger, "resource cleanup completed")
 }
 
-func waitForServeDrain(serveErr <-chan error, ctx context.Context, logger func(string, ...any)) error {
+func waitForServeDrain(ctx context.Context, serveErr <-chan error, logger func(string, ...any)) error {
 	select {
 	case err := <-serveErr:
 		return err

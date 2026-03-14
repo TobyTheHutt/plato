@@ -111,6 +111,7 @@ linters:
       rules:
         - name: blank-imports
         - name: constant-logical-expr
+        - name: context-as-argument
         - name: context-keys-type
         - name: deep-exit
         - name: defer
