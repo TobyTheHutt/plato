@@ -319,7 +319,7 @@ If you want to run checks directly without `make`:
 Backend:
 
 ```bash
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
 go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 cd backend
 golangci-lint run -c ../.golangci.yml ./...

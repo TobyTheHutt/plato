@@ -492,7 +492,7 @@ func assertMainUsesRunServerWithExplicitAddr(t *testing.T, exitCode *int) {
 		if logger == nil {
 			t.Fatal("expected logger function")
 		}
-		listener, err := net.Listen("tcp", testEphemeralAddr)
+		listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", testEphemeralAddr)
 		if err != nil {
 			t.Fatalf("create listener for main callback: %v", err)
 		}

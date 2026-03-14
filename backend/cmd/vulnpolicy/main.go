@@ -22,6 +22,11 @@ import (
 	"time"
 )
 
+var (
+	exitProcess            = os.Exit
+	stderrWriter io.Writer = os.Stderr
+)
+
 const (
 	defaultNVDAPIBaseURL     = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 	defaultGHSAAPIBaseURL    = "https://api.github.com/advisories"
@@ -32,10 +37,10 @@ const (
 	reportToolName           = "vulnpolicy"
 	unknownUnreachableReason = "Finding is not reachable so severity resolution is skipped by policy"
 	unknownOverrideReason    = "Severity resolution is skipped because a risk override matched this finding"
-	nvd401ErrorMessage       = "Missing or invalid NVD API key. Please configure a valid API key."
-	nvd403ErrorMessage       = "NVD API key valid but lacks required permissions. Please check your API key configuration."
-	ghsa401ErrorMessage      = "Missing or invalid GHSA token. Remove GHSA_TOKEN_FILE to use unauthenticated access, or configure a valid token."
-	ghsa403ErrorMessage      = "GHSA token is valid but access is forbidden. Check token scope and account permissions."
+	nvd401ErrorMessage       = "missing or invalid NVD API key, please configure a valid API key"
+	nvd403ErrorMessage       = "NVD API key is valid but lacks required permissions, please check your API key configuration"
+	ghsa401ErrorMessage      = "missing or invalid GHSA token, remove GHSA_TOKEN_FILE to use unauthenticated access or configure a valid token"
+	ghsa403ErrorMessage      = "GHSA token is valid but access is forbidden, check token scope and account permissions"
 	errorMessageFormat       = "error: %v"
 	dateLayoutISO            = "2006-01-02"
 	envNVDAPIKey             = "NVD_API_" + "KEY"
@@ -328,20 +333,24 @@ func main() {
 	config, err := parseCLIConfig()
 	if err != nil {
 		exitf(errorMessageFormat, err)
+		return
 	}
 
 	outcome, err := runPolicyEvaluation(config)
 	if err != nil {
 		exitf(errorMessageFormat, err)
+		return
 	}
 
 	printResult(config.scanMode, outcome.result)
 	if err = writeScanReportIfConfigured(config, outcome); err != nil {
 		exitf(errorMessageFormat, err)
+		return
 	}
 
 	if hasBlockingFindings(outcome.result) {
-		os.Exit(1)
+		exitProcess(1)
+		return
 	}
 }
 
@@ -533,8 +542,8 @@ func hasBlockingFindings(result evaluationResult) bool {
 }
 
 func exitf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
+	_, _ = fmt.Fprintf(stderrWriter, format+"\n", args...)
+	exitProcess(1)
 }
 
 func parseGovulncheckOutput(reader io.Reader) ([]vulnAssessment, error) {
@@ -575,8 +584,8 @@ func updateVulnFromOSV(osv *govulnOSV, vulnByID map[string]*vulnAssessment) {
 	if summary := strings.TrimSpace(osv.Summary); summary != "" {
 		entry.Summary = summary
 	}
-	if url := strings.TrimSpace(osv.DatabaseSpecific.URL); url != "" {
-		entry.URL = url
+	if databaseURL := strings.TrimSpace(osv.DatabaseSpecific.URL); databaseURL != "" {
+		entry.URL = databaseURL
 	}
 	if severityValue, ok := resolveOSVSeverity(*osv); ok && betterSeverity(severityValue, entry.OSVSeverity) {
 		entry.OSVSeverity = severityValue

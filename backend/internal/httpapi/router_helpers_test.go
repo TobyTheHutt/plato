@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,7 @@ const (
 
 func TestSetCORS(t *testing.T) {
 	t.Run("wildcard policy", func(t *testing.T) {
-		request := httptest.NewRequest(http.MethodGet, testOrganisationsPath, http.NoBody)
+		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, testOrganisationsPath, http.NoBody)
 		recorder := httptest.NewRecorder()
 		setCORS(recorder, request, corsPolicy{
 			allowAnyOrigin: true,
@@ -27,7 +28,7 @@ func TestSetCORS(t *testing.T) {
 	})
 
 	t.Run("allowlisted origin", func(t *testing.T) {
-		request := httptest.NewRequest(http.MethodGet, testOrganisationsPath, http.NoBody)
+		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, testOrganisationsPath, http.NoBody)
 		request.Header.Set(headerOrigin, testAppOrigin)
 		recorder := httptest.NewRecorder()
 		setCORS(recorder, request, corsPolicy{
@@ -47,7 +48,7 @@ func TestSetCORS(t *testing.T) {
 	})
 
 	t.Run("blocked origin", func(t *testing.T) {
-		request := httptest.NewRequest(http.MethodGet, testOrganisationsPath, http.NoBody)
+		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, testOrganisationsPath, http.NoBody)
 		request.Header.Set(headerOrigin, "https://blocked.example.com")
 		recorder := httptest.NewRecorder()
 		setCORS(recorder, request, corsPolicy{

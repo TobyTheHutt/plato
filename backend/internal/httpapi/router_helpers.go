@@ -113,7 +113,9 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set(headerContentType, contentTypeJSON)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		log.Printf("write json failed: status=%d body_type=%T err=%v", status, body, err)
+		sanitizedErr := strings.ReplaceAll(err.Error(), "\r", "\\r")
+		sanitizedErr = strings.ReplaceAll(sanitizedErr, "\n", "\\n")
+		log.Printf("write json failed: status=%d err=%s", status, sanitizedErr)
 	}
 }
 
@@ -137,9 +139,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		message := "validation failed"
 		detailed := strings.TrimSpace(err.Error())
 		suffix := ": " + domain.ErrValidation.Error()
-		if strings.HasSuffix(detailed, suffix) {
-			detailed = strings.TrimSuffix(detailed, suffix)
-		}
+		detailed = strings.TrimSuffix(detailed, suffix)
 		if detailed != "" && detailed != domain.ErrValidation.Error() {
 			message = detailed
 		}

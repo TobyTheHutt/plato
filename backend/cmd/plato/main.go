@@ -85,7 +85,7 @@ func run(addr string, handler http.Handler, start func(*http.Server, net.Listene
 
 	server := newHTTPServer(addr, handler)
 
-	listener, err := net.Listen("tcp", addr)
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}

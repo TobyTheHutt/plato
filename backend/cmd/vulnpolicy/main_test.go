@@ -7,13 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -2398,32 +2398,33 @@ func TestTruncatedInfoIDs(t *testing.T) {
 }
 
 func TestMainMissingInputFlag(t *testing.T) {
-	if os.Getenv("PLATO_TEST_MAIN_MISSING_INPUT") == "1" {
-		os.Args = []string{"vulnpolicy", "-overrides", "dummy.json"}
-		main()
-		return
+	result := runMainWithArgs(t, []string{"vulnpolicy", "-overrides", "dummy.json"})
+	if result.exitCode != 1 {
+		t.Fatalf("expected exit code 1 for missing -input, got %d", result.exitCode)
 	}
-
-	// #nosec G204 -- test intentionally re-executes the current test binary.
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainMissingInputFlag")
-	cmd.Env = append(os.Environ(), "PLATO_TEST_MAIN_MISSING_INPUT=1")
-	output, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("expected main subprocess to fail for missing -input")
-	}
-	if !strings.Contains(string(output), "error: -input is required") {
-		t.Fatalf("expected missing-input error message, got:\n%s", string(output))
+	if !strings.Contains(result.stderr, "error: -input is required") {
+		t.Fatalf("expected missing-input error message, got:\n%s", result.stderr)
 	}
 }
 
 func TestMainOfflineSnapshotFlow(t *testing.T) {
-	if runMainOfflineSnapshotChildFlowIfRequested() {
-		return
-	}
-
 	paths := setupMainOfflineSnapshotFlowFiles(t)
-	output := runMainOfflineSnapshotFlowSubprocess(t, paths)
-	assertMainOfflineSnapshotFlowOutput(t, output)
+	result := runMainWithArgs(t, []string{
+		"vulnpolicy",
+		"-input", paths.inputPath,
+		"-overrides", paths.overridesPath,
+		"-scan-mode", scanModeSource,
+		"-severity-snapshot", paths.snapshotPath,
+		"-offline",
+		"-report-file", paths.reportPath,
+	})
+	if result.exitCode != -1 {
+		t.Fatalf("expected main offline flow to complete without exit, got %d", result.exitCode)
+	}
+	if result.stderr != "" {
+		t.Fatalf("expected no stderr output, got:\n%s", result.stderr)
+	}
+	assertMainOfflineSnapshotFlowOutput(t, result.stdout)
 	assertMainOfflineSnapshotFlowReport(t, paths.reportPath)
 }
 
@@ -2432,30 +2433,6 @@ type mainOfflineSnapshotFlowPaths struct {
 	overridesPath string
 	snapshotPath  string
 	reportPath    string
-}
-
-func runMainOfflineSnapshotChildFlowIfRequested() bool {
-	if os.Getenv("PLATO_TEST_MAIN_OFFLINE_FLOW") != "1" {
-		return false
-	}
-
-	inputPath := os.Getenv("PLATO_TEST_MAIN_INPUT_PATH")
-	overridesPath := os.Getenv("PLATO_TEST_MAIN_OVERRIDES_PATH")
-	snapshotPath := os.Getenv("PLATO_TEST_MAIN_SNAPSHOT_PATH")
-	reportPath := os.Getenv("PLATO_TEST_MAIN_REPORT_PATH")
-	os.Args = []string{
-		"vulnpolicy",
-		"-input", inputPath,
-		"-overrides", overridesPath,
-		"-scan-mode", "source",
-		"-severity-snapshot", snapshotPath,
-		"-offline",
-	}
-	if strings.TrimSpace(reportPath) != "" {
-		os.Args = append(os.Args, "-report-file", reportPath)
-	}
-	main()
-	return true
 }
 
 func setupMainOfflineSnapshotFlowFiles(t *testing.T) mainOfflineSnapshotFlowPaths {
@@ -2484,24 +2461,43 @@ func setupMainOfflineSnapshotFlowFiles(t *testing.T) mainOfflineSnapshotFlowPath
 	return paths
 }
 
-func runMainOfflineSnapshotFlowSubprocess(t *testing.T, paths mainOfflineSnapshotFlowPaths) string {
+type mainRunResult struct {
+	stdout   string
+	stderr   string
+	exitCode int
+}
+
+// runMainWithArgs is an in-process main() harness that mutates os.Args,
+// flag.CommandLine, exitProcess, and stderrWriter, so tests using it must not call t.Parallel().
+func runMainWithArgs(t *testing.T, args []string) mainRunResult {
 	t.Helper()
 
-	// #nosec G204 -- test intentionally re-executes the current test binary.
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainOfflineSnapshotFlow")
-	cmd.Env = append(
-		os.Environ(),
-		"PLATO_TEST_MAIN_OFFLINE_FLOW=1",
-		"PLATO_TEST_MAIN_INPUT_PATH="+paths.inputPath,
-		"PLATO_TEST_MAIN_OVERRIDES_PATH="+paths.overridesPath,
-		"PLATO_TEST_MAIN_SNAPSHOT_PATH="+paths.snapshotPath,
-		"PLATO_TEST_MAIN_REPORT_PATH="+paths.reportPath,
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("expected main offline flow to succeed, got error: %v, output:\n%s", err, string(output))
+	originalArgs := os.Args
+	originalFlagSet := flag.CommandLine
+	originalExitProcess := exitProcess
+	originalStderrWriter := stderrWriter
+	t.Cleanup(func() {
+		os.Args = originalArgs
+		flag.CommandLine = originalFlagSet
+		exitProcess = originalExitProcess
+		stderrWriter = originalStderrWriter
+	})
+
+	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard)
+	flag.CommandLine = flagSet
+	os.Args = append([]string(nil), args...)
+
+	var stderr bytes.Buffer
+	stderrWriter = &stderr
+
+	result := mainRunResult{exitCode: -1}
+	exitProcess = func(code int) {
+		result.exitCode = code
 	}
-	return string(output)
+	result.stdout = captureStdout(t, main)
+	result.stderr = stderr.String()
+	return result
 }
 
 func assertMainOfflineSnapshotFlowOutput(t *testing.T, output string) {

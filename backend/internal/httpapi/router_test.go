@@ -36,7 +36,7 @@ const (
 func TestHealthz(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", http.NoBody)
 
 	router.ServeHTTP(rec, req)
 
@@ -145,7 +145,7 @@ func TestMethodAndJSONErrors(t *testing.T) {
 	}
 
 	badJSON := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, testOrganisationsPath, bytes.NewBufferString("{"))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, testOrganisationsPath, bytes.NewBufferString("{"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Role", "org_admin")
 	router.ServeHTTP(badJSON, req)
@@ -1077,7 +1077,7 @@ func doJSONRequest(t *testing.T, handler http.Handler, method, path string, body
 func doRawRequest(t *testing.T, handler http.Handler, method, path string, body []byte, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	request := httptest.NewRequest(method, path, bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(context.Background(), method, path, bytes.NewReader(body))
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

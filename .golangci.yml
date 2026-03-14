@@ -1,135 +1,132 @@
+version: "2"
 run:
-  timeout: 5m
-  tests: true
-  issues-exit-code: 1
   modules-download-mode: readonly
-
+  issues-exit-code: 1
+  tests: true
 linters:
-  disable-all: true
+  default: none
   enable:
-    - govet
-    - staticcheck
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - depguard
+    - dupl
     - errcheck
-    - ineffassign
-    - unused
     - errorlint
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godoclint
+    - gosec
+    - govet
+    - ineffassign
+    - maintidx
+    - nestif
     - nilerr
     - nilnil
-    - bodyclose
-    - copyloopvar
+    - noctx
+    - nolintlint
+    - revive
     - rowserrcheck
     - sqlclosecheck
-    - revive
-    - gocritic
-    - goconst
-    - dupl
-    - funlen
-    - nestif
-    - nolintlint
-    - depguard
-    - maintidx
-    - cyclop
-    - gocyclo
-    - gocognit
-    - gosec
-    - noctx
-    - contextcheck
-    - containedctx
-
-linters-settings:
-  govet:
-    enable:
-      - shadow
-    settings:
-      shadow:
-        strict: true
-
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-
-  staticcheck:
-    checks:
-      - all
-
-  revive:
-    confidence: 0.8
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-    enabled-checks:
-      - commentedOutCode
-      - commentedOutImport
-      - commentFormatting
-    disabled-checks:
-      - hugeParam
-      - rangeValCopy
-      - paramTypeCombine
-      - unnamedResult
-      - httpNoBody
-      - sprintfQuotedString
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-    ignore-tests: false
-    numbers: true
-    ignore-calls: false
-
-  dupl:
-    threshold: 220
-
-  funlen:
-    lines: 220
-    statements: 120
-
-  nestif:
-    min-complexity: 16
-
-  maintidx:
-    under: 15
-
-  cyclop:
-    max-complexity: 25
-    package-average: 12
-
-  gocyclo:
-    min-complexity: 20
-
-  gocognit:
-    min-complexity: 15
-
-  nolintlint:
-    require-explanation: true
-    require-specific: true
-    allow-unused: false
-
-  depguard:
+    - staticcheck
+    - unused
+  settings:
+    cyclop:
+      max-complexity: 25
+      package-average: 12
+    depguard:
+      rules:
+        domain-boundaries:
+          files:
+            - internal/domain/**/*.go
+          deny:
+            - pkg: plato/backend/internal/service
+              desc: domain layer must not depend on service layer
+            - pkg: plato/backend/internal/httpapi
+              desc: domain layer must not depend on transport layer
+            - pkg: plato/backend/internal/adapters
+              desc: domain layer must remain infrastructure agnostic
+        service-boundaries:
+          files:
+            - internal/service/**/*.go
+          deny:
+            - pkg: plato/backend/internal/httpapi
+              desc: service layer must not depend on transport layer
+    dupl:
+      threshold: 220
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    funlen:
+      lines: 220
+      statements: 120
+    gocognit:
+      min-complexity: 15
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      numbers: true
+      ignore-calls: false
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - paramTypeCombine
+        - unnamedResult
+        - httpNoBody
+        - sprintfQuotedString
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 20
+    govet:
+      enable:
+        - shadow
+      settings:
+        shadow:
+          strict: true
+    maintidx:
+      under: 15
+    nestif:
+      min-complexity: 16
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      confidence: 0.8
+    staticcheck:
+      checks:
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      domain-boundaries:
-        files:
-          - "internal/domain/**/*.go"
-        deny:
-          - pkg: "plato/backend/internal/service"
-            desc: domain layer must not depend on service layer
-          - pkg: "plato/backend/internal/httpapi"
-            desc: domain layer must not depend on transport layer
-          - pkg: "plato/backend/internal/adapters"
-            desc: domain layer must remain infrastructure agnostic
-      service-boundaries:
-        files:
-          - "internal/service/**/*.go"
-        deny:
-          - pkg: "plato/backend/internal/httpapi"
-            desc: service layer must not depend on transport layer
-
+      - linters:
+          - dupl
+        path: internal/httpapi/routes_.*\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: "internal/httpapi/routes_.*\\.go"
-      linters:
-        - dupl
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -98,21 +99,21 @@ func TestJWTAuthProviderFromRequest(t *testing.T) {
 		"exp":    now.Add(time.Hour).Unix(),
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	request.Header.Set(headerAuthorization, bearerPrefix+token)
 
-	context, err := provider.FromRequest(request)
+	authContext, err := provider.FromRequest(request)
 	if err != nil {
 		t.Fatalf("authenticate request: %v", err)
 	}
-	if context.UserID != "user_1" {
-		t.Fatalf("expected user_1, got %s", context.UserID)
+	if authContext.UserID != "user_1" {
+		t.Fatalf("expected user_1, got %s", authContext.UserID)
 	}
-	if context.OrganisationID != "org_1" {
-		t.Fatalf("expected org_1, got %s", context.OrganisationID)
+	if authContext.OrganisationID != "org_1" {
+		t.Fatalf("expected org_1, got %s", authContext.OrganisationID)
 	}
-	if len(context.Roles) != 2 {
-		t.Fatalf(errExpectedTwoRolesFmt, context.Roles)
+	if len(authContext.Roles) != 2 {
+		t.Fatalf(errExpectedTwoRolesFmt, authContext.Roles)
 	}
 }
 
@@ -133,21 +134,21 @@ func TestJWTAuthProviderFromRequestClaimFallbacks(t *testing.T) {
 		"exp":             now.Add(time.Hour).Unix(),
 	})
 
-	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	request.Header.Set(headerAuthorization, bearerPrefix+token)
 
-	context, err := provider.FromRequest(request)
+	authContext, err := provider.FromRequest(request)
 	if err != nil {
 		t.Fatalf("authenticate request: %v", err)
 	}
-	if context.UserID != "user_2" {
-		t.Fatalf("expected user_2, got %s", context.UserID)
+	if authContext.UserID != "user_2" {
+		t.Fatalf("expected user_2, got %s", authContext.UserID)
 	}
-	if context.OrganisationID != "org_2" {
-		t.Fatalf("expected org_2, got %s", context.OrganisationID)
+	if authContext.OrganisationID != "org_2" {
+		t.Fatalf("expected org_2, got %s", authContext.OrganisationID)
 	}
-	if len(context.Roles) != 2 {
-		t.Fatalf(errExpectedTwoRolesFmt, context.Roles)
+	if len(authContext.Roles) != 2 {
+		t.Fatalf(errExpectedTwoRolesFmt, authContext.Roles)
 	}
 }
 
@@ -231,7 +232,7 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 			request.Header.Set(headerAuthorization, testCase.headerValue)
 
 			_, authErr := provider.FromRequest(request)
@@ -244,7 +245,7 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 
 func TestJWTAuthProviderNilProvider(t *testing.T) {
 	var provider *JWTAuthProvider
-	request := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	if _, err := provider.FromRequest(request); err == nil {
 		t.Fatal("expected error for nil provider")
 	}
