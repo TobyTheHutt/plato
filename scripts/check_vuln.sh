@@ -147,6 +147,7 @@ run_policy() {
   local scan_mode="$1"
   local input_file="$2"
   shift 2
+  local policy_status=0
 
   local -a vulnpolicy_args=(
     -input "$input_file"
@@ -194,8 +195,12 @@ run_policy() {
   fi
 
   pushd "$ROOT_DIR/backend" >/dev/null
+  set +e
   go run -tags tools ./cmd/vulnpolicy "${vulnpolicy_args[@]}"
+  policy_status=$?
+  set -e
   popd >/dev/null
+  return "$policy_status"
 }
 
 verify_report_file() {
