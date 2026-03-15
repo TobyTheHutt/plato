@@ -2,6 +2,7 @@ package ports
 
 import "testing"
 
+// TestAuthContextHasRole verifies the auth context has role scenario.
 func TestAuthContextHasRole(t *testing.T) {
 	ctx := AuthContext{Roles: []string{"org_user"}}
 	if !ctx.HasRole("org_user") {

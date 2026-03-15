@@ -8,6 +8,7 @@ import (
 	"plato/backend/internal/ports"
 )
 
+// ListGroups returns the groups visible to the caller within their organisation.
 func (s *Service) ListGroups(ctx context.Context, auth ports.AuthContext) ([]domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -19,6 +20,7 @@ func (s *Service) ListGroups(ctx context.Context, auth ports.AuthContext) ([]dom
 	return s.repo.ListGroups(ctx, organisationID)
 }
 
+// GetGroup returns one group from the caller's organisation.
 func (s *Service) GetGroup(ctx context.Context, auth ports.AuthContext, groupID string) (domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return domain.Group{}, err
@@ -30,6 +32,7 @@ func (s *Service) GetGroup(ctx context.Context, auth ports.AuthContext, groupID 
 	return s.repo.GetGroup(ctx, organisationID, groupID)
 }
 
+// CreateGroup validates and creates a group in the caller's organisation.
 func (s *Service) CreateGroup(ctx context.Context, auth ports.AuthContext, input domain.Group) (domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Group{}, err
@@ -62,6 +65,7 @@ func (s *Service) CreateGroup(ctx context.Context, auth ports.AuthContext, input
 	return created, nil
 }
 
+// UpdateGroup validates and updates a group in the caller's organisation.
 func (s *Service) UpdateGroup(ctx context.Context, auth ports.AuthContext, groupID string, input domain.Group) (domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Group{}, err
@@ -95,6 +99,7 @@ func (s *Service) UpdateGroup(ctx context.Context, auth ports.AuthContext, group
 	return updated, nil
 }
 
+// DeleteGroup deletes a group from the caller's organisation.
 func (s *Service) DeleteGroup(ctx context.Context, auth ports.AuthContext, groupID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err
@@ -113,6 +118,7 @@ func (s *Service) DeleteGroup(ctx context.Context, auth ports.AuthContext, group
 	return nil
 }
 
+// AddGroupMember adds a person to a group when they belong to the same organisation.
 func (s *Service) AddGroupMember(ctx context.Context, auth ports.AuthContext, groupID, personID string) (domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Group{}, err
@@ -139,6 +145,7 @@ func (s *Service) AddGroupMember(ctx context.Context, auth ports.AuthContext, gr
 	return s.repo.UpdateGroup(ctx, group)
 }
 
+// RemoveGroupMember removes a person from a group.
 func (s *Service) RemoveGroupMember(ctx context.Context, auth ports.AuthContext, groupID, personID string) (domain.Group, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Group{}, err

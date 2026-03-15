@@ -6,39 +6,58 @@ import (
 	"time"
 )
 
+// DateLayout is the canonical layout for full dates in API payloads.
 const DateLayout = "2006-01-02"
+
+// MonthLayout is the canonical layout for year-month values in API payloads.
 const MonthLayout = "2006-01"
 
 const (
+	// RoleOrgAdmin grants organisation administrator permissions.
 	RoleOrgAdmin = "org_admin"
-	RoleOrgUser  = "org_user"
+	// RoleOrgUser grants standard organisation user permissions.
+	RoleOrgUser = "org_user"
 )
 
 const (
+	// ScopeOrganisation scopes a report to the whole organisation.
 	ScopeOrganisation = "organisation"
-	ScopePerson       = "person"
-	ScopeGroup        = "group"
-	ScopeProject      = "project"
+	// ScopePerson scopes a report to one or more people.
+	ScopePerson = "person"
+	// ScopeGroup scopes a report to one or more groups.
+	ScopeGroup = "group"
+	// ScopeProject scopes a report to one or more projects.
+	ScopeProject = "project"
 )
 
 const (
+	// AllocationTargetPerson identifies an allocation targeted at a person.
 	AllocationTargetPerson = "person"
-	AllocationTargetGroup  = "group"
+	// AllocationTargetGroup identifies an allocation targeted at a group.
+	AllocationTargetGroup = "group"
 )
 
 const (
-	GranularityDay   = "day"
-	GranularityWeek  = "week"
+	// GranularityDay groups report output by day.
+	GranularityDay = "day"
+	// GranularityWeek groups report output by week.
+	GranularityWeek = "week"
+	// GranularityMonth groups report output by month.
 	GranularityMonth = "month"
-	GranularityYear  = "year"
+	// GranularityYear groups report output by year.
+	GranularityYear = "year"
 )
 
 var (
+	// ErrValidation reports invalid input data.
 	ErrValidation = errors.New("validation failed")
-	ErrForbidden  = errors.New("forbidden")
-	ErrNotFound   = errors.New("not found")
+	// ErrForbidden reports an authorization failure.
+	ErrForbidden = errors.New("forbidden")
+	// ErrNotFound reports a missing resource.
+	ErrNotFound = errors.New("not found")
 )
 
+// Organisation describes an organisation and its working-time baselines.
 type Organisation struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
@@ -49,6 +68,7 @@ type Organisation struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// Person describes a person and their employment settings.
 type Person struct {
 	ID                           string             `json:"id"`
 	OrganisationID               string             `json:"organisation_id"`
@@ -60,11 +80,13 @@ type Person struct {
 	UpdatedAt                    time.Time          `json:"updated_at"`
 }
 
+// EmploymentChange records a person's employment percentage from a month onward.
 type EmploymentChange struct {
 	EffectiveMonth string  `json:"effective_month"`
 	EmploymentPct  float64 `json:"employment_pct"`
 }
 
+// Project describes a project tracked within an organisation.
 type Project struct {
 	ID                   string    `json:"id"`
 	OrganisationID       string    `json:"organisation_id"`
@@ -76,6 +98,7 @@ type Project struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+// Group describes a named group of people within an organisation.
 type Group struct {
 	ID             string    `json:"id"`
 	OrganisationID string    `json:"organisation_id"`
@@ -85,6 +108,7 @@ type Group struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// Allocation assigns project effort to a person or a group.
 type Allocation struct {
 	ID             string    `json:"id"`
 	OrganisationID string    `json:"organisation_id"`
@@ -100,6 +124,7 @@ type Allocation struct {
 	PersonID string `json:"person_id,omitempty"`
 }
 
+// OrgHoliday records organisation-wide unavailable hours for a date.
 type OrgHoliday struct {
 	ID             string    `json:"id"`
 	OrganisationID string    `json:"organisation_id"`
@@ -109,6 +134,7 @@ type OrgHoliday struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// GroupUnavailability records unavailable hours for a group on a date.
 type GroupUnavailability struct {
 	ID             string    `json:"id"`
 	OrganisationID string    `json:"organisation_id"`
@@ -119,6 +145,7 @@ type GroupUnavailability struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// PersonUnavailability records unavailable hours for a person on a date.
 type PersonUnavailability struct {
 	ID             string    `json:"id"`
 	OrganisationID string    `json:"organisation_id"`
@@ -129,6 +156,7 @@ type PersonUnavailability struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// ReportRequest defines an availability and load report query.
 type ReportRequest struct {
 	Scope       string   `json:"scope"`
 	IDs         []string `json:"ids"`
@@ -137,6 +165,7 @@ type ReportRequest struct {
 	Granularity string   `json:"granularity"`
 }
 
+// ReportBucket contains aggregated report values for one period.
 type ReportBucket struct {
 	PeriodStart       string  `json:"period_start"`
 	AvailabilityHours float64 `json:"availability_hours"`
@@ -148,6 +177,7 @@ type ReportBucket struct {
 	CompletionPct     float64 `json:"project_completion_pct"`
 }
 
+// ValidateDate normalizes and validates a full date string.
 func ValidateDate(value string) (string, error) {
 	parsed, err := time.Parse(DateLayout, value)
 	if err != nil {
@@ -157,6 +187,7 @@ func ValidateDate(value string) (string, error) {
 	return parsed.Format(DateLayout), nil
 }
 
+// ValidateMonth normalizes and validates a year-month string.
 func ValidateMonth(value string) (string, error) {
 	parsed, err := time.Parse(MonthLayout, value)
 	if err != nil {
@@ -166,6 +197,7 @@ func ValidateMonth(value string) (string, error) {
 	return parsed.Format(MonthLayout), nil
 }
 
+// ValidateName validates that a name is not blank after trimming.
 func ValidateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return ErrValidation
@@ -174,6 +206,7 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// ValidatePercent validates that a percentage is within the supported range.
 func ValidatePercent(value float64) error {
 	if value < 0 || value > 100 {
 		return ErrValidation
@@ -182,6 +215,7 @@ func ValidatePercent(value float64) error {
 	return nil
 }
 
+// ValidateGranularity validates a report granularity value.
 func ValidateGranularity(value string) error {
 	switch value {
 	case GranularityDay, GranularityWeek, GranularityMonth, GranularityYear:
@@ -191,6 +225,7 @@ func ValidateGranularity(value string) error {
 	}
 }
 
+// ValidateScope validates a report scope value.
 func ValidateScope(value string) error {
 	switch value {
 	case ScopeOrganisation, ScopePerson, ScopeGroup, ScopeProject:
@@ -200,6 +235,7 @@ func ValidateScope(value string) error {
 	}
 }
 
+// ValidateAllocationTargetType validates an allocation target type value.
 func ValidateAllocationTargetType(value string) error {
 	switch value {
 	case AllocationTargetPerson, AllocationTargetGroup:
@@ -209,6 +245,7 @@ func ValidateAllocationTargetType(value string) error {
 	}
 }
 
+// EmploymentPctOnDate returns the effective employment percentage for a date.
 func EmploymentPctOnDate(person Person, date string) (float64, error) {
 	normalizedDate, err := ValidateDate(date)
 	if err != nil {

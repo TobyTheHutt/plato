@@ -20,6 +20,7 @@ const (
 	errExpectedOneBucket  = "expected 1 bucket, got %d"
 )
 
+// TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides verifies the calculate availability load person scope with holidays and overrides scenario.
 func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{
@@ -75,6 +76,7 @@ func TestCalculateAvailabilityLoadPersonScopeWithHolidaysAndOverrides(t *testing
 	assertBucket(t, result[2], "2026-01-03", 2, 4, -2)
 }
 
+// TestCalculateAvailabilityLoadGroupScopeMonthAggregation verifies the calculate availability load group scope month aggregation scenario.
 func TestCalculateAvailabilityLoadGroupScopeMonthAggregation(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{
@@ -116,6 +118,7 @@ func TestCalculateAvailabilityLoadGroupScopeMonthAggregation(t *testing.T) {
 	}
 }
 
+// TestCalculateAvailabilityLoadProjectScopeFiltersAllocationAndRange verifies the calculate availability load project scope filters allocation and range scenario.
 func TestCalculateAvailabilityLoadProjectScopeFiltersAllocationAndRange(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{ID: "org-1", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080},
@@ -149,6 +152,7 @@ func TestCalculateAvailabilityLoadProjectScopeFiltersAllocationAndRange(t *testi
 	}
 }
 
+// TestCalculateAvailabilityLoadProjectScopeIncludesGroupAllocations verifies the calculate availability load project scope includes group allocations scenario.
 func TestCalculateAvailabilityLoadProjectScopeIncludesGroupAllocations(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{ID: "org-1", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080},
@@ -186,6 +190,7 @@ func TestCalculateAvailabilityLoadProjectScopeIncludesGroupAllocations(t *testin
 	}
 }
 
+// TestCalculateAvailabilityLoadProjectScopeUsesCumulativeProjectLoadForCompletion verifies the calculate availability load project scope uses cumulative project load for completion scenario.
 func TestCalculateAvailabilityLoadProjectScopeUsesCumulativeProjectLoadForCompletion(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{ID: "org-1", HoursPerDay: 8, HoursPerWeek: 40, HoursPerYear: 2080},
@@ -235,6 +240,7 @@ func TestCalculateAvailabilityLoadProjectScopeUsesCumulativeProjectLoadForComple
 	}
 }
 
+// TestCalculateAvailabilityLoadAllocationsUseFullTimeScale verifies the calculate availability load allocations use full time scale scenario.
 func TestCalculateAvailabilityLoadAllocationsUseFullTimeScale(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{
@@ -272,6 +278,7 @@ func TestCalculateAvailabilityLoadAllocationsUseFullTimeScale(t *testing.T) {
 	}
 }
 
+// TestCalculateAvailabilityLoadUsesEmploymentTimelineByDate verifies the calculate availability load uses employment timeline by date scenario.
 func TestCalculateAvailabilityLoadUsesEmploymentTimelineByDate(t *testing.T) {
 	input := CalculationInput{
 		Organisation: Organisation{
@@ -309,6 +316,7 @@ func TestCalculateAvailabilityLoadUsesEmploymentTimelineByDate(t *testing.T) {
 	assertBucket(t, result[1], "2026-06-01", 4, 0, 4)
 }
 
+// TestCalculateAvailabilityLoadValidation verifies the calculate availability load validation scenario.
 func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 	_, err := CalculateAvailabilityLoad(CalculationInput{
 		Organisation: Organisation{HoursPerDay: 8, HoursPerYear: 2080},
@@ -345,6 +353,7 @@ func TestCalculateAvailabilityLoadValidation(t *testing.T) {
 	}
 }
 
+// TestAllocationHelperValidationBranches verifies the allocation helper validation branches scenario.
 func TestAllocationHelperValidationBranches(t *testing.T) {
 	if err := ValidateAllocationTargetType(AllocationTargetPerson); err != nil {
 		t.Fatalf("expected person target type to be valid, got %v", err)
@@ -403,6 +412,7 @@ func TestAllocationHelperValidationBranches(t *testing.T) {
 	}
 }
 
+// TestAllocationHelperEdgeBranches verifies the allocation helper edge branches scenario.
 func TestAllocationHelperEdgeBranches(t *testing.T) {
 	startDate, endDate, err := parseAllocationDateRange("", "")
 	if err != nil {
@@ -485,6 +495,7 @@ func TestAllocationHelperEdgeBranches(t *testing.T) {
 	}
 }
 
+// TestScopeSelectionHelperFunctions verifies the scope selection helper functions scenario.
 func TestScopeSelectionHelperFunctions(t *testing.T) {
 	personsByID := map[string]Person{
 		"p1": {ID: "p1"},

@@ -9,6 +9,7 @@ import (
 
 const testFallbackValue = "fallback"
 
+// TestDevAuthProviderFromRequest verifies the dev auth provider from request scenario.
 func TestDevAuthProviderFromRequest(t *testing.T) {
 	t.Setenv(devUserIDEnvVar, "fallback-user")
 	t.Setenv(devOrgIDEnvVar, "fallback-org")
@@ -35,6 +36,7 @@ func TestDevAuthProviderFromRequest(t *testing.T) {
 	}
 }
 
+// TestDevAuthProviderDefaults verifies the dev auth provider defaults scenario.
 func TestDevAuthProviderDefaults(t *testing.T) {
 	t.Setenv(devUserIDEnvVar, "")
 	t.Setenv(devOrgIDEnvVar, "")
@@ -54,6 +56,7 @@ func TestDevAuthProviderDefaults(t *testing.T) {
 	}
 }
 
+// TestParseRoles verifies the parse roles scenario.
 func TestParseRoles(t *testing.T) {
 	roles := parseRoles(" org_admin, , org_user ")
 	if len(roles) != 2 {
@@ -64,6 +67,7 @@ func TestParseRoles(t *testing.T) {
 	}
 }
 
+// TestGetenv verifies the getenv scenario.
 func TestGetenv(t *testing.T) {
 	if getenv("NOT_SET", testFallbackValue) != testFallbackValue {
 		t.Fatal("expected fallback env value")

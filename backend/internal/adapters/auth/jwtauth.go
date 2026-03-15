@@ -31,11 +31,13 @@ const (
 
 const generatedDevJWTSecretBytes = 48
 
+// JWTAuthProvider validates HS256 bearer tokens and extracts auth context.
 type JWTAuthProvider struct {
 	signingKey []byte
 	now        func() time.Time
 }
 
+// NewJWTAuthProviderFromEnv returns a JWT auth provider configured from the environment.
 func NewJWTAuthProviderFromEnv() (*JWTAuthProvider, error) {
 	configuredEnvKey, signingKey := jwtSigningKeyFromEnv()
 	secret := signingKey
@@ -53,6 +55,7 @@ func NewJWTAuthProviderFromEnv() (*JWTAuthProvider, error) {
 	return NewJWTAuthProvider(secret)
 }
 
+// NewJWTAuthProvider returns a JWT auth provider for the provided signing secret.
 func NewJWTAuthProvider(secret string) (*JWTAuthProvider, error) {
 	trimmedSecret := strings.TrimSpace(secret)
 	if trimmedSecret == "" {
@@ -65,6 +68,7 @@ func NewJWTAuthProvider(secret string) (*JWTAuthProvider, error) {
 	}, nil
 }
 
+// FromRequest validates a bearer token and returns the derived auth context.
 func (p *JWTAuthProvider) FromRequest(r *http.Request) (ports.AuthContext, error) {
 	if p == nil {
 		return ports.AuthContext{}, errors.New("auth provider is nil")

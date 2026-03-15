@@ -20,12 +20,14 @@ const (
 	defaultDevAdminRole = "org_admin"
 )
 
+// DevAuthProvider builds auth context from development headers and defaults.
 type DevAuthProvider struct {
 	defaultUserID string
 	defaultOrgID  string
 	defaultRoles  []string
 }
 
+// NewDevAuthProvider returns a development auth provider backed by environment defaults.
 func NewDevAuthProvider() *DevAuthProvider {
 	userID := getenv(devUserIDEnvVar, defaultDevUserID)
 	orgID := getenv(devOrgIDEnvVar, "")
@@ -41,6 +43,7 @@ func NewDevAuthProvider() *DevAuthProvider {
 	}
 }
 
+// FromRequest builds auth context from request headers or development defaults.
 func (p *DevAuthProvider) FromRequest(r *http.Request) (ports.AuthContext, error) {
 	if p == nil {
 		return ports.AuthContext{}, errors.New("auth provider is nil")

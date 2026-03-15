@@ -39,14 +39,17 @@ func enforceTenant(auth ports.AuthContext, targetOrganisationID string) error {
 	return nil
 }
 
+// IsValidationError reports whether err matches the validation sentinel.
 func IsValidationError(err error) bool {
 	return errors.Is(err, domain.ErrValidation)
 }
 
+// IsForbiddenError reports whether err matches the forbidden sentinel.
 func IsForbiddenError(err error) bool {
 	return errors.Is(err, domain.ErrForbidden)
 }
 
+// IsNotFoundError reports whether err matches the not-found sentinel.
 func IsNotFoundError(err error) bool {
 	return errors.Is(err, domain.ErrNotFound)
 }

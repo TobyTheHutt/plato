@@ -10,6 +10,7 @@ import (
 	"plato/backend/internal/ports"
 )
 
+// ListPersons returns the people visible to the caller within their organisation.
 func (s *Service) ListPersons(ctx context.Context, auth ports.AuthContext) ([]domain.Person, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -21,6 +22,7 @@ func (s *Service) ListPersons(ctx context.Context, auth ports.AuthContext) ([]do
 	return s.repo.ListPersons(ctx, organisationID)
 }
 
+// GetPerson returns one person from the caller's organisation.
 func (s *Service) GetPerson(ctx context.Context, auth ports.AuthContext, personID string) (domain.Person, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return domain.Person{}, err
@@ -32,6 +34,7 @@ func (s *Service) GetPerson(ctx context.Context, auth ports.AuthContext, personI
 	return s.repo.GetPerson(ctx, organisationID, personID)
 }
 
+// CreatePerson validates and creates a person in the caller's organisation.
 func (s *Service) CreatePerson(ctx context.Context, auth ports.AuthContext, input domain.Person) (domain.Person, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Person{}, err
@@ -64,6 +67,7 @@ func (s *Service) CreatePerson(ctx context.Context, auth ports.AuthContext, inpu
 	return created, nil
 }
 
+// UpdatePerson validates and updates a person in the caller's organisation.
 func (s *Service) UpdatePerson(ctx context.Context, auth ports.AuthContext, personID string, input domain.Person) (domain.Person, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Person{}, err
@@ -107,6 +111,7 @@ func (s *Service) UpdatePerson(ctx context.Context, auth ports.AuthContext, pers
 	return updated, nil
 }
 
+// DeletePerson deletes a person from the caller's organisation.
 func (s *Service) DeletePerson(ctx context.Context, auth ports.AuthContext, personID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err

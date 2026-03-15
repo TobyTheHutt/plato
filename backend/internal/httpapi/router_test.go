@@ -33,6 +33,7 @@ const (
 	errCreateServiceFmt   = "create service: %v"
 )
 
+// TestHealthz verifies the healthz scenario.
 func TestHealthz(t *testing.T) {
 	router := newTestRouter(t)
 	rec := httptest.NewRecorder()
@@ -53,6 +54,7 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+// TestRBACOrgUserCannotMutate verifies the RBAC org user cannot mutate scenario.
 func TestRBACOrgUserCannotMutate(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -63,6 +65,7 @@ func TestRBACOrgUserCannotMutate(t *testing.T) {
 	}
 }
 
+// TestTenantScopingForPersonAndOrganisation verifies the tenant scoping for person and organisation scenario.
 func TestTenantScopingForPersonAndOrganisation(t *testing.T) {
 	router := newTestRouter(t)
 	orgA := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -86,6 +89,7 @@ func TestTenantScopingForPersonAndOrganisation(t *testing.T) {
 	}
 }
 
+// TestAllocationValidationAndReportEndpoint verifies the allocation validation and report endpoint scenario.
 func TestAllocationValidationAndReportEndpoint(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -133,6 +137,7 @@ func TestAllocationValidationAndReportEndpoint(t *testing.T) {
 	}
 }
 
+// TestMethodAndJSONErrors verifies the method and JSON errors scenario.
 func TestMethodAndJSONErrors(t *testing.T) {
 	router := newTestRouter(t)
 
@@ -154,6 +159,7 @@ func TestMethodAndJSONErrors(t *testing.T) {
 	}
 }
 
+// TestDefaultAuthValuesEnableDevFlow verifies the default auth values enable dev flow scenario.
 func TestDefaultAuthValuesEnableDevFlow(t *testing.T) {
 	router := newTestRouter(t)
 	rec := doJSONRequest(t, router, http.MethodPost, testOrganisationsPath, map[string]any{"name": "Org dev", "hours_per_day": 8, "hours_per_week": 40, "hours_per_year": 2080}, nil)
@@ -162,6 +168,7 @@ func TestDefaultAuthValuesEnableDevFlow(t *testing.T) {
 	}
 }
 
+// TestAPICloseRunsCleanupOnceAcrossConcurrentCallers verifies the API close runs cleanup once across concurrent callers scenario.
 func TestAPICloseRunsCleanupOnceAcrossConcurrentCallers(t *testing.T) {
 	expected := errors.New("cleanup failed")
 	callCount := 0
@@ -202,6 +209,7 @@ func TestAPICloseRunsCleanupOnceAcrossConcurrentCallers(t *testing.T) {
 	}
 }
 
+// TestEndToEndCRUDRoutes verifies the end to end CRUD routes scenario.
 func TestEndToEndCRUDRoutes(t *testing.T) {
 	router := newTestRouter(t)
 	state := setupEndToEndCRUDRoutesState(t, router)
@@ -493,6 +501,7 @@ func executeEndToEndDeletionFlow(t *testing.T, router http.Handler, state *endTo
 	}
 }
 
+// TestRouterNewRouterAndAuthFailure verifies the router new router and auth failure scenario.
 func TestRouterNewRouterAndAuthFailure(t *testing.T) {
 	t.Setenv("DEV_MODE", envBoolTrue)
 	t.Setenv(dataFileEnvVar, filepath.Join(t.TempDir(), "router-data.json"))
@@ -521,6 +530,7 @@ func TestRouterNewRouterAndAuthFailure(t *testing.T) {
 	}
 }
 
+// TestRouterNewRouterProductionModeRequiresJWTSecret verifies the router new router production mode requires JWT secret scenario.
 func TestRouterNewRouterProductionModeRequiresJWTSecret(t *testing.T) {
 	t.Setenv("PRODUCTION_MODE", envBoolTrue)
 	t.Setenv("PLATO_CORS_ALLOWED_ORIGINS", testAppOrigin)
@@ -532,6 +542,7 @@ func TestRouterNewRouterProductionModeRequiresJWTSecret(t *testing.T) {
 	}
 }
 
+// TestRouterNewRouterProductionModeCORSAllowlistAndAuth verifies the router new router production mode CORS allowlist and auth scenario.
 func TestRouterNewRouterProductionModeCORSAllowlistAndAuth(t *testing.T) {
 	t.Setenv("PRODUCTION_MODE", envBoolTrue)
 	t.Setenv("PLATO_AUTH_JWT_HS256_SIGNING_KEY", "test-secret")
@@ -561,6 +572,7 @@ func TestRouterNewRouterProductionModeCORSAllowlistAndAuth(t *testing.T) {
 	}
 }
 
+// TestMethodNotAllowedAndInternalErrorBranches verifies the method not allowed and internal error branches scenario.
 func TestMethodNotAllowedAndInternalErrorBranches(t *testing.T) {
 	router := newTestRouter(t)
 	state := setupMethodNotAllowedState(t, router)
@@ -743,6 +755,7 @@ func verifyMethodNotAllowedInternalErrorBranch(t *testing.T) {
 	}
 }
 
+// TestInvalidJSONAcrossMutatingRoutes verifies the invalid JSON across mutating routes scenario.
 func TestInvalidJSONAcrossMutatingRoutes(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -796,6 +809,7 @@ func TestInvalidJSONAcrossMutatingRoutes(t *testing.T) {
 	}
 }
 
+// TestResourceNotFoundAndTenantRequiredResponses verifies the resource not found and tenant required responses scenario.
 func TestResourceNotFoundAndTenantRequiredResponses(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -851,6 +865,7 @@ func TestResourceNotFoundAndTenantRequiredResponses(t *testing.T) {
 
 type failingAuthProvider struct{}
 
+// FromRequest returns the forced authentication failure used by tests.
 func (failingAuthProvider) FromRequest(_ *http.Request) (ports.AuthContext, error) {
 	return ports.AuthContext{}, errors.New("forced auth failure")
 }
@@ -859,6 +874,7 @@ type errorRepository struct {
 	ports.Repository
 }
 
+// ListOrganisations returns the forced repository failure used by tests.
 func (e errorRepository) ListOrganisations(_ context.Context) ([]domain.Organisation, error) {
 	return nil, errors.New("forced repository failure")
 }
@@ -867,10 +883,12 @@ type personUnavailabilityDeleteErrorRepository struct {
 	ports.Repository
 }
 
+// DeletePersonUnavailabilityByPerson returns the forced delete failure used by tests.
 func (e personUnavailabilityDeleteErrorRepository) DeletePersonUnavailabilityByPerson(_ context.Context, _, _, _ string) error {
 	return errors.New("forced person unavailability delete failure")
 }
 
+// TestPathHelpers verifies the path helpers scenario.
 func TestPathHelpers(t *testing.T) {
 	if values := splitPath(""); len(values) != 0 {
 		t.Fatalf("expected empty split path, got %v", values)
@@ -890,6 +908,7 @@ func TestPathHelpers(t *testing.T) {
 	}
 }
 
+// TestOrganisationAndReportExtraBranches verifies the organisation and report extra branches scenario.
 func TestOrganisationAndReportExtraBranches(t *testing.T) {
 	router := newTestRouter(t)
 	orgID := createOrganisation(t, router, map[string]string{"X-Role": "org_admin"})
@@ -940,6 +959,7 @@ func TestOrganisationAndReportExtraBranches(t *testing.T) {
 	}
 }
 
+// TestDeletePersonUnavailabilityByPersonError verifies the delete person unavailability by person error scenario.
 func TestDeletePersonUnavailabilityByPersonError(t *testing.T) {
 	repo, err := persistence.NewFileRepository(filepath.Join(t.TempDir(), "person-unavailability-list-error-data.json"))
 	if err != nil {
@@ -962,6 +982,7 @@ func TestDeletePersonUnavailabilityByPersonError(t *testing.T) {
 	}
 }
 
+// TestDecodeJSONRequestBodyTooLarge verifies the decode JSON request body too large scenario.
 func TestDecodeJSONRequestBodyTooLarge(t *testing.T) {
 	router := newTestRouter(t)
 	oversizedName := strings.Repeat("a", int(maxJSONBodyBytes))

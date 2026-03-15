@@ -9,6 +9,7 @@ import (
 	"plato/backend/internal/ports"
 )
 
+// ReportAvailabilityAndLoad generates availability and load buckets for a report request.
 func (s *Service) ReportAvailabilityAndLoad(ctx context.Context, auth ports.AuthContext, request domain.ReportRequest) ([]domain.ReportBucket, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err

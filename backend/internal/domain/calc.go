@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// CalculationInput bundles the data required to calculate report buckets.
 type CalculationInput struct {
 	Organisation         Organisation
 	Persons              []Person
@@ -53,6 +54,7 @@ type personDayTotals struct {
 	freeHours         float64
 }
 
+// CalculateAvailabilityLoad computes availability and load buckets from a data snapshot.
 func CalculateAvailabilityLoad(input CalculationInput) ([]ReportBucket, error) {
 	if err := ValidateScope(input.Request.Scope); err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	"plato/backend/internal/ports"
 )
 
+// ListOrganisations returns the organisations visible to the caller.
 func (s *Service) ListOrganisations(ctx context.Context, auth ports.AuthContext) ([]domain.Organisation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -31,6 +32,7 @@ func (s *Service) ListOrganisations(ctx context.Context, auth ports.AuthContext)
 	return []domain.Organisation{}, nil
 }
 
+// GetOrganisation returns one organisation after tenant checks pass.
 func (s *Service) GetOrganisation(ctx context.Context, auth ports.AuthContext, organisationID string) (domain.Organisation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return domain.Organisation{}, err
@@ -47,6 +49,7 @@ func (s *Service) GetOrganisation(ctx context.Context, auth ports.AuthContext, o
 	return organisation, nil
 }
 
+// CreateOrganisation validates and creates an organisation.
 func (s *Service) CreateOrganisation(ctx context.Context, auth ports.AuthContext, input domain.Organisation) (domain.Organisation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Organisation{}, err
@@ -69,6 +72,7 @@ func (s *Service) CreateOrganisation(ctx context.Context, auth ports.AuthContext
 	return created, nil
 }
 
+// UpdateOrganisation validates and updates an organisation.
 func (s *Service) UpdateOrganisation(ctx context.Context, auth ports.AuthContext, organisationID string, input domain.Organisation) (domain.Organisation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Organisation{}, err
@@ -99,6 +103,7 @@ func (s *Service) UpdateOrganisation(ctx context.Context, auth ports.AuthContext
 	return updated, nil
 }
 
+// DeleteOrganisation deletes an organisation after tenant checks pass.
 func (s *Service) DeleteOrganisation(ctx context.Context, auth ports.AuthContext, organisationID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err

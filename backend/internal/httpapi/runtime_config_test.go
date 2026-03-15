@@ -7,6 +7,7 @@ import (
 
 const errLoadRuntimeConfigFmt = "load runtime config: %v"
 
+// TestLoadRuntimeConfigFromEnvDefaultsToProductionMode verifies the load runtime config from env defaults to production mode scenario.
 func TestLoadRuntimeConfigFromEnvDefaultsToProductionMode(t *testing.T) {
 	t.Setenv(envDevMode, "")
 	t.Setenv(envProductionMode, "")
@@ -27,6 +28,7 @@ func TestLoadRuntimeConfigFromEnvDefaultsToProductionMode(t *testing.T) {
 	}
 }
 
+// TestLoadRuntimeConfigFromEnvDevelopmentModeEnablesWildcardCORS verifies the load runtime config from env development mode enables wildcard CORS scenario.
 func TestLoadRuntimeConfigFromEnvDevelopmentModeEnablesWildcardCORS(t *testing.T) {
 	t.Setenv(envDevMode, envBoolTrue)
 	t.Setenv(envProductionMode, "")
@@ -44,6 +46,7 @@ func TestLoadRuntimeConfigFromEnvDevelopmentModeEnablesWildcardCORS(t *testing.T
 	}
 }
 
+// TestLoadRuntimeConfigFromEnvProductionModeParsesAllowlist verifies the load runtime config from env production mode parses allowlist scenario.
 func TestLoadRuntimeConfigFromEnvProductionModeParsesAllowlist(t *testing.T) {
 	t.Setenv(envDevMode, "")
 	t.Setenv(envProductionMode, envBoolTrue)
@@ -68,6 +71,7 @@ func TestLoadRuntimeConfigFromEnvProductionModeParsesAllowlist(t *testing.T) {
 	}
 }
 
+// TestLoadRuntimeConfigFromEnvProductionModeRejectsWildcardOrigin verifies the load runtime config from env production mode rejects wildcard origin scenario.
 func TestLoadRuntimeConfigFromEnvProductionModeRejectsWildcardOrigin(t *testing.T) {
 	t.Setenv(envDevMode, "")
 	t.Setenv(envProductionMode, envBoolTrue)
@@ -78,6 +82,7 @@ func TestLoadRuntimeConfigFromEnvProductionModeRejectsWildcardOrigin(t *testing.
 	}
 }
 
+// TestLoadRuntimeConfigFromEnvRejectsInvalidBooleanValues verifies the load runtime config from env rejects invalid boolean values scenario.
 func TestLoadRuntimeConfigFromEnvRejectsInvalidBooleanValues(t *testing.T) {
 	t.Setenv(envDevMode, "nope")
 	t.Setenv(envProductionMode, "")
@@ -88,6 +93,7 @@ func TestLoadRuntimeConfigFromEnvRejectsInvalidBooleanValues(t *testing.T) {
 	}
 }
 
+// TestLoadRuntimeConfigFromEnvRejectsConflictingModeBooleans verifies the load runtime config from env rejects conflicting mode booleans scenario.
 func TestLoadRuntimeConfigFromEnvRejectsConflictingModeBooleans(t *testing.T) {
 	t.Setenv(envDevMode, envBoolTrue)
 	t.Setenv(envProductionMode, envBoolTrue)
@@ -98,6 +104,7 @@ func TestLoadRuntimeConfigFromEnvRejectsConflictingModeBooleans(t *testing.T) {
 	}
 }
 
+// TestDefaultListenAddr verifies the default listen addr scenario.
 func TestDefaultListenAddr(t *testing.T) {
 	if got := DefaultListenAddr(RuntimeModeDevelopment); got != "127.0.0.1:8070" {
 		t.Fatalf("unexpected development default listen addr: %s", got)

@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// TestValidationHelpers verifies the validation helpers scenario.
 func TestValidationHelpers(t *testing.T) {
 	t.Run("BasicValidationHelpers", func(t *testing.T) {
 		testBasicValidationHelpers(t)
@@ -145,6 +146,7 @@ func testEmploymentPctOnDateValidation(t *testing.T) {
 	}
 }
 
+// TestPeriodStartAndRoundHelpers verifies the period start and round helpers scenario.
 func TestPeriodStartAndRoundHelpers(t *testing.T) {
 	day := time.Date(2026, time.February, 18, 0, 0, 0, 0, time.UTC)
 	if got := periodStart(day, GranularityDay).Format(DateLayout); got != "2026-02-18" {
@@ -168,6 +170,7 @@ func TestPeriodStartAndRoundHelpers(t *testing.T) {
 	}
 }
 
+// TestSelectedPeopleForScope verifies the selected people for scope scenario.
 func TestSelectedPeopleForScope(t *testing.T) {
 	persons := map[string]Person{"p1": {ID: "p1"}, "p2": {ID: "p2"}}
 	groups := map[string]Group{"g1": {ID: "g1", MemberIDs: []string{"p1", "p2"}}}

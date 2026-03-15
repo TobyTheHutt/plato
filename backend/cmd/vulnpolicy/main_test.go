@@ -52,6 +52,7 @@ type fakeSeverityResolver struct {
 	calls []string
 }
 
+// Resolve returns the configured severity assessment for tests.
 func (resolver *fakeSeverityResolver) Resolve(_ context.Context, vuln vulnAssessment) (severityAssessment, error) {
 	resolver.calls = append(resolver.calls, vuln.ID)
 	if assessment, ok := resolver.byID[vuln.ID]; ok {
@@ -63,6 +64,7 @@ func (resolver *fakeSeverityResolver) Resolve(_ context.Context, vuln vulnAssess
 	return severityAssessment{Severity: severityUnknown}, nil
 }
 
+// TestParseGovulncheckOutput verifies the parse govulncheck output scenario.
 func TestParseGovulncheckOutput(t *testing.T) {
 	t.Parallel()
 	input := strings.Join([]string{
@@ -105,6 +107,7 @@ func TestParseGovulncheckOutput(t *testing.T) {
 	}
 }
 
+// TestParseGovulncheckOutputWithModeBinaryFindingsAreReachable verifies the parse govulncheck output with mode binary findings are reachable scenario.
 func TestParseGovulncheckOutputWithModeBinaryFindingsAreReachable(t *testing.T) {
 	t.Parallel()
 
@@ -134,6 +137,7 @@ func TestParseGovulncheckOutputWithModeBinaryFindingsAreReachable(t *testing.T) 
 	}
 }
 
+// TestLoadOverrides verifies the load overrides scenario.
 func TestLoadOverrides(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
@@ -298,6 +302,7 @@ func writeOverrideFixture(t *testing.T, path, content string) {
 	}
 }
 
+// TestNormalizeScanMode verifies the normalize scan mode scenario.
 func TestNormalizeScanMode(t *testing.T) {
 	t.Parallel()
 
@@ -334,6 +339,7 @@ func TestNormalizeScanMode(t *testing.T) {
 	}
 }
 
+// TestEvaluateVulnerabilities verifies the evaluate vulnerabilities scenario.
 func TestEvaluateVulnerabilities(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
@@ -392,6 +398,7 @@ func TestEvaluateVulnerabilities(t *testing.T) {
 	}
 }
 
+// TestCollectCVEIDs verifies the collect CVE IDs scenario.
 func TestCollectCVEIDs(t *testing.T) {
 	t.Parallel()
 	vuln := vulnAssessment{
@@ -405,6 +412,7 @@ func TestCollectCVEIDs(t *testing.T) {
 	}
 }
 
+// TestCollectGHSAIDs verifies the collect GHSA IDs scenario.
 func TestCollectGHSAIDs(t *testing.T) {
 	t.Parallel()
 
@@ -419,6 +427,7 @@ func TestCollectGHSAIDs(t *testing.T) {
 	}
 }
 
+// TestCollectExcludedIDsAndFilterExcludedVulnerabilities verifies the collect excluded IDs and filter excluded vulnerabilities scenario.
 func TestCollectExcludedIDsAndFilterExcludedVulnerabilities(t *testing.T) {
 	t.Parallel()
 
@@ -466,6 +475,7 @@ func TestCollectExcludedIDsAndFilterExcludedVulnerabilities(t *testing.T) {
 	}
 }
 
+// TestBestNVDSeverity verifies the best NVD severity scenario.
 func TestBestNVDSeverity(t *testing.T) {
 	t.Parallel()
 	payload := nvdResponse{
@@ -502,6 +512,7 @@ func TestBestNVDSeverity(t *testing.T) {
 	}
 }
 
+// TestNormalizeSeverity verifies the normalize severity scenario.
 func TestNormalizeSeverity(t *testing.T) {
 	t.Parallel()
 	if normalizeSeverity("", 9.2) != severityCritical {
@@ -509,6 +520,7 @@ func TestNormalizeSeverity(t *testing.T) {
 	}
 }
 
+// TestResolveNVDAPIKey verifies the resolve NVD API key scenario.
 func TestResolveNVDAPIKey(t *testing.T) {
 	t.Run("from file", func(t *testing.T) {
 		t.Setenv(envNVDAPIKey, testFromEnvValue)
@@ -551,6 +563,7 @@ func TestResolveNVDAPIKey(t *testing.T) {
 	})
 }
 
+// TestResolveGHSAToken verifies the resolve GHSA token scenario.
 func TestResolveGHSAToken(t *testing.T) {
 	t.Run("from file", testResolveGHSATokenFromFile)
 	t.Run("empty file fails", testResolveGHSATokenEmptyFileFails)
@@ -610,6 +623,7 @@ func testResolveGHSATokenFallsBackToGitHubTokenEnv(t *testing.T) {
 	}
 }
 
+// TestLoadSeveritySnapshot verifies the load severity snapshot scenario.
 func TestLoadSeveritySnapshot(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
@@ -655,6 +669,7 @@ func TestLoadSeveritySnapshot(t *testing.T) {
 	})
 }
 
+// TestResolveCVEOfflineUsesSnapshot verifies the resolve CVE offline uses snapshot scenario.
 func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -706,6 +721,7 @@ func TestResolveCVEOfflineUsesSnapshot(t *testing.T) {
 	}
 }
 
+// TestParseGovulncheckOutputMalformedJSON verifies the parse govulncheck output malformed JSON scenario.
 func TestParseGovulncheckOutputMalformedJSON(t *testing.T) {
 	t.Parallel()
 
@@ -738,6 +754,7 @@ func TestParseGovulncheckOutputMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestNormalizeSeverityMatrix verifies the normalize severity matrix scenario.
 func TestNormalizeSeverityMatrix(t *testing.T) {
 	t.Parallel()
 
@@ -771,6 +788,7 @@ func TestNormalizeSeverityMatrix(t *testing.T) {
 	}
 }
 
+// TestParseOverrideSeverity verifies the parse override severity scenario.
 func TestParseOverrideSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -809,6 +827,7 @@ func TestParseOverrideSeverity(t *testing.T) {
 	}
 }
 
+// TestLoadOverridesErrorPaths verifies the load overrides error paths scenario.
 func TestLoadOverridesErrorPaths(t *testing.T) {
 	t.Parallel()
 
@@ -857,6 +876,7 @@ func TestLoadOverridesErrorPaths(t *testing.T) {
 	})
 }
 
+// TestLoadSeveritySnapshotErrorPaths verifies the load severity snapshot error paths scenario.
 func TestLoadSeveritySnapshotErrorPaths(t *testing.T) {
 	t.Parallel()
 
@@ -881,6 +901,7 @@ func TestLoadSeveritySnapshotErrorPaths(t *testing.T) {
 	})
 }
 
+// TestEvaluateVulnerabilitiesUnknownSeverity verifies the evaluate vulnerabilities unknown severity scenario.
 func TestEvaluateVulnerabilitiesUnknownSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -908,6 +929,7 @@ func TestEvaluateVulnerabilitiesUnknownSeverity(t *testing.T) {
 	}
 }
 
+// TestSortEvaluated verifies the sort evaluated scenario.
 func TestSortEvaluated(t *testing.T) {
 	t.Parallel()
 
@@ -927,6 +949,7 @@ func TestSortEvaluated(t *testing.T) {
 	}
 }
 
+// TestResolveUsesCachedCVEsAndJoinedErrors verifies the resolve uses cached CVE s and joined errors scenario.
 func TestResolveUsesCachedCVEsAndJoinedErrors(t *testing.T) {
 	t.Parallel()
 
@@ -959,6 +982,7 @@ func TestResolveUsesCachedCVEsAndJoinedErrors(t *testing.T) {
 	}
 }
 
+// TestResolvePrefersOSVSeverityWhenPresent verifies the resolve prefers OSV severity when present scenario.
 func TestResolvePrefersOSVSeverityWhenPresent(t *testing.T) {
 	t.Parallel()
 
@@ -986,6 +1010,7 @@ func TestResolvePrefersOSVSeverityWhenPresent(t *testing.T) {
 	}
 }
 
+// TestResolvePrefersGHSAOverNVD verifies the resolve prefers GHSA over NVD scenario.
 func TestResolvePrefersGHSAOverNVD(t *testing.T) {
 	t.Parallel()
 
@@ -1010,6 +1035,7 @@ func TestResolvePrefersGHSAOverNVD(t *testing.T) {
 	}
 }
 
+// TestResolveFallsBackToNVDWhenGHSAFails verifies the resolve falls back to NVD when GHSA fails scenario.
 func TestResolveFallsBackToNVDWhenGHSAFails(t *testing.T) {
 	t.Parallel()
 
@@ -1039,6 +1065,7 @@ func TestResolveFallsBackToNVDWhenGHSAFails(t *testing.T) {
 	}
 }
 
+// TestResolveUnknownSeverityReasonNoAliases verifies the resolve unknown severity reason no aliases scenario.
 func TestResolveUnknownSeverityReasonNoAliases(t *testing.T) {
 	t.Parallel()
 
@@ -1063,6 +1090,7 @@ func TestResolveUnknownSeverityReasonNoAliases(t *testing.T) {
 	}
 }
 
+// TestResolveUnknownSeverityReasonLookupFailures verifies the resolve unknown severity reason lookup failures scenario.
 func TestResolveUnknownSeverityReasonLookupFailures(t *testing.T) {
 	t.Parallel()
 
@@ -1093,6 +1121,7 @@ func TestResolveUnknownSeverityReasonLookupFailures(t *testing.T) {
 	}
 }
 
+// TestResolveWithOnlyGHSAAliasFallsBackToUnknownReason verifies the resolve with only GHSA alias falls back to unknown reason scenario.
 func TestResolveWithOnlyGHSAAliasFallsBackToUnknownReason(t *testing.T) {
 	t.Parallel()
 
@@ -1132,6 +1161,7 @@ func newTestResolver(client *http.Client, baseURL, apiKey string) *nvdSeverityRe
 	}
 }
 
+// TestResolveGHSASuccessfulLookupIsCachedWithoutToken verifies the resolve GHSA successful lookup is cached without token scenario.
 func TestResolveGHSASuccessfulLookupIsCachedWithoutToken(t *testing.T) {
 	t.Parallel()
 
@@ -1188,6 +1218,7 @@ func TestResolveGHSASuccessfulLookupIsCachedWithoutToken(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAUsesBearerTokenWhenConfigured verifies the resolve GHSA uses bearer token when configured scenario.
 func TestResolveGHSAUsesBearerTokenWhenConfigured(t *testing.T) {
 	t.Parallel()
 
@@ -1220,6 +1251,7 @@ func TestResolveGHSAUsesBearerTokenWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAOfflineMode verifies the resolve GHSA offline mode scenario.
 func TestResolveGHSAOfflineMode(t *testing.T) {
 	t.Parallel()
 
@@ -1241,6 +1273,7 @@ func TestResolveGHSAOfflineMode(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAInvalidBaseURL verifies the resolve GHSA invalid base URL scenario.
 func TestResolveGHSAInvalidBaseURL(t *testing.T) {
 	t.Parallel()
 
@@ -1260,6 +1293,7 @@ func TestResolveGHSAInvalidBaseURL(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAUnauthorizedStatusFailsFast verifies the resolve GHSA unauthorized status fails fast scenario.
 func TestResolveGHSAUnauthorizedStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
@@ -1292,6 +1326,7 @@ func TestResolveGHSAUnauthorizedStatusFailsFast(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAForbiddenStatusFailsFast verifies the resolve GHSA forbidden status fails fast scenario.
 func TestResolveGHSAForbiddenStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
@@ -1324,6 +1359,7 @@ func TestResolveGHSAForbiddenStatusFailsFast(t *testing.T) {
 	}
 }
 
+// TestResolveGHSANon200Status verifies the resolve GHSA non 200 status scenario.
 func TestResolveGHSANon200Status(t *testing.T) {
 	t.Parallel()
 
@@ -1351,6 +1387,7 @@ func TestResolveGHSANon200Status(t *testing.T) {
 	}
 }
 
+// TestResolveGHSADecodeError verifies the resolve GHSA decode error scenario.
 func TestResolveGHSADecodeError(t *testing.T) {
 	t.Parallel()
 
@@ -1379,6 +1416,7 @@ func TestResolveGHSADecodeError(t *testing.T) {
 	}
 }
 
+// TestResolveGHSAUnknownSeverityFails verifies the resolve GHSA unknown severity fails scenario.
 func TestResolveGHSAUnknownSeverityFails(t *testing.T) {
 	t.Parallel()
 
@@ -1410,6 +1448,7 @@ func TestResolveGHSAUnknownSeverityFails(t *testing.T) {
 	}
 }
 
+// TestResolveGHSARetryableStatusEventuallyFails verifies the resolve GHSA retryable status eventually fails scenario.
 func TestResolveGHSARetryableStatusEventuallyFails(t *testing.T) {
 	t.Parallel()
 
@@ -1443,6 +1482,7 @@ func TestResolveGHSARetryableStatusEventuallyFails(t *testing.T) {
 	}
 }
 
+// TestResolveCVEInvalidBaseURL verifies the resolve CVE invalid base URL scenario.
 func TestResolveCVEInvalidBaseURL(t *testing.T) {
 	t.Parallel()
 
@@ -1456,6 +1496,7 @@ func TestResolveCVEInvalidBaseURL(t *testing.T) {
 	}
 }
 
+// TestResolveCVENon200Status verifies the resolve CVE non 200 status scenario.
 func TestResolveCVENon200Status(t *testing.T) {
 	t.Parallel()
 
@@ -1477,6 +1518,7 @@ func TestResolveCVENon200Status(t *testing.T) {
 	}
 }
 
+// TestResolveCVEUnauthorizedStatusFailsFast verifies the resolve CVE unauthorized status fails fast scenario.
 func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
@@ -1503,6 +1545,7 @@ func TestResolveCVEUnauthorizedStatusFailsFast(t *testing.T) {
 	}
 }
 
+// TestResolveCVEForbiddenStatusFailsFast verifies the resolve CVE forbidden status fails fast scenario.
 func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 	t.Parallel()
 
@@ -1529,6 +1572,7 @@ func TestResolveCVEForbiddenStatusFailsFast(t *testing.T) {
 	}
 }
 
+// TestResolveCVEDecodeError verifies the resolve CVE decode error scenario.
 func TestResolveCVEDecodeError(t *testing.T) {
 	t.Parallel()
 
@@ -1551,6 +1595,7 @@ func TestResolveCVEDecodeError(t *testing.T) {
 	}
 }
 
+// TestResolveCVESuccessfulLookupIsCached verifies the resolve CVE successful lookup is cached scenario.
 func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
 	t.Parallel()
 
@@ -1606,6 +1651,7 @@ func TestResolveCVESuccessfulLookupIsCached(t *testing.T) {
 	}
 }
 
+// TestResolveCVERetryableStatusEventuallyFails verifies the resolve CVE retryable status eventually fails scenario.
 func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 	t.Parallel()
 
@@ -1632,6 +1678,7 @@ func TestResolveCVERetryableStatusEventuallyFails(t *testing.T) {
 	}
 }
 
+// TestResolveCVERateLimitStatusEventuallyFails verifies the resolve CVE rate limit status eventually fails scenario.
 func TestResolveCVERateLimitStatusEventuallyFails(t *testing.T) {
 	t.Parallel()
 
@@ -1670,6 +1717,7 @@ func TestResolveCVERateLimitStatusEventuallyFails(t *testing.T) {
 	}
 }
 
+// TestResolveCVERetryableStatusReturnsContextCancellation verifies the resolve CVE retryable status returns context cancellation scenario.
 func TestResolveCVERetryableStatusReturnsContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -1696,6 +1744,7 @@ func TestResolveCVERetryableStatusReturnsContextCancellation(t *testing.T) {
 	}
 }
 
+// TestResolveCVETransportErrorWithCanceledContext verifies the resolve CVE transport error with canceled context scenario.
 func TestResolveCVETransportErrorWithCanceledContext(t *testing.T) {
 	t.Parallel()
 
@@ -1721,6 +1770,7 @@ func TestResolveCVETransportErrorWithCanceledContext(t *testing.T) {
 	}
 }
 
+// TestBestNVDSeverityNoMetrics verifies the best NVD severity no metrics scenario.
 func TestBestNVDSeverityNoMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -1730,6 +1780,7 @@ func TestBestNVDSeverityNoMetrics(t *testing.T) {
 	}
 }
 
+// TestBestNVDSeverityPrefersHigherScoreOnTies verifies the best NVD severity prefers higher score on ties scenario.
 func TestBestNVDSeverityPrefersHigherScoreOnTies(t *testing.T) {
 	t.Parallel()
 
@@ -1763,6 +1814,7 @@ func TestBestNVDSeverityPrefersHigherScoreOnTies(t *testing.T) {
 	}
 }
 
+// TestBetterSeverity verifies the better severity scenario.
 func TestBetterSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -1788,6 +1840,7 @@ func TestBetterSeverity(t *testing.T) {
 	}
 }
 
+// TestSeverityRankMatrix verifies the severity rank matrix scenario.
 func TestSeverityRankMatrix(t *testing.T) {
 	t.Parallel()
 
@@ -1812,6 +1865,7 @@ func TestSeverityRankMatrix(t *testing.T) {
 	}
 }
 
+// TestAddQueryParam verifies the add query param scenario.
 func TestAddQueryParam(t *testing.T) {
 	t.Parallel()
 
@@ -1828,6 +1882,7 @@ func TestAddQueryParam(t *testing.T) {
 	}
 }
 
+// TestAdvisoryLookupURL verifies the advisory lookup URL scenario.
 func TestAdvisoryLookupURL(t *testing.T) {
 	t.Parallel()
 
@@ -1855,6 +1910,7 @@ func TestAdvisoryLookupURL(t *testing.T) {
 	}
 }
 
+// TestRetryableGHSAStatusError verifies the retryable GHSA status error scenario.
 func TestRetryableGHSAStatusError(t *testing.T) {
 	t.Parallel()
 
@@ -1869,6 +1925,7 @@ func TestRetryableGHSAStatusError(t *testing.T) {
 	}
 }
 
+// TestParseScore verifies the parse score scenario.
 func TestParseScore(t *testing.T) {
 	t.Parallel()
 
@@ -1903,6 +1960,7 @@ func TestParseScore(t *testing.T) {
 	}
 }
 
+// TestResolveOSVSeverityAndCandidateExtraction verifies the resolve OSV severity and candidate extraction scenario.
 func TestResolveOSVSeverityAndCandidateExtraction(t *testing.T) {
 	t.Parallel()
 
@@ -1937,6 +1995,7 @@ func TestResolveOSVSeverityAndCandidateExtraction(t *testing.T) {
 	}
 }
 
+// TestCandidateFromMapAndScoreFromCVSSText verifies the candidate from map and score from c v s s text scenario.
 func TestCandidateFromMapAndScoreFromCVSSText(t *testing.T) {
 	t.Parallel()
 
@@ -1966,6 +2025,7 @@ func TestCandidateFromMapAndScoreFromCVSSText(t *testing.T) {
 	}
 }
 
+// TestBestGHSASeverity verifies the best GHSA severity scenario.
 func TestBestGHSASeverity(t *testing.T) {
 	t.Parallel()
 
@@ -1990,6 +2050,7 @@ func TestBestGHSASeverity(t *testing.T) {
 	}
 }
 
+// TestPrintResult verifies the print result scenario.
 func TestPrintResult(t *testing.T) {
 	now := time.Date(2026, time.February, 22, 12, 0, 0, 0, time.UTC)
 	result := evaluationResult{
@@ -2074,6 +2135,7 @@ func TestPrintResult(t *testing.T) {
 	}
 }
 
+// TestPrintResultBinaryInfoHeading verifies the print result binary info heading scenario.
 func TestPrintResultBinaryInfoHeading(t *testing.T) {
 	t.Parallel()
 
@@ -2093,6 +2155,7 @@ func TestPrintResultBinaryInfoHeading(t *testing.T) {
 	}
 }
 
+// TestBuildScanReportIncludesFullFindingsAndTruncation verifies the build scan report includes full findings and truncation scenario.
 func TestBuildScanReportIncludesFullFindingsAndTruncation(t *testing.T) {
 	t.Parallel()
 
@@ -2222,6 +2285,7 @@ func assertBuildScanReportFindingsAndTruncation(t *testing.T, report scanReport)
 	}
 }
 
+// TestWriteScanReportCreatesParentDirectory verifies the write scan report creates parent directory scenario.
 func TestWriteScanReportCreatesParentDirectory(t *testing.T) {
 	t.Parallel()
 
@@ -2256,6 +2320,7 @@ func TestWriteScanReportCreatesParentDirectory(t *testing.T) {
 	}
 }
 
+// TestWriteScanReportEmptyPathIsNoop verifies the write scan report empty path is no-op scenario.
 func TestWriteScanReportEmptyPathIsNoop(t *testing.T) {
 	t.Parallel()
 
@@ -2264,6 +2329,7 @@ func TestWriteScanReportEmptyPathIsNoop(t *testing.T) {
 	}
 }
 
+// TestHasReportSeverity verifies the has report severity scenario.
 func TestHasReportSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -2290,6 +2356,7 @@ func TestHasReportSeverity(t *testing.T) {
 	}
 }
 
+// TestReportSeverityFromEvaluated verifies the report severity from evaluated scenario.
 func TestReportSeverityFromEvaluated(t *testing.T) {
 	t.Parallel()
 
@@ -2359,6 +2426,7 @@ func testReportSeverityFromEvaluatedOverride(t *testing.T) {
 	}
 }
 
+// TestReportFindingFromEvaluatedAlwaysIncludesSeverity verifies the report finding from evaluated always includes severity scenario.
 func TestReportFindingFromEvaluatedAlwaysIncludesSeverity(t *testing.T) {
 	t.Parallel()
 
@@ -2380,6 +2448,7 @@ func TestReportFindingFromEvaluatedAlwaysIncludesSeverity(t *testing.T) {
 	}
 }
 
+// TestTruncatedInfoIDs verifies the truncated info IDs scenario.
 func TestTruncatedInfoIDs(t *testing.T) {
 	t.Parallel()
 
@@ -2397,6 +2466,7 @@ func TestTruncatedInfoIDs(t *testing.T) {
 	}
 }
 
+// TestMainMissingInputFlag verifies the main missing input flag scenario.
 func TestMainMissingInputFlag(t *testing.T) {
 	result := runMainWithArgs(t, []string{"vulnpolicy", "-overrides", "dummy.json"})
 	if result.exitCode != 1 {
@@ -2407,6 +2477,7 @@ func TestMainMissingInputFlag(t *testing.T) {
 	}
 }
 
+// TestMainOfflineSnapshotFlow verifies the main offline snapshot flow scenario.
 func TestMainOfflineSnapshotFlow(t *testing.T) {
 	paths := setupMainOfflineSnapshotFlowFiles(t)
 	result := runMainWithArgs(t, []string{
@@ -2582,6 +2653,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip delegates the request to the wrapped test function.
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
 }

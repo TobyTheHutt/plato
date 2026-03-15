@@ -8,6 +8,7 @@ import (
 	"plato/backend/internal/ports"
 )
 
+// ListOrgHolidays returns organisation holidays visible to the caller.
 func (s *Service) ListOrgHolidays(ctx context.Context, auth ports.AuthContext) ([]domain.OrgHoliday, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -19,6 +20,7 @@ func (s *Service) ListOrgHolidays(ctx context.Context, auth ports.AuthContext) (
 	return s.repo.ListOrgHolidays(ctx, organisationID)
 }
 
+// CreateOrgHoliday validates and creates an organisation holiday entry.
 func (s *Service) CreateOrgHoliday(ctx context.Context, auth ports.AuthContext, input domain.OrgHoliday) (domain.OrgHoliday, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.OrgHoliday{}, err
@@ -51,6 +53,7 @@ func (s *Service) CreateOrgHoliday(ctx context.Context, auth ports.AuthContext, 
 	return created, nil
 }
 
+// DeleteOrgHoliday deletes an organisation holiday entry.
 func (s *Service) DeleteOrgHoliday(ctx context.Context, auth ports.AuthContext, holidayID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err
@@ -69,6 +72,7 @@ func (s *Service) DeleteOrgHoliday(ctx context.Context, auth ports.AuthContext, 
 	return nil
 }
 
+// ListGroupUnavailability returns group unavailability entries visible to the caller.
 func (s *Service) ListGroupUnavailability(ctx context.Context, auth ports.AuthContext) ([]domain.GroupUnavailability, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -80,6 +84,7 @@ func (s *Service) ListGroupUnavailability(ctx context.Context, auth ports.AuthCo
 	return s.repo.ListGroupUnavailability(ctx, organisationID)
 }
 
+// CreateGroupUnavailability validates and creates a group unavailability entry.
 func (s *Service) CreateGroupUnavailability(ctx context.Context, auth ports.AuthContext, input domain.GroupUnavailability) (domain.GroupUnavailability, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.GroupUnavailability{}, err
@@ -117,6 +122,7 @@ func (s *Service) CreateGroupUnavailability(ctx context.Context, auth ports.Auth
 	return created, nil
 }
 
+// DeleteGroupUnavailability deletes a group unavailability entry.
 func (s *Service) DeleteGroupUnavailability(ctx context.Context, auth ports.AuthContext, entryID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err
@@ -135,6 +141,7 @@ func (s *Service) DeleteGroupUnavailability(ctx context.Context, auth ports.Auth
 	return nil
 }
 
+// ListPersonUnavailability returns person unavailability entries visible to the caller.
 func (s *Service) ListPersonUnavailability(ctx context.Context, auth ports.AuthContext) ([]domain.PersonUnavailability, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -146,6 +153,7 @@ func (s *Service) ListPersonUnavailability(ctx context.Context, auth ports.AuthC
 	return s.repo.ListPersonUnavailability(ctx, organisationID)
 }
 
+// ListPersonUnavailabilityByPerson returns unavailability entries for one person.
 func (s *Service) ListPersonUnavailabilityByPerson(ctx context.Context, auth ports.AuthContext, personID string) ([]domain.PersonUnavailability, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -157,6 +165,7 @@ func (s *Service) ListPersonUnavailabilityByPerson(ctx context.Context, auth por
 	return s.repo.ListPersonUnavailabilityByPerson(ctx, organisationID, personID)
 }
 
+// CreatePersonUnavailability validates and creates a person unavailability entry.
 func (s *Service) CreatePersonUnavailability(ctx context.Context, auth ports.AuthContext, input domain.PersonUnavailability) (domain.PersonUnavailability, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.PersonUnavailability{}, err
@@ -200,6 +209,7 @@ func (s *Service) CreatePersonUnavailability(ctx context.Context, auth ports.Aut
 	return created, nil
 }
 
+// DeletePersonUnavailability deletes a person unavailability entry.
 func (s *Service) DeletePersonUnavailability(ctx context.Context, auth ports.AuthContext, entryID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err
@@ -218,6 +228,7 @@ func (s *Service) DeletePersonUnavailability(ctx context.Context, auth ports.Aut
 	return nil
 }
 
+// DeletePersonUnavailabilityByPerson deletes one person's unavailability entry.
 func (s *Service) DeletePersonUnavailabilityByPerson(ctx context.Context, auth ports.AuthContext, personID, entryID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err

@@ -12,6 +12,7 @@ const (
 	testAppOrigin         = "https://app.example.com"
 )
 
+// TestSetCORS verifies the set CORS scenario.
 func TestSetCORS(t *testing.T) {
 	t.Run("wildcard policy", func(t *testing.T) {
 		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, testOrganisationsPath, http.NoBody)

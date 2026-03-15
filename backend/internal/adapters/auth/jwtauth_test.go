@@ -17,6 +17,7 @@ const (
 	errExpectedTwoRolesFmt = "expected two roles, got %v"
 )
 
+// TestNewJWTAuthProviderFromEnv verifies the new JWT auth provider from env scenario.
 func TestNewJWTAuthProviderFromEnv(t *testing.T) {
 	t.Setenv(devModeEnvVar, "")
 	t.Setenv(jwtSigningKeyEnvVar, "")
@@ -40,6 +41,7 @@ func TestNewJWTAuthProviderFromEnv(t *testing.T) {
 	}
 }
 
+// TestNewJWTAuthProviderFromEnvGeneratesSecretInDevelopmentMode verifies the new JWT auth provider from env generates secret in development mode scenario.
 func TestNewJWTAuthProviderFromEnvGeneratesSecretInDevelopmentMode(t *testing.T) {
 	t.Setenv(devModeEnvVar, "true")
 	t.Setenv(jwtSigningKeyEnvVar, "")
@@ -65,6 +67,7 @@ func TestNewJWTAuthProviderFromEnvGeneratesSecretInDevelopmentMode(t *testing.T)
 	}
 }
 
+// TestNewJWTAuthProviderFromEnvUsesLegacySigningKey verifies the new JWT auth provider from env uses legacy signing key scenario.
 func TestNewJWTAuthProviderFromEnvUsesLegacySigningKey(t *testing.T) {
 	t.Setenv(devModeEnvVar, "")
 	t.Setenv(jwtSigningKeyEnvVar, "")
@@ -82,6 +85,7 @@ func TestNewJWTAuthProviderFromEnvUsesLegacySigningKey(t *testing.T) {
 	}
 }
 
+// TestJWTAuthProviderFromRequest verifies the JWT auth provider from request scenario.
 func TestJWTAuthProviderFromRequest(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	provider, err := NewJWTAuthProvider(testJWTSecret)
@@ -117,6 +121,7 @@ func TestJWTAuthProviderFromRequest(t *testing.T) {
 	}
 }
 
+// TestJWTAuthProviderFromRequestClaimFallbacks verifies the JWT auth provider from request claim fallbacks scenario.
 func TestJWTAuthProviderFromRequestClaimFallbacks(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	provider, err := NewJWTAuthProvider("fallback-secret")
@@ -152,6 +157,7 @@ func TestJWTAuthProviderFromRequestClaimFallbacks(t *testing.T) {
 	}
 }
 
+// TestJWTAuthProviderFromRequestErrors verifies the JWT auth provider from request errors scenario.
 func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	provider, err := NewJWTAuthProvider(testJWTSecret)
@@ -243,6 +249,7 @@ func TestJWTAuthProviderFromRequestErrors(t *testing.T) {
 	}
 }
 
+// TestJWTAuthProviderNilProvider verifies the JWT auth provider nil provider scenario.
 func TestJWTAuthProviderNilProvider(t *testing.T) {
 	var provider *JWTAuthProvider
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
@@ -251,6 +258,7 @@ func TestJWTAuthProviderNilProvider(t *testing.T) {
 	}
 }
 
+// TestParseNumericDateClaim verifies the parse numeric date claim scenario.
 func TestParseNumericDateClaim(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -286,6 +294,7 @@ func TestParseNumericDateClaim(t *testing.T) {
 	}
 }
 
+// TestParseRolesClaim verifies the parse roles claim scenario.
 func TestParseRolesClaim(t *testing.T) {
 	roles, err := parseRolesClaim(nil)
 	if err != nil {
@@ -313,6 +322,7 @@ func TestParseRolesClaim(t *testing.T) {
 	}
 }
 
+// TestValidateClaimHelpers verifies the validate claim helpers scenario.
 func TestValidateClaimHelpers(t *testing.T) {
 	if err := validateExpiration(map[string]any{}, 100); err == nil {
 		t.Fatal("expected missing exp claim error")
@@ -332,6 +342,7 @@ func TestValidateClaimHelpers(t *testing.T) {
 	}
 }
 
+// TestDevelopmentModeAndSecretHelpers verifies the development mode and secret helpers scenario.
 func TestDevelopmentModeAndSecretHelpers(t *testing.T) {
 	t.Setenv(devModeEnvVar, "true")
 	if !isDevModeEnabled() {

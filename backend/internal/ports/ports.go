@@ -7,12 +7,14 @@ import (
 	"plato/backend/internal/domain"
 )
 
+// AuthContext carries authenticated caller information through the backend.
 type AuthContext struct {
 	UserID         string   `json:"user_id"`
 	OrganisationID string   `json:"organisation_id"`
 	Roles          []string `json:"roles"`
 }
 
+// HasRole reports whether the context includes the provided role.
 func (a AuthContext) HasRole(role string) bool {
 	for _, entry := range a.Roles {
 		if entry == role {
@@ -23,19 +25,23 @@ func (a AuthContext) HasRole(role string) bool {
 	return false
 }
 
+// AuthProvider extracts authentication context from an HTTP request.
 type AuthProvider interface {
 	FromRequest(r *http.Request) (AuthContext, error)
 }
 
+// Telemetry records backend telemetry events.
 type Telemetry interface {
 	Record(name string, attributes map[string]string)
 }
 
+// ImportExport defines import and export operations.
 type ImportExport interface {
 	Import(ctx context.Context, raw []byte) error
 	Export(ctx context.Context) ([]byte, error)
 }
 
+// Repository defines the persistence operations used by the service layer.
 type Repository interface {
 	ListOrganisations(ctx context.Context) ([]domain.Organisation, error)
 	GetOrganisation(ctx context.Context, id string) (domain.Organisation, error)

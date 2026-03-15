@@ -13,6 +13,7 @@ import (
 
 const allocationLimitTolerance = 1e-9
 
+// ListAllocations returns the allocations visible to the caller within their organisation.
 func (s *Service) ListAllocations(ctx context.Context, auth ports.AuthContext) ([]domain.Allocation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return nil, err
@@ -24,6 +25,7 @@ func (s *Service) ListAllocations(ctx context.Context, auth ports.AuthContext) (
 	return s.repo.ListAllocations(ctx, organisationID)
 }
 
+// GetAllocation returns one allocation from the caller's organisation.
 func (s *Service) GetAllocation(ctx context.Context, auth ports.AuthContext, allocationID string) (domain.Allocation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin, domain.RoleOrgUser); err != nil {
 		return domain.Allocation{}, err
@@ -35,6 +37,7 @@ func (s *Service) GetAllocation(ctx context.Context, auth ports.AuthContext, all
 	return s.repo.GetAllocation(ctx, organisationID, allocationID)
 }
 
+// CreateAllocation validates and creates an allocation in the caller's organisation.
 func (s *Service) CreateAllocation(ctx context.Context, auth ports.AuthContext, input domain.Allocation) (domain.Allocation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Allocation{}, err
@@ -88,6 +91,7 @@ func (s *Service) CreateAllocation(ctx context.Context, auth ports.AuthContext, 
 	return created, nil
 }
 
+// UpdateAllocation validates and updates an allocation in the caller's organisation.
 func (s *Service) UpdateAllocation(ctx context.Context, auth ports.AuthContext, allocationID string, input domain.Allocation) (domain.Allocation, error) {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return domain.Allocation{}, err
@@ -145,6 +149,7 @@ func (s *Service) UpdateAllocation(ctx context.Context, auth ports.AuthContext, 
 	return updated, nil
 }
 
+// DeleteAllocation deletes an allocation from the caller's organisation.
 func (s *Service) DeleteAllocation(ctx context.Context, auth ports.AuthContext, allocationID string) error {
 	if err := requireAnyRole(auth, domain.RoleOrgAdmin); err != nil {
 		return err

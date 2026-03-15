@@ -13,27 +13,34 @@ const (
 	envCORSAllowedOrigins = "PLATO_CORS_ALLOWED_ORIGINS"
 )
 
+// RuntimeMode identifies the backend runtime mode.
 type RuntimeMode string
 
 const (
+	// RuntimeModeDevelopment enables development auth and permissive defaults.
 	RuntimeModeDevelopment RuntimeMode = "development"
-	RuntimeModeProduction  RuntimeMode = "production"
+	// RuntimeModeProduction enables production auth and stricter defaults.
+	RuntimeModeProduction RuntimeMode = "production"
 )
 
+// RuntimeConfig captures runtime mode and CORS settings.
 type RuntimeConfig struct {
 	Mode               RuntimeMode
 	CORSAllowedOrigins []string
 	AllowAnyCORSOrigin bool
 }
 
+// IsDevelopment reports whether the runtime mode is development.
 func (m RuntimeMode) IsDevelopment() bool {
 	return m == RuntimeModeDevelopment
 }
 
+// IsProduction reports whether the runtime mode is production.
 func (m RuntimeMode) IsProduction() bool {
 	return m == RuntimeModeProduction
 }
 
+// DefaultListenAddr returns the default listen address for the runtime mode.
 func DefaultListenAddr(mode RuntimeMode) string {
 	if mode.IsDevelopment() {
 		return "127.0.0.1:8070"
@@ -41,6 +48,7 @@ func DefaultListenAddr(mode RuntimeMode) string {
 	return ":8070"
 }
 
+// LoadRuntimeConfigFromEnv reads runtime mode and CORS settings from environment variables.
 func LoadRuntimeConfigFromEnv() (RuntimeConfig, error) {
 	mode, err := runtimeModeFromEnv()
 	if err != nil {

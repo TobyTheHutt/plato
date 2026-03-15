@@ -19,6 +19,7 @@ const (
 	errCreateOrganisationFmt = "create organisation: %v"
 )
 
+// TestFileRepositoryCRUDAndCascade verifies the file repository CRUD and cascade scenario.
 func TestFileRepositoryCRUDAndCascade(t *testing.T) {
 	state := setupRepositoryCascadeState(t)
 	createRepositoryCascadeFixtures(t, state)
@@ -453,6 +454,7 @@ func verifyRepositoryCascadePersistence(t *testing.T, state *repositoryCascadeSt
 	}
 }
 
+// TestFileRepositoryNotFoundCases verifies the file repository not found cases scenario.
 func TestFileRepositoryNotFoundCases(t *testing.T) {
 	ctx := context.Background()
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), testRepoFileName))
@@ -502,6 +504,7 @@ func TestFileRepositoryNotFoundCases(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryNormalizesLegacyAllocationTargets verifies the file repository normalizes legacy allocation targets scenario.
 func TestFileRepositoryNormalizesLegacyAllocationTargets(t *testing.T) {
 	ctx := context.Background()
 	state := `{
@@ -547,6 +550,7 @@ func TestFileRepositoryNormalizesLegacyAllocationTargets(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryLoadAndDefaultPathBranches verifies the file repository load and default path branches scenario.
 func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	ctx := context.Background()
 
@@ -589,6 +593,7 @@ func TestFileRepositoryLoadAndDefaultPathBranches(t *testing.T) {
 	}
 }
 
+// TestPersistenceHelperBranches verifies the persistence helper branches scenario.
 func TestPersistenceHelperBranches(t *testing.T) {
 	repo := &FileRepository{}
 	repo.ensureMapsLocked()
@@ -622,6 +627,7 @@ func TestPersistenceHelperBranches(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryRollsBackStateOnPersistFailure verifies the file repository rolls back state on persist failure scenario.
 func TestFileRepositoryRollsBackStateOnPersistFailure(t *testing.T) {
 	ctx := context.Background()
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "rollback-state.json"))
@@ -655,6 +661,7 @@ func TestFileRepositoryRollsBackStateOnPersistFailure(t *testing.T) {
 	}
 }
 
+// TestSortingHelpers verifies the sorting helpers scenario.
 func TestSortingHelpers(t *testing.T) {
 	verifySortedOrganisations(t)
 	verifySortedPersons(t)
@@ -750,6 +757,7 @@ func verifySortedPersonUnavailability(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryClose verifies the file repository close scenario.
 func TestFileRepositoryClose(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), testRepoFileName)
@@ -792,6 +800,7 @@ func TestFileRepositoryClose(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryContextCancellation verifies the file repository context cancellation scenario.
 func TestFileRepositoryContextCancellation(t *testing.T) {
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-repo.json"))
 	if err != nil {
@@ -844,6 +853,7 @@ func TestFileRepositoryContextCancellation(t *testing.T) {
 	}
 }
 
+// TestFileRepositoryCancelledContextAcrossMethods verifies the file repository cancelled context across methods scenario.
 func TestFileRepositoryCancelledContextAcrossMethods(t *testing.T) {
 	repo, err := NewFileRepository(filepath.Join(t.TempDir(), "context-cancel-all-methods.json"))
 	if err != nil {

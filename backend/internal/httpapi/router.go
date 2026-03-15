@@ -21,6 +21,7 @@ const (
 	healthRoutePath        = "/healthz"
 )
 
+// API serves the backend HTTP API with auth, routing, and cleanup support.
 type API struct {
 	authProvider ports.AuthProvider
 	corsPolicy   corsPolicy
@@ -41,6 +42,7 @@ var apiRouteMatchers = []apiRouteMatcher{
 	matchReportsRoute,
 }
 
+// NewRouter constructs a router from runtime configuration and default adapters.
 func NewRouter(runtimeConfig RuntimeConfig) (http.Handler, error) {
 	dataFile := strings.TrimSpace(os.Getenv(dataFileEnvVar))
 	repo, err := persistence.NewFileRepository(dataFile)
@@ -74,6 +76,7 @@ func NewRouter(runtimeConfig RuntimeConfig) (http.Handler, error) {
 	return api, nil
 }
 
+// NewRouterFromEnv loads runtime configuration from the environment and constructs a router.
 func NewRouterFromEnv() (http.Handler, error) {
 	runtimeConfig, err := LoadRuntimeConfigFromEnv()
 	if err != nil {
@@ -82,6 +85,7 @@ func NewRouterFromEnv() (http.Handler, error) {
 	return NewRouter(runtimeConfig)
 }
 
+// NewRouterWithDependencies constructs a router from provided test or custom dependencies.
 func NewRouterWithDependencies(authProvider ports.AuthProvider, svc *service.Service) http.Handler {
 	return &API{
 		authProvider: authProvider,
@@ -106,6 +110,7 @@ func authProviderFromMode(mode RuntimeMode) (ports.AuthProvider, error) {
 	return provider, nil
 }
 
+// Close runs router cleanup at most once.
 func (a *API) Close() error {
 	a.closeOnce.Do(func() {
 		if a.cleanup == nil {
@@ -120,6 +125,7 @@ func (a *API) Close() error {
 	return a.closeErr
 }
 
+// ServeHTTP applies CORS, authenticates the request, and dispatches the API route.
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	setCORS(w, r, a.corsPolicy)
 	if r.Method == http.MethodOptions {

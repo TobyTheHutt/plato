@@ -1091,6 +1091,7 @@ func loadSeveritySnapshot(path string) (map[string]severityAssessment, error) {
 	return result, nil
 }
 
+// Resolve looks up the best available severity assessment for a vulnerability.
 func (resolver *nvdSeverityResolver) Resolve(ctx context.Context, vuln vulnAssessment) (severityAssessment, error) {
 	if osvSeverity, ok := resolvedOSVSeverity(vuln); ok {
 		return osvSeverity, nil

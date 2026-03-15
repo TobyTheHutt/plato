@@ -27,6 +27,7 @@ const (
 	errSetupAllocationFmt = "setup allocation: %v"
 )
 
+// TestServiceOrganisationCRUDAndTenantEnforcement verifies the service organisation CRUD and tenant enforcement scenario.
 func TestServiceOrganisationCRUDAndTenantEnforcement(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -105,6 +106,7 @@ func TestServiceOrganisationCRUDAndTenantEnforcement(t *testing.T) {
 	}
 }
 
+// TestNewServiceRequiresDependencies verifies the new service requires dependencies scenario.
 func TestNewServiceRequiresDependencies(t *testing.T) {
 	repo, err := persistence.NewFileRepository(filepath.Join(t.TempDir(), "deps-data.json"))
 	if err != nil {
@@ -131,6 +133,7 @@ func TestNewServiceRequiresDependencies(t *testing.T) {
 	}
 }
 
+// TestServiceResourceFlowAndReport verifies the service resource flow and report scenario.
 func TestServiceResourceFlowAndReport(t *testing.T) {
 	state := setupServiceResourceFlowState(t)
 	validateServiceResourceFlowPeopleProjectsGroups(t, state)
@@ -534,6 +537,7 @@ func validateServiceResourceFlowCleanup(ctx context.Context, t *testing.T, state
 	}
 }
 
+// TestServiceValidationAndHelpers verifies the service validation and helpers scenario.
 func TestServiceValidationAndHelpers(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -648,6 +652,7 @@ func assertServiceValidationErrorHelpers(t *testing.T) {
 	}
 }
 
+// TestServiceRemainingErrorBranches verifies the service remaining error branches scenario.
 func TestServiceRemainingErrorBranches(t *testing.T) {
 	state := setupServiceRemainingErrorBranchesState(t)
 	validateServiceRemainingErrorBranchesForbiddenReads(t, state)
@@ -991,6 +996,7 @@ func validateServiceRemainingErrorBranchesReports(t *testing.T, state *serviceRe
 	}
 }
 
+// TestServicePersonUnavailabilityEmploymentDailyCap verifies the service person unavailability employment daily cap scenario.
 func TestServicePersonUnavailabilityEmploymentDailyCap(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1023,6 +1029,7 @@ func TestServicePersonUnavailabilityEmploymentDailyCap(t *testing.T) {
 	}
 }
 
+// TestServicePersonEmploymentChangesByMonth verifies the service person employment changes by month scenario.
 func TestServicePersonEmploymentChangesByMonth(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1118,6 +1125,7 @@ func assertEmploymentTimelineUnavailabilityCaps(ctx context.Context, t *testing.
 	}
 }
 
+// TestServiceForbiddenMutationsForOrgUser verifies the service forbidden mutations for org user scenario.
 func TestServiceForbiddenMutationsForOrgUser(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1201,6 +1209,7 @@ func expectForbiddenError(t *testing.T, err error) {
 	}
 }
 
+// TestServiceAdditionalBranchCoverage verifies the service additional branch coverage scenario.
 func TestServiceAdditionalBranchCoverage(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1345,6 +1354,7 @@ func assertServiceAdditionalReportAndHelperValidation(ctx context.Context, t *te
 	}
 }
 
+// TestAllocationValidationHelpers verifies the allocation validation helpers scenario.
 func TestAllocationValidationHelpers(t *testing.T) {
 	assertProjectValidationHelpers(t)
 	assertAllocationValidationHelpers(t)
@@ -1455,6 +1465,7 @@ func assertAllocationWithinProjectRangeHelpers(t *testing.T) {
 	}
 }
 
+// TestOverlapDateRanges verifies the overlap date ranges scenario.
 func TestOverlapDateRanges(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1540,6 +1551,7 @@ func TestOverlapDateRanges(t *testing.T) {
 	}
 }
 
+// TestBuildAllocationEvents verifies the build allocation events scenario.
 func TestBuildAllocationEvents(t *testing.T) {
 	candidateStart := mustParseTestDate(t, "2026-01-05")
 	candidateEnd := mustParseTestDate(t, "2026-01-15")
@@ -1638,6 +1650,7 @@ func TestBuildAllocationEvents(t *testing.T) {
 	}
 }
 
+// TestAllocationTargetResolutionAndLimitRangeChecks verifies the allocation target resolution and limit range checks scenario.
 func TestAllocationTargetResolutionAndLimitRangeChecks(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -1752,6 +1765,7 @@ func assertAllocationLimitRangeChecks(ctx context.Context, t *testing.T, svc *Se
 	}
 }
 
+// TestValidateScopeIDsRejectsUnknownScope verifies the validate scope IDs rejects unknown scope scenario.
 func TestValidateScopeIDsRejectsUnknownScope(t *testing.T) {
 	err := validateScopeIDs(domain.ReportRequest{Scope: "unknown", IDs: []string{"id_1"}}, nil, nil, nil)
 	if !errors.Is(err, domain.ErrValidation) {

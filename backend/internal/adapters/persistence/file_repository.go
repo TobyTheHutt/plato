@@ -27,6 +27,7 @@ type fileState struct {
 	Sequence             int64                                  `json:"sequence"`
 }
 
+// FileRepository stores backend state in a JSON file on local disk.
 type FileRepository struct {
 	path           string
 	mu             sync.RWMutex
@@ -45,6 +46,7 @@ const (
 	personUnavailabilityIDPrefix = "person_unavailability"
 )
 
+// Close flushes the current in-memory state to disk.
 func (r *FileRepository) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,6 +54,7 @@ func (r *FileRepository) Close() error {
 	return r.persistLocked()
 }
 
+// NewFileRepository returns a file-backed repository for the provided path.
 func NewFileRepository(path string) (*FileRepository, error) {
 	if path == "" {
 		path = "./plato_runtime_data.json"
@@ -338,6 +341,7 @@ func sortedPersonUnavailability(items []domain.PersonUnavailability) {
 	})
 }
 
+// ListOrganisations returns all stored organisations in sorted order.
 func (r *FileRepository) ListOrganisations(ctx context.Context) ([]domain.Organisation, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -354,6 +358,7 @@ func (r *FileRepository) ListOrganisations(ctx context.Context) ([]domain.Organi
 	return result, nil
 }
 
+// GetOrganisation returns the organisation with the provided id.
 func (r *FileRepository) GetOrganisation(ctx context.Context, id string) (domain.Organisation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Organisation{}, err
@@ -369,6 +374,7 @@ func (r *FileRepository) GetOrganisation(ctx context.Context, id string) (domain
 	return organisation, nil
 }
 
+// CreateOrganisation stores a new organisation.
 func (r *FileRepository) CreateOrganisation(ctx context.Context, organisation domain.Organisation) (domain.Organisation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Organisation{}, err
@@ -390,6 +396,7 @@ func (r *FileRepository) CreateOrganisation(ctx context.Context, organisation do
 	return organisation, nil
 }
 
+// UpdateOrganisation stores changes to an existing organisation.
 func (r *FileRepository) UpdateOrganisation(ctx context.Context, organisation domain.Organisation) (domain.Organisation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Organisation{}, err
@@ -414,6 +421,7 @@ func (r *FileRepository) UpdateOrganisation(ctx context.Context, organisation do
 	return organisation, nil
 }
 
+// DeleteOrganisation removes an organisation and its dependent records.
 func (r *FileRepository) DeleteOrganisation(ctx context.Context, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -498,6 +506,7 @@ func (r *FileRepository) deletePersonUnavailabilityByOrganisationLocked(organisa
 	}
 }
 
+// ListPersons returns all people for one organisation in sorted order.
 func (r *FileRepository) ListPersons(ctx context.Context, organisationID string) ([]domain.Person, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -516,6 +525,7 @@ func (r *FileRepository) ListPersons(ctx context.Context, organisationID string)
 	return result, nil
 }
 
+// GetPerson returns the person with the provided id from one organisation.
 func (r *FileRepository) GetPerson(ctx context.Context, organisationID, id string) (domain.Person, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Person{}, err
@@ -531,6 +541,7 @@ func (r *FileRepository) GetPerson(ctx context.Context, organisationID, id strin
 	return person, nil
 }
 
+// CreatePerson stores a new person.
 func (r *FileRepository) CreatePerson(ctx context.Context, person domain.Person) (domain.Person, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Person{}, err
@@ -552,6 +563,7 @@ func (r *FileRepository) CreatePerson(ctx context.Context, person domain.Person)
 	return person, nil
 }
 
+// UpdatePerson stores changes to an existing person.
 func (r *FileRepository) UpdatePerson(ctx context.Context, person domain.Person) (domain.Person, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Person{}, err
@@ -576,6 +588,7 @@ func (r *FileRepository) UpdatePerson(ctx context.Context, person domain.Person)
 	return person, nil
 }
 
+// DeletePerson removes a person and dependent records from one organisation.
 func (r *FileRepository) DeletePerson(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -635,6 +648,7 @@ func (r *FileRepository) deletePersonUnavailabilityLocked(organisationID, person
 	}
 }
 
+// ListProjects returns all projects for one organisation in sorted order.
 func (r *FileRepository) ListProjects(ctx context.Context, organisationID string) ([]domain.Project, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -653,6 +667,7 @@ func (r *FileRepository) ListProjects(ctx context.Context, organisationID string
 	return result, nil
 }
 
+// GetProject returns the project with the provided id from one organisation.
 func (r *FileRepository) GetProject(ctx context.Context, organisationID, id string) (domain.Project, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Project{}, err
@@ -668,6 +683,7 @@ func (r *FileRepository) GetProject(ctx context.Context, organisationID, id stri
 	return project, nil
 }
 
+// CreateProject stores a new project.
 func (r *FileRepository) CreateProject(ctx context.Context, project domain.Project) (domain.Project, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Project{}, err
@@ -689,6 +705,7 @@ func (r *FileRepository) CreateProject(ctx context.Context, project domain.Proje
 	return project, nil
 }
 
+// UpdateProject stores changes to an existing project.
 func (r *FileRepository) UpdateProject(ctx context.Context, project domain.Project) (domain.Project, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Project{}, err
@@ -713,6 +730,7 @@ func (r *FileRepository) UpdateProject(ctx context.Context, project domain.Proje
 	return project, nil
 }
 
+// DeleteProject removes a project and dependent records from one organisation.
 func (r *FileRepository) DeleteProject(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -736,6 +754,7 @@ func (r *FileRepository) DeleteProject(ctx context.Context, organisationID, id s
 	return r.persistLockedWithContext(ctx)
 }
 
+// ListGroups returns all groups for one organisation in sorted order.
 func (r *FileRepository) ListGroups(ctx context.Context, organisationID string) ([]domain.Group, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -754,6 +773,7 @@ func (r *FileRepository) ListGroups(ctx context.Context, organisationID string) 
 	return result, nil
 }
 
+// GetGroup returns the group with the provided id from one organisation.
 func (r *FileRepository) GetGroup(ctx context.Context, organisationID, id string) (domain.Group, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Group{}, err
@@ -769,6 +789,7 @@ func (r *FileRepository) GetGroup(ctx context.Context, organisationID, id string
 	return copyGroup(group), nil
 }
 
+// CreateGroup stores a new group.
 func (r *FileRepository) CreateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Group{}, err
@@ -791,6 +812,7 @@ func (r *FileRepository) CreateGroup(ctx context.Context, group domain.Group) (d
 	return group, nil
 }
 
+// UpdateGroup stores changes to an existing group.
 func (r *FileRepository) UpdateGroup(ctx context.Context, group domain.Group) (domain.Group, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Group{}, err
@@ -816,6 +838,7 @@ func (r *FileRepository) UpdateGroup(ctx context.Context, group domain.Group) (d
 	return group, nil
 }
 
+// DeleteGroup removes a group from one organisation.
 func (r *FileRepository) DeleteGroup(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -845,6 +868,7 @@ func (r *FileRepository) DeleteGroup(ctx context.Context, organisationID, id str
 	return r.persistLockedWithContext(ctx)
 }
 
+// ListAllocations returns all allocations for one organisation in sorted order.
 func (r *FileRepository) ListAllocations(ctx context.Context, organisationID string) ([]domain.Allocation, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -863,6 +887,7 @@ func (r *FileRepository) ListAllocations(ctx context.Context, organisationID str
 	return result, nil
 }
 
+// GetAllocation returns the allocation with the provided id from one organisation.
 func (r *FileRepository) GetAllocation(ctx context.Context, organisationID, id string) (domain.Allocation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Allocation{}, err
@@ -878,6 +903,7 @@ func (r *FileRepository) GetAllocation(ctx context.Context, organisationID, id s
 	return allocation, nil
 }
 
+// CreateAllocation stores a new allocation.
 func (r *FileRepository) CreateAllocation(ctx context.Context, allocation domain.Allocation) (domain.Allocation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Allocation{}, err
@@ -905,6 +931,7 @@ func (r *FileRepository) CreateAllocation(ctx context.Context, allocation domain
 	return allocation, nil
 }
 
+// UpdateAllocation stores changes to an existing allocation.
 func (r *FileRepository) UpdateAllocation(ctx context.Context, allocation domain.Allocation) (domain.Allocation, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.Allocation{}, err
@@ -935,6 +962,7 @@ func (r *FileRepository) UpdateAllocation(ctx context.Context, allocation domain
 	return allocation, nil
 }
 
+// DeleteAllocation removes an allocation from one organisation.
 func (r *FileRepository) DeleteAllocation(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -951,6 +979,7 @@ func (r *FileRepository) DeleteAllocation(ctx context.Context, organisationID, i
 	return r.persistLockedWithContext(ctx)
 }
 
+// ListOrgHolidays returns organisation holiday entries in sorted order.
 func (r *FileRepository) ListOrgHolidays(ctx context.Context, organisationID string) ([]domain.OrgHoliday, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -969,6 +998,7 @@ func (r *FileRepository) ListOrgHolidays(ctx context.Context, organisationID str
 	return result, nil
 }
 
+// CreateOrgHoliday stores a new organisation holiday entry.
 func (r *FileRepository) CreateOrgHoliday(ctx context.Context, entry domain.OrgHoliday) (domain.OrgHoliday, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.OrgHoliday{}, err
@@ -990,6 +1020,7 @@ func (r *FileRepository) CreateOrgHoliday(ctx context.Context, entry domain.OrgH
 	return entry, nil
 }
 
+// DeleteOrgHoliday removes an organisation holiday entry.
 func (r *FileRepository) DeleteOrgHoliday(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -1006,6 +1037,7 @@ func (r *FileRepository) DeleteOrgHoliday(ctx context.Context, organisationID, i
 	return r.persistLockedWithContext(ctx)
 }
 
+// ListGroupUnavailability returns group unavailability entries in sorted order.
 func (r *FileRepository) ListGroupUnavailability(ctx context.Context, organisationID string) ([]domain.GroupUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -1024,6 +1056,7 @@ func (r *FileRepository) ListGroupUnavailability(ctx context.Context, organisati
 	return result, nil
 }
 
+// CreateGroupUnavailability stores a new group unavailability entry.
 func (r *FileRepository) CreateGroupUnavailability(ctx context.Context, entry domain.GroupUnavailability) (domain.GroupUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.GroupUnavailability{}, err
@@ -1045,6 +1078,7 @@ func (r *FileRepository) CreateGroupUnavailability(ctx context.Context, entry do
 	return entry, nil
 }
 
+// DeleteGroupUnavailability removes a group unavailability entry.
 func (r *FileRepository) DeleteGroupUnavailability(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -1061,6 +1095,7 @@ func (r *FileRepository) DeleteGroupUnavailability(ctx context.Context, organisa
 	return r.persistLockedWithContext(ctx)
 }
 
+// ListPersonUnavailability returns person unavailability entries in sorted order.
 func (r *FileRepository) ListPersonUnavailability(ctx context.Context, organisationID string) ([]domain.PersonUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -1079,6 +1114,7 @@ func (r *FileRepository) ListPersonUnavailability(ctx context.Context, organisat
 	return result, nil
 }
 
+// ListPersonUnavailabilityByPerson returns person unavailability entries for one person.
 func (r *FileRepository) ListPersonUnavailabilityByPerson(ctx context.Context, organisationID, personID string) ([]domain.PersonUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -1097,6 +1133,7 @@ func (r *FileRepository) ListPersonUnavailabilityByPerson(ctx context.Context, o
 	return result, nil
 }
 
+// ListPersonUnavailabilityByPersonAndDate returns person unavailability entries for one day.
 func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(ctx context.Context, organisationID, personID, date string) ([]domain.PersonUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return nil, err
@@ -1115,6 +1152,7 @@ func (r *FileRepository) ListPersonUnavailabilityByPersonAndDate(ctx context.Con
 	return result, nil
 }
 
+// CreatePersonUnavailability stores a new person unavailability entry.
 func (r *FileRepository) CreatePersonUnavailability(ctx context.Context, entry domain.PersonUnavailability) (domain.PersonUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.PersonUnavailability{}, err
@@ -1136,6 +1174,7 @@ func (r *FileRepository) CreatePersonUnavailability(ctx context.Context, entry d
 	return entry, nil
 }
 
+// CreatePersonUnavailabilityWithDailyLimit stores a person unavailability entry within the provided daily limit.
 func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(ctx context.Context, entry domain.PersonUnavailability, maxHours float64) (domain.PersonUnavailability, error) {
 	if err := contextErr(ctx); err != nil {
 		return domain.PersonUnavailability{}, err
@@ -1167,6 +1206,7 @@ func (r *FileRepository) CreatePersonUnavailabilityWithDailyLimit(ctx context.Co
 	return entry, nil
 }
 
+// DeletePersonUnavailability removes a person unavailability entry.
 func (r *FileRepository) DeletePersonUnavailability(ctx context.Context, organisationID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -1183,6 +1223,7 @@ func (r *FileRepository) DeletePersonUnavailability(ctx context.Context, organis
 	return r.persistLockedWithContext(ctx)
 }
 
+// DeletePersonUnavailabilityByPerson removes a person's unavailability entry.
 func (r *FileRepository) DeletePersonUnavailabilityByPerson(ctx context.Context, organisationID, personID, id string) error {
 	if err := contextErr(ctx); err != nil {
 		return err

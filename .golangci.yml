@@ -86,6 +86,19 @@ linters:
         - style
     gocyclo:
       min-complexity: 20
+    godoclint:
+      default: none
+      enable:
+        - pkg-doc
+        - single-pkg-doc
+        - start-with-name
+        - require-pkg-doc
+        - require-doc
+        - deprecated
+      options:
+        require-doc:
+          ignore-exported: false
+          ignore-unexported: true
     govet:
       enable:
         - shadow

@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestNoopImportExport verifies the no-op import export scenario.
 func TestNoopImportExport(t *testing.T) {
 	adapter := NewNoopImportExport()
 	if err := adapter.Import(context.Background(), []byte("{}")); err != nil {

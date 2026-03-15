@@ -21,6 +21,7 @@ const (
 	testEphemeralAddr      = "127.0.0.1:0"
 )
 
+// TestGetenv verifies the getenv scenario.
 func TestGetenv(t *testing.T) {
 	t.Setenv(listenAddrEnv, ":9000")
 	if got := getenv(listenAddrEnv, testFallbackListenAddr); got != ":9000" {
@@ -33,6 +34,7 @@ func TestGetenv(t *testing.T) {
 	}
 }
 
+// TestRun verifies the run scenario.
 func TestRun(t *testing.T) {
 	handler := http.NewServeMux()
 	addr := testEphemeralAddr
@@ -106,6 +108,7 @@ func assertRunRejectsNilStart(t *testing.T, handler http.Handler, addr string) {
 	}
 }
 
+// TestRunGracefulShutdownCallsCleanup verifies the run graceful shutdown calls cleanup scenario.
 func TestRunGracefulShutdownCallsCleanup(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -153,6 +156,7 @@ func TestRunGracefulShutdownCallsCleanup(t *testing.T) {
 	}
 }
 
+// TestRunLogsTimeoutWaitingForServerGoroutine verifies the run logs timeout waiting for server goroutine scenario.
 func TestRunLogsTimeoutWaitingForServerGoroutine(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -200,6 +204,7 @@ func TestRunLogsTimeoutWaitingForServerGoroutine(t *testing.T) {
 	}
 }
 
+// TestRunLogsForcedShutdownWhenSlowRequestExceedsGracePeriod verifies the run logs forced shutdown when slow request exceeds grace period scenario.
 func TestRunLogsForcedShutdownWhenSlowRequestExceedsGracePeriod(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -264,6 +269,7 @@ func TestRunLogsForcedShutdownWhenSlowRequestExceedsGracePeriod(t *testing.T) {
 	close(releaseSlowRequest)
 }
 
+// TestRunReturnsServeErrorAfterShutdownSignal verifies the run returns serve error after shutdown signal scenario.
 func TestRunReturnsServeErrorAfterShutdownSignal(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -297,6 +303,7 @@ func TestRunReturnsServeErrorAfterShutdownSignal(t *testing.T) {
 	}
 }
 
+// TestRunAllowsInFlightRequestAndRejectsNewRequestsOnShutdown verifies the run allows in flight request and rejects new requests on shutdown scenario.
 func TestRunAllowsInFlightRequestAndRejectsNewRequestsOnShutdown(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -379,6 +386,7 @@ func TestRunAllowsInFlightRequestAndRejectsNewRequestsOnShutdown(t *testing.T) {
 	}
 }
 
+// TestCloseResources verifies the close resources scenario.
 func TestCloseResources(t *testing.T) {
 	if err := closeResources(nil); err != nil {
 		t.Fatalf("expected nil for nil handler, got %v", err)
@@ -401,6 +409,7 @@ func TestCloseResources(t *testing.T) {
 	}
 }
 
+// TestRunLogsCleanupFailure verifies the run logs cleanup failure scenario.
 func TestRunLogsCleanupFailure(t *testing.T) {
 	previousSignalNotify := signalNotify
 	previousSignalStop := signalStop
@@ -444,6 +453,7 @@ func TestRunLogsCleanupFailure(t *testing.T) {
 	}
 }
 
+// TestMainUsesRunServerAndExitHandler verifies the main uses run server and exit handler scenario.
 func TestMainUsesRunServerAndExitHandler(t *testing.T) {
 	previousRunServer := runServer
 	previousMakeRouter := makeRouter
@@ -549,6 +559,7 @@ func assertMainExitsOnRunServerError(t *testing.T, exitCode *int) {
 	}
 }
 
+// TestMainUsesModeDefaultsAndHandlesBootstrapErrors verifies the main uses mode defaults and handles bootstrap errors scenario.
 func TestMainUsesModeDefaultsAndHandlesBootstrapErrors(t *testing.T) {
 	previousRunServer := runServer
 	previousMakeRouter := makeRouter
@@ -625,6 +636,7 @@ func TestMainUsesModeDefaultsAndHandlesBootstrapErrors(t *testing.T) {
 	}
 }
 
+// TestLogStartupWarnings verifies the log startup warnings scenario.
 func TestLogStartupWarnings(t *testing.T) {
 	logMessages := []string{}
 	logger := func(format string, args ...any) {
@@ -658,6 +670,7 @@ type testClosableHandler struct {
 	closed   bool
 }
 
+// Close marks the handler as closed for shutdown tests.
 func (h *testClosableHandler) Close() error {
 	h.closed = true
 	return h.closeErr
