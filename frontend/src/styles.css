@@ -111,6 +111,35 @@ button:disabled {
   gap: 0.5rem;
 }
 
+.pagination-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pagination-summary,
+.pagination-actions,
+.pagination-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pagination-page-size {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.pagination-page-indicator {
+  color: #334155;
+  font-weight: 600;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -253,5 +282,17 @@ details > summary {
   td {
     border: 0;
     padding: 0.15rem 0;
+  }
+
+  .pagination-container,
+  .pagination-actions,
+  .pagination-nav {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pagination-page-size {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

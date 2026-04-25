@@ -1,5 +1,7 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react"
 import { normalizeAllocationTargetID, normalizeAllocationTargetType } from "../app/helpers"
+import { usePagination } from "../hooks/usePagination"
+import { PaginationControls } from "./PaginationControls"
 import type {
   Allocation,
   AllocationFormState,
@@ -71,6 +73,8 @@ export function AllocationsPanel(props: AllocationsPanelProps) {
   const groupsByID = new Map(groups.map((group) => [group.id, group]))
   const personsByID = new Map(persons.map((person) => [person.id, person]))
   const projectsByID = new Map(projects.map((project) => [project.id, project]))
+  const allocationsPagination = usePagination(allocations)
+  const visibleAllocations = allocationsPagination.visibleItems
 
   return (
     <section className="panel">
@@ -225,7 +229,7 @@ export function AllocationsPanel(props: AllocationsPanelProps) {
           </tr>
         </thead>
         <tbody>
-          {allocations.map((allocation) => {
+          {visibleAllocations.map((allocation) => {
             const targetType = normalizeAllocationTargetType(allocation)
             const targetID = normalizeAllocationTargetID(allocation)
             const targetLabel = targetType === "group"
@@ -265,8 +269,29 @@ export function AllocationsPanel(props: AllocationsPanelProps) {
               </tr>
             )
           })}
+          {allocations.length === 0 && (
+            <tr>
+              <td colSpan={7}>No items to display</td>
+            </tr>
+          )}
         </tbody>
       </table>
+      <PaginationControls
+        ariaLabel="Allocations pagination"
+        currentPage={allocationsPagination.currentPage}
+        endItemNumber={allocationsPagination.endItemNumber}
+        hasNextPage={allocationsPagination.hasNextPage}
+        hasPreviousPage={allocationsPagination.hasPreviousPage}
+        isPaginated={allocationsPagination.isPaginated}
+        pageSize={allocationsPagination.pageSize}
+        selectedItemCount={selectedAllocationIDs.length}
+        startItemNumber={allocationsPagination.startItemNumber}
+        totalItems={allocationsPagination.totalItems}
+        totalPages={allocationsPagination.totalPages}
+        onNextPage={allocationsPagination.goToNextPage}
+        onPageSizeChange={allocationsPagination.changePageSize}
+        onPreviousPage={allocationsPagination.goToPreviousPage}
+      />
     </section>
   )
 }

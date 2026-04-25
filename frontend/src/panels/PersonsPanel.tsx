@@ -1,5 +1,7 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react"
 import type { Person, PersonFormState } from "../app/types"
+import { usePagination } from "../hooks/usePagination"
+import { PaginationControls } from "./PaginationControls"
 
 type PersonsPanelProps = {
   personForm: PersonFormState
@@ -36,6 +38,8 @@ export function PersonsPanel(props: PersonsPanelProps) {
     onDeletePerson
   } = props
   const selectedPersonIDSet = new Set(selectedPersonIDs)
+  const personsPagination = usePagination(persons)
+  const visiblePersons = personsPagination.visibleItems
 
   return (
     <section className="panel">
@@ -99,7 +103,7 @@ export function PersonsPanel(props: PersonsPanelProps) {
           </tr>
         </thead>
         <tbody>
-          {persons.map((person) => (
+          {visiblePersons.map((person) => (
             <tr key={person.id} className={isOverallocatedPersonID(person.id) ? "person-overallocated" : undefined}>
               <td>
                 <input
@@ -134,8 +138,29 @@ export function PersonsPanel(props: PersonsPanelProps) {
               </td>
             </tr>
           ))}
+          {persons.length === 0 && (
+            <tr>
+              <td colSpan={5}>No items to display</td>
+            </tr>
+          )}
         </tbody>
       </table>
+      <PaginationControls
+        ariaLabel="Persons pagination"
+        currentPage={personsPagination.currentPage}
+        endItemNumber={personsPagination.endItemNumber}
+        hasNextPage={personsPagination.hasNextPage}
+        hasPreviousPage={personsPagination.hasPreviousPage}
+        isPaginated={personsPagination.isPaginated}
+        pageSize={personsPagination.pageSize}
+        selectedItemCount={selectedPersonIDs.length}
+        startItemNumber={personsPagination.startItemNumber}
+        totalItems={personsPagination.totalItems}
+        totalPages={personsPagination.totalPages}
+        onNextPage={personsPagination.goToNextPage}
+        onPageSizeChange={personsPagination.changePageSize}
+        onPreviousPage={personsPagination.goToPreviousPage}
+      />
     </section>
   )
 }

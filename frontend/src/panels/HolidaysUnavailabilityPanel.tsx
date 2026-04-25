@@ -1,4 +1,6 @@
 import type { Dispatch, FormEvent, SetStateAction } from "react"
+import { usePagination } from "../hooks/usePagination"
+import { PaginationControls } from "./PaginationControls"
 import type {
   AvailabilityScope,
   AvailabilityUnitScope,
@@ -39,6 +41,77 @@ type HolidaysUnavailabilityPanelProps = {
   selectedGroupPersonUnavailability: PersonUnavailability[]
 }
 
+type UnavailabilityTableProps = {
+  entries: PersonUnavailability[]
+  persons: Person[]
+  isOverallocatedPersonID: (personID: string) => boolean
+  onDeletePersonUnavailability: (entry: PersonUnavailability) => void
+}
+
+function UnavailabilityTable(props: UnavailabilityTableProps) {
+  const {
+    entries,
+    persons,
+    isOverallocatedPersonID,
+    onDeletePersonUnavailability
+  } = props
+  const personByID = new Map(persons.map((person) => [person.id, person]))
+  const pagination = usePagination(entries)
+  const visibleEntries = pagination.visibleItems
+
+  return (
+    <>
+      <table>
+        <thead>
+          <tr>
+            <th>Person</th>
+            <th>Date</th>
+            <th>Hours</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {visibleEntries.map((entry) => {
+            const person = personByID.get(entry.person_id)
+            return (
+              <tr key={entry.id}>
+                <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
+                  {person?.name ?? entry.person_id}
+                </td>
+                <td>{entry.date}</td>
+                <td>{entry.hours}</td>
+                <td>
+                  <button type="button" onClick={() => onDeletePersonUnavailability(entry)}>Delete</button>
+                </td>
+              </tr>
+            )
+          })}
+          {entries.length === 0 && (
+            <tr>
+              <td colSpan={4}>No items to display</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <PaginationControls
+        ariaLabel="Unavailability pagination"
+        currentPage={pagination.currentPage}
+        endItemNumber={pagination.endItemNumber}
+        hasNextPage={pagination.hasNextPage}
+        hasPreviousPage={pagination.hasPreviousPage}
+        isPaginated={pagination.isPaginated}
+        pageSize={pagination.pageSize}
+        startItemNumber={pagination.startItemNumber}
+        totalItems={pagination.totalItems}
+        totalPages={pagination.totalPages}
+        onNextPage={pagination.goToNextPage}
+        onPageSizeChange={pagination.changePageSize}
+        onPreviousPage={pagination.goToPreviousPage}
+      />
+    </>
+  )
+}
+
 export function HolidaysUnavailabilityPanel(props: HolidaysUnavailabilityPanelProps) {
   const {
     availabilityScope,
@@ -66,7 +139,9 @@ export function HolidaysUnavailabilityPanel(props: HolidaysUnavailabilityPanelPr
     groups,
     selectedGroupPersonUnavailability
   } = props
-  const personByID = new Map(persons.map((person) => [person.id, person]))
+  const activeUnavailabilityEntries = availabilityScope === "group"
+    ? selectedGroupPersonUnavailability
+    : personUnavailability
 
   return (
     <section className="panel">
@@ -141,30 +216,12 @@ export function HolidaysUnavailabilityPanel(props: HolidaysUnavailabilityPanelPr
             <button type="submit">{availabilityUnitScope === "hours" ? "Add org unavailability" : "Add org member unavailability"}</button>
           </form>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Date</th>
-                <th>Hours</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {personUnavailability.map((entry) => (
-                <tr key={entry.id}>
-                  <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                    {personByID.get(entry.person_id)?.name ?? entry.person_id}
-                  </td>
-                  <td>{entry.date}</td>
-                  <td>{entry.hours}</td>
-                  <td>
-                    <button type="button" onClick={() => onDeletePersonUnavailability(entry)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <UnavailabilityTable
+            entries={activeUnavailabilityEntries}
+            persons={persons}
+            isOverallocatedPersonID={isOverallocatedPersonID}
+            onDeletePersonUnavailability={onDeletePersonUnavailability}
+          />
         </>
       )}
 
@@ -223,33 +280,12 @@ export function HolidaysUnavailabilityPanel(props: HolidaysUnavailabilityPanelPr
             <button type="submit">{availabilityUnitScope === "hours" ? "Add person unavailability" : "Add person unavailability entries"}</button>
           </form>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Date</th>
-                <th>Hours</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {personUnavailability.map((entry) => {
-                const person = personByID.get(entry.person_id)
-                return (
-                  <tr key={entry.id}>
-                    <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                      {person?.name ?? entry.person_id}
-                    </td>
-                    <td>{entry.date}</td>
-                    <td>{entry.hours}</td>
-                    <td>
-                      <button type="button" onClick={() => onDeletePersonUnavailability(entry)}>Delete</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <UnavailabilityTable
+            entries={activeUnavailabilityEntries}
+            persons={persons}
+            isOverallocatedPersonID={isOverallocatedPersonID}
+            onDeletePersonUnavailability={onDeletePersonUnavailability}
+          />
         </>
       )}
 
@@ -302,33 +338,12 @@ export function HolidaysUnavailabilityPanel(props: HolidaysUnavailabilityPanelPr
             <button type="submit">{availabilityUnitScope === "hours" ? "Add group unavailability" : "Add group unavailability entries"}</button>
           </form>
 
-          <table>
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Date</th>
-                <th>Hours</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {selectedGroupPersonUnavailability.map((entry) => {
-                const person = personByID.get(entry.person_id)
-                return (
-                  <tr key={entry.id}>
-                    <td className={isOverallocatedPersonID(entry.person_id) ? "person-overallocated" : undefined}>
-                      {person?.name ?? entry.person_id}
-                    </td>
-                    <td>{entry.date}</td>
-                    <td>{entry.hours}</td>
-                    <td>
-                      <button type="button" onClick={() => onDeletePersonUnavailability(entry)}>Delete</button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <UnavailabilityTable
+            entries={activeUnavailabilityEntries}
+            persons={persons}
+            isOverallocatedPersonID={isOverallocatedPersonID}
+            onDeletePersonUnavailability={onDeletePersonUnavailability}
+          />
         </>
       )}
     </section>

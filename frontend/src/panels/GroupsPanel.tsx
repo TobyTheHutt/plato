@@ -1,5 +1,7 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react"
 import type { Group, GroupFormState, GroupMemberFormState, Person } from "../app/types"
+import { usePagination } from "../hooks/usePagination"
+import { PaginationControls } from "./PaginationControls"
 
 type GroupsPanelProps = {
   groupForm: GroupFormState
@@ -46,6 +48,8 @@ export function GroupsPanel(props: GroupsPanelProps) {
     onDeleteGroup
   } = props
   const personByID = new Map(persons.map((person) => [person.id, person]))
+  const groupsPagination = usePagination(groups)
+  const visibleGroups = groupsPagination.visibleItems
 
   return (
     <section className="panel">
@@ -143,7 +147,7 @@ export function GroupsPanel(props: GroupsPanelProps) {
           </tr>
         </thead>
         <tbody>
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <tr key={group.id}>
               <td>
                 <input
@@ -186,8 +190,29 @@ export function GroupsPanel(props: GroupsPanelProps) {
               </td>
             </tr>
           ))}
+          {groups.length === 0 && (
+            <tr>
+              <td colSpan={4}>No items to display</td>
+            </tr>
+          )}
         </tbody>
       </table>
+      <PaginationControls
+        ariaLabel="Groups pagination"
+        currentPage={groupsPagination.currentPage}
+        endItemNumber={groupsPagination.endItemNumber}
+        hasNextPage={groupsPagination.hasNextPage}
+        hasPreviousPage={groupsPagination.hasPreviousPage}
+        isPaginated={groupsPagination.isPaginated}
+        pageSize={groupsPagination.pageSize}
+        selectedItemCount={selectedGroupIDs.length}
+        startItemNumber={groupsPagination.startItemNumber}
+        totalItems={groupsPagination.totalItems}
+        totalPages={groupsPagination.totalPages}
+        onNextPage={groupsPagination.goToNextPage}
+        onPageSizeChange={groupsPagination.changePageSize}
+        onPreviousPage={groupsPagination.goToPreviousPage}
+      />
     </section>
   )
 }

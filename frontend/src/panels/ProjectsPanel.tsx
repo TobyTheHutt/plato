@@ -1,5 +1,7 @@
 import type { Dispatch, FormEvent, RefObject, SetStateAction } from "react"
 import type { Project, ProjectFormState } from "../app/types"
+import { usePagination } from "../hooks/usePagination"
+import { PaginationControls } from "./PaginationControls"
 
 type ProjectsPanelProps = {
   projectForm: ProjectFormState
@@ -34,6 +36,8 @@ export function ProjectsPanel(props: ProjectsPanelProps) {
     onDeleteProject
   } = props
   const selectedProjectIDSet = new Set(selectedProjectIDs)
+  const projectsPagination = usePagination(projects)
+  const visibleProjects = projectsPagination.visibleItems
 
   return (
     <section className="panel">
@@ -98,7 +102,7 @@ export function ProjectsPanel(props: ProjectsPanelProps) {
           </tr>
         </thead>
         <tbody>
-          {projects.map((project) => (
+          {visibleProjects.map((project) => (
             <tr key={project.id}>
               <td>
                 <input
@@ -128,8 +132,29 @@ export function ProjectsPanel(props: ProjectsPanelProps) {
               </td>
             </tr>
           ))}
+          {projects.length === 0 && (
+            <tr>
+              <td colSpan={6}>No items to display</td>
+            </tr>
+          )}
         </tbody>
       </table>
+      <PaginationControls
+        ariaLabel="Projects pagination"
+        currentPage={projectsPagination.currentPage}
+        endItemNumber={projectsPagination.endItemNumber}
+        hasNextPage={projectsPagination.hasNextPage}
+        hasPreviousPage={projectsPagination.hasPreviousPage}
+        isPaginated={projectsPagination.isPaginated}
+        pageSize={projectsPagination.pageSize}
+        selectedItemCount={selectedProjectIDs.length}
+        startItemNumber={projectsPagination.startItemNumber}
+        totalItems={projectsPagination.totalItems}
+        totalPages={projectsPagination.totalPages}
+        onNextPage={projectsPagination.goToNextPage}
+        onPageSizeChange={projectsPagination.changePageSize}
+        onPreviousPage={projectsPagination.goToPreviousPage}
+      />
     </section>
   )
 }
