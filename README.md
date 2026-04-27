@@ -98,12 +98,12 @@ Router logic is organized by domain in `backend/internal/httpapi`:
 ### Prerequisites
 
 - Node.js LTS and npm or pnpm
-- Go `1.26.1`
+- Go `1.26.2`
 
 Toolchain policy:
 - Plato enforces the exact Go version from `backend/go.mod` for reproducible local and CI checks
-- `make check` runs `scripts/check_go_toolchain.sh` and fails fast with a clear mismatch message when local Go is not `1.26.1`
-- For containerized local development, use a base image pinned to `golang:1.26.1`
+- `make check` runs `scripts/check_go_toolchain.sh` and fails fast with a clear mismatch message when local Go is not `1.26.2`
+- For containerized local development, use a base image pinned to `golang:1.26.2`
 
 ### Run in development
 
