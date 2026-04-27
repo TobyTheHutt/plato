@@ -30,6 +30,18 @@ function sectionByHeading(name: RegExp): ReturnType<typeof within> {
   return within(section as HTMLElement)
 }
 
+function buildPersonRows(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const personNumber = index + 1
+    return {
+      id: `person_${personNumber}`,
+      organisation_id: "org_1",
+      name: `Person ${personNumber}`,
+      employment_pct: 100
+    }
+  })
+}
+
 describe("App focused behaviors", () => {
   it("renders the title", async () => {
     render(<App />)
@@ -127,6 +139,39 @@ describe("App focused behaviors", () => {
     expect(report.getByRole("columnheader", { name: /^project load hours$/i })).toBeInTheDocument()
     expect(report.getByRole("columnheader", { name: /^project estimation hours$/i })).toBeInTheDocument()
     expect(report.getByRole("columnheader", { name: /^project completion %$/i })).toBeInTheDocument()
+  })
+
+  it("paginates person rows and keeps selection across pages", async () => {
+    buildMockAPI({
+      persons: buildPersonRows(12)
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option", { name: "Alpha Org" }).length).toBeGreaterThan(0)
+    })
+
+    const personsPanel = sectionByHeading(/^persons$/i)
+    expect(personsPanel.getByRole("cell", { name: "Person 1" })).toBeInTheDocument()
+    expect(personsPanel.getByRole("cell", { name: "Person 10" })).toBeInTheDocument()
+    expect(personsPanel.queryByRole("cell", { name: "Person 11" })).not.toBeInTheDocument()
+    expect(personsPanel.getByText("Showing 1-10 of 12")).toBeInTheDocument()
+    expect(personsPanel.getByText("Page 1 of 2")).toBeInTheDocument()
+
+    fireEvent.click(personsPanel.getByRole("checkbox", { name: /^select all persons$/i }))
+    expect(personsPanel.getByText("12 items selected")).toBeInTheDocument()
+
+    fireEvent.click(personsPanel.getByRole("button", { name: /next page/i }))
+    expect(personsPanel.getByRole("cell", { name: "Person 11" })).toBeInTheDocument()
+    expect(personsPanel.getByRole("cell", { name: "Person 12" })).toBeInTheDocument()
+    expect(personsPanel.getByRole("checkbox", { name: /select person person 11/i })).toBeChecked()
+    expect(personsPanel.queryByRole("cell", { name: "Person 1" })).not.toBeInTheDocument()
+
+    fireEvent.change(personsPanel.getByLabelText(/items per page/i), { target: { value: "20" } })
+    expect(personsPanel.getByRole("cell", { name: "Person 1" })).toBeInTheDocument()
+    expect(personsPanel.getByRole("cell", { name: "Person 12" })).toBeInTheDocument()
+    expect(personsPanel.queryByText(/Page 1 of/i)).not.toBeInTheDocument()
   })
 
   it("runs organisation and project reports and renders project columns", async () => {

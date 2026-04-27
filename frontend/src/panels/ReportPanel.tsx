@@ -5,8 +5,10 @@ import {
   reportDetailToggleLabel,
   reportUtilizationForDisplay
 } from "../app/helpers"
+import { usePagination } from "../hooks/usePagination"
 import type { Person, ReportGranularity, ReportObjectResult, ReportTableRow } from "../app/types"
 import type { ReportScope } from "../reportColumns"
+import { PaginationControls } from "./PaginationControls"
 
 type ReportPanelProps = {
   reportScope: ReportScope
@@ -59,6 +61,12 @@ export function ReportPanel(props: ReportPanelProps) {
     onToggleReportPeriodDetails
   } = props
   const reportIDSet = new Set(reportIDs)
+  const reportRowsPagination = usePagination(visibleReportRows)
+  const paginatedReportRows = reportRowsPagination.visibleItems
+  const reportColumnCount = 1
+    + (showReportObjectColumn ? 1 : 0)
+    + (showAvailabilityColumns ? 4 : 0)
+    + (showProjectColumns ? 3 : 0)
 
   return (
     <section className="panel">
@@ -138,7 +146,7 @@ export function ReportPanel(props: ReportPanelProps) {
           </tr>
         </thead>
         <tbody>
-          {visibleReportRows.map((row) => {
+          {paginatedReportRows.map((row) => {
             const isExpandableRow = isExpandableReportPeriodRow(row)
             const isExpanded = expandedReportPeriodSet.has(row.periodStart)
             const isOverallocatedReportPerson = reportScope === "person" && isOverallocatedPersonID(row.objectID)
@@ -197,8 +205,28 @@ export function ReportPanel(props: ReportPanelProps) {
               </tr>
             )
           })}
+          {visibleReportRows.length === 0 && (
+            <tr>
+              <td colSpan={reportColumnCount}>No items to display</td>
+            </tr>
+          )}
         </tbody>
       </table>
+      <PaginationControls
+        ariaLabel="Report pagination"
+        currentPage={reportRowsPagination.currentPage}
+        endItemNumber={reportRowsPagination.endItemNumber}
+        hasNextPage={reportRowsPagination.hasNextPage}
+        hasPreviousPage={reportRowsPagination.hasPreviousPage}
+        isPaginated={reportRowsPagination.isPaginated}
+        pageSize={reportRowsPagination.pageSize}
+        startItemNumber={reportRowsPagination.startItemNumber}
+        totalItems={reportRowsPagination.totalItems}
+        totalPages={reportRowsPagination.totalPages}
+        onNextPage={reportRowsPagination.goToNextPage}
+        onPageSizeChange={reportRowsPagination.changePageSize}
+        onPreviousPage={reportRowsPagination.goToPreviousPage}
+      />
     </section>
   )
 }
